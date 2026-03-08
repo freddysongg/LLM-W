@@ -8,7 +8,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.routes.configs import router as configs_router
+from app.api.routes.datasets import router as datasets_router
 from app.api.routes.health import router as health_router
+from app.api.routes.models import router as models_router
 from app.api.routes.projects import router as projects_router
 from app.api.routes.settings import router as settings_router
 from app.core.config import settings
@@ -42,6 +44,8 @@ app.add_middleware(
 app.include_router(health_router, tags=["health"])
 app.include_router(projects_router)
 app.include_router(configs_router)
+app.include_router(models_router)
+app.include_router(datasets_router)
 app.include_router(settings_router)
 
 
