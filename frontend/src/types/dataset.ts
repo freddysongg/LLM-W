@@ -6,31 +6,65 @@ export interface TokenStats {
   readonly mean: number;
   readonly median: number;
   readonly p95: number;
+  readonly p99: number;
+}
+
+export interface SplitCounts {
+  readonly train: number | null;
+  readonly validation: number | null;
+  readonly test: number | null;
 }
 
 export interface QualityWarning {
-  readonly type: string;
+  readonly code: string;
   readonly message: string;
   readonly count: number | null;
 }
 
-export interface SampleRow {
+export interface DatasetSample {
   readonly index: number;
-  readonly fields: Record<string, string>;
+  readonly row: Record<string, unknown>;
 }
 
 export interface DatasetProfile {
-  readonly id: string;
-  readonly projectId: string;
-  readonly source: DatasetSource;
   readonly datasetId: string;
-  readonly fingerprint: string | null;
-  readonly trainSize: number | null;
-  readonly evalSize: number | null;
-  readonly fieldMapping: Record<string, string> | null;
+  readonly source: DatasetSource;
+  readonly format: DatasetFormat;
+  readonly totalRows: number;
+  readonly splitCounts: SplitCounts;
+  readonly detectedFields: ReadonlyArray<string>;
   readonly tokenStats: TokenStats | null;
   readonly qualityWarnings: ReadonlyArray<QualityWarning>;
+  readonly duplicateCount: number;
+  readonly malformedCount: number;
+  readonly resolvedAt: string;
+}
+
+export interface DatasetSamplesResponse {
+  readonly total: number;
+  readonly offset: number;
+  readonly limit: number;
+  readonly samples: ReadonlyArray<DatasetSample>;
+}
+
+export interface DatasetResolveRequest {
+  readonly source: DatasetSource;
+  readonly datasetId: string;
+  readonly subset: string | null;
+  readonly trainSplit: string;
+  readonly evalSplit: string | null;
   readonly format: DatasetFormat;
-  readonly createdAt: string;
-  readonly updatedAt: string;
+  readonly formatMapping: Record<string, string> | null;
+}
+
+export interface PreviewTransformRequest {
+  readonly format: DatasetFormat;
+  readonly formatMapping: Record<string, string> | null;
+  readonly sampleCount: number;
+}
+
+export interface PreviewTransformResponse {
+  readonly samples: ReadonlyArray<Record<string, unknown>>;
+  readonly formatApplied: string;
+  readonly truncated: boolean;
 }
