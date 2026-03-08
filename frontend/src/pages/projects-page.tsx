@@ -12,8 +12,9 @@ import { ProjectList } from "@/components/projects/project-list";
 import { CreateProjectDialog } from "@/components/projects/create-project-dialog";
 import { DeleteProjectAction } from "@/components/projects/delete-project-action";
 import { ProjectDetailPanel } from "@/components/projects/project-detail-panel";
+import { ImportExportActions } from "@/components/projects/import-export-actions";
 import { Button } from "@/components/ui/button";
-import type { Project } from "@/types/project";
+import type { Project, CreateProjectRequest } from "@/types/project";
 
 export default function ProjectsPage(): React.JSX.Element {
   const { data: projects, isLoading, error } = useProjects();
@@ -65,10 +66,19 @@ export default function ProjectsPage(): React.JSX.Element {
       <div className="flex-1 flex flex-col min-w-0">
         <div className="flex items-center justify-between px-6 py-4 border-b">
           <h1 className="text-xl font-semibold">Projects</h1>
-          <Button onClick={() => setIsCreateOpen(true)} size="sm">
-            <Plus className="h-4 w-4 mr-1" />
-            New Project
-          </Button>
+          <div className="flex items-center gap-2">
+            <ImportExportActions
+              selectedProject={selectedProject}
+              onImport={(request: CreateProjectRequest) =>
+                createProject.mutate({ request }, { onSuccess: () => {} })
+              }
+              isImporting={createProject.isPending}
+            />
+            <Button onClick={() => setIsCreateOpen(true)} size="sm">
+              <Plus className="h-4 w-4 mr-1" />
+              New Project
+            </Button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto p-6">
