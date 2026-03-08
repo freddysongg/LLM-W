@@ -1,8 +1,197 @@
+import * as React from "react";
+import { useAppStore } from "@/stores/app-store";
+import {
+  useRuns,
+  useRunStages,
+  useCheckpoints,
+  useCancelRun,
+  usePauseRun,
+  useResumeRun,
+} from "@/hooks/useRuns";
+import { useRunStream } from "@/hooks/useRunStream";
+import { RunList } from "@/components/runs/run-list";
+import { ActiveRunBanner } from "@/components/runs/active-run-banner";
+import { RunTimeline } from "@/components/runs/run-timeline";
+import { StageDetailPanel } from "@/components/runs/stage-detail-panel";
+import { LiveMetricsCharts } from "@/components/runs/live-metrics-charts";
+import { LogStream } from "@/components/runs/log-stream";
+import { SystemResourceMonitor } from "@/components/runs/system-resource-monitor";
+import { CheckpointList } from "@/components/runs/checkpoint-list";
+import { FailurePanel } from "@/components/runs/failure-panel";
+import { RunActions } from "@/components/runs/run-actions";
+import { ResumeFromCheckpointDialog } from "@/components/runs/resume-from-checkpoint-dialog";
+import type { Checkpoint } from "@/api/runs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
 export default function RunsPage(): React.JSX.Element {
+  const { activeProjectId } = useAppStore();
+  const [selectedRunId, setSelectedRunId] = React.useState<string | null>(null);
+  const [selectedStageId, setSelectedStageId] = React.useState<string | null>(null);
+  const [isResumeDialogOpen, setIsResumeDialogOpen] = React.useState(false);
+
+  const { data: runs = [], isLoading: isRunsLoading } = useRuns({
+    projectId: activeProjectId ?? "",
+  });
+
+  const selectedRun = runs.find((r) => r.id === selectedRunId) ?? null;
+
+  const { data: stages = [] } = useRunStages({
+    projectId: activeProjectId ?? "",
+    runId: selectedRunId ?? "",
+  });
+
+  const { data: checkpoints = [] } = useCheckpoints({
+    projectId: activeProjectId ?? "",
+    runId: selectedRunId ?? "",
+  });
+
+  const streamState = useRunStream({
+    projectId: activeProjectId,
+    runId: selectedRunId,
+  });
+
+  const cancelRun = useCancelRun();
+  const pauseRun = usePauseRun();
+  const resumeRun = useResumeRun();
+
+  const activeRun = runs.find((r) => r.status === "running" || r.status === "pending") ?? null;
+  const selectedStage = stages.find((s) => s.id === selectedStageId) ?? null;
+
+  const allCheckpoints: ReadonlyArray<Checkpoint> = [
+    ...checkpoints,
+    ...streamState.liveCheckpoints,
+  ];
+
+  const handleCancelRun = (): void => {
+    if (!activeProjectId || !selectedRunId) return;
+    cancelRun.mutate({ projectId: activeProjectId, runId: selectedRunId });
+  };
+
+  const handlePauseRun = (): void => {
+    if (!activeProjectId || !selectedRunId) return;
+    pauseRun.mutate({ projectId: activeProjectId, runId: selectedRunId });
+  };
+
+  const handleResumeRun = (): void => {
+    if (allCheckpoints.length === 0) {
+      if (!activeProjectId || !selectedRunId) return;
+      resumeRun.mutate({ projectId: activeProjectId, runId: selectedRunId });
+    } else {
+      setIsResumeDialogOpen(true);
+    }
+  };
+
+  const handleResumeFromCheckpoint = (_checkpoint: Checkpoint): void => {
+    if (!activeProjectId || !selectedRunId) return;
+    resumeRun.mutate(
+      { projectId: activeProjectId, runId: selectedRunId },
+      { onSuccess: () => setIsResumeDialogOpen(false) },
+    );
+  };
+
+  if (!activeProjectId) {
+    return (
+      <div className="p-6">
+        <h1 className="text-xl font-semibold mb-2">Runs</h1>
+        <p className="text-sm text-muted-foreground">Select a project to view runs.</p>
+      </div>
+    );
+  }
+
   return (
-    <div className="p-6">
-      <h1 className="text-2xl font-semibold">Runs</h1>
-      <p className="mt-2 text-muted-foreground">Coming soon</p>
+    <div className="p-6 space-y-4">
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-semibold">Runs</h1>
+        {selectedRun && (
+          <RunActions
+            run={selectedRun}
+            onCancel={handleCancelRun}
+            onPause={handlePauseRun}
+            onResume={handleResumeRun}
+            isCancelling={cancelRun.isPending}
+            isPausing={pauseRun.isPending}
+            isResuming={resumeRun.isPending}
+          />
+        )}
+      </div>
+
+      {activeRun && selectedRunId === activeRun.id && (
+        <ActiveRunBanner
+          run={activeRun}
+          currentStep={streamState.currentStep}
+          totalSteps={streamState.totalSteps}
+          progressPct={streamState.progressPct}
+          isConnected={streamState.isConnected}
+        />
+      )}
+
+      {isRunsLoading && <div className="text-sm text-muted-foreground">Loading runs…</div>}
+
+      {!isRunsLoading && (
+        <RunList
+          runs={runs}
+          selectedRunId={selectedRunId}
+          onSelectRun={(id) => {
+            setSelectedRunId(id);
+            setSelectedStageId(null);
+          }}
+        />
+      )}
+
+      {selectedRun && (
+        <>
+          {selectedRun.status === "failed" && <FailurePanel run={selectedRun} />}
+
+          <Tabs defaultValue="timeline">
+            <TabsList>
+              <TabsTrigger value="timeline">Timeline</TabsTrigger>
+              <TabsTrigger value="metrics">Metrics</TabsTrigger>
+              <TabsTrigger value="logs">Logs</TabsTrigger>
+              <TabsTrigger value="system">System</TabsTrigger>
+              <TabsTrigger value="checkpoints">Checkpoints</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="timeline" className="mt-4 space-y-3">
+              <RunTimeline
+                stages={stages}
+                selectedStageId={selectedStageId}
+                onSelectStage={setSelectedStageId}
+              />
+              {selectedStage && (
+                <StageDetailPanel stage={selectedStage} onClose={() => setSelectedStageId(null)} />
+              )}
+            </TabsContent>
+
+            <TabsContent value="metrics" className="mt-4">
+              <LiveMetricsCharts metricPoints={streamState.liveMetrics.byStep} />
+            </TabsContent>
+
+            <TabsContent value="logs" className="mt-4 h-96">
+              <LogStream logs={streamState.liveLogs} />
+            </TabsContent>
+
+            <TabsContent value="system" className="mt-4">
+              <SystemResourceMonitor resources={streamState.systemResources} />
+            </TabsContent>
+
+            <TabsContent value="checkpoints" className="mt-4">
+              <CheckpointList
+                checkpoints={allCheckpoints}
+                selectedCheckpointPath={null}
+                onSelectCheckpoint={() => setIsResumeDialogOpen(true)}
+              />
+            </TabsContent>
+          </Tabs>
+        </>
+      )}
+
+      <ResumeFromCheckpointDialog
+        isOpen={isResumeDialogOpen}
+        checkpoints={allCheckpoints}
+        onConfirm={handleResumeFromCheckpoint}
+        onClose={() => setIsResumeDialogOpen(false)}
+        isResuming={resumeRun.isPending}
+      />
     </div>
   );
 }
