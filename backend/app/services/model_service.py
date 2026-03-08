@@ -16,6 +16,7 @@ from app.schemas.model import (
     ActivationCaptureRequest,
     ActivationLayerSnapshot,
     ActivationSnapshotResponse,
+    DeltaComputeRequest,
     FullTensorRequest,
     FullTensorResponse,
     LayerDetailResponse,
@@ -23,9 +24,11 @@ from app.schemas.model import (
     ModelProfile,
     ModelResolveRequest,
     TierOneStats,
+    WeightDeltaResponse,
 )
 from app.services.introspection import (
     build_architecture_response,
+    compute_weight_deltas,
     count_parameters_from_config,
     estimate_resource_usage,
 )
@@ -100,9 +103,7 @@ def _resolve_model_sync(*, project_id: str, request: ModelResolveRequest) -> Mod
     )
 
 
-async def resolve_model(
-    *, project_id: str, request: ModelResolveRequest
-) -> ModelProfile:
+async def resolve_model(*, project_id: str, request: ModelResolveRequest) -> ModelProfile:
     loop = asyncio.get_event_loop()
     profile = await loop.run_in_executor(
         None,
@@ -228,13 +229,24 @@ async def capture_activations(
     )
 
 
-def get_activation_snapshot(
-    *, project_id: str, snapshot_id: str
-) -> ActivationSnapshotResponse:
+def get_activation_snapshot(*, project_id: str, snapshot_id: str) -> ActivationSnapshotResponse:
     snapshot = _activation_snapshots.get(snapshot_id)
     if snapshot is None:
         raise ActivationSnapshotNotFoundError(snapshot_id)
     return snapshot
+
+
+async def compute_model_deltas(
+    *, project_id: str, request: DeltaComputeRequest
+) -> WeightDeltaResponse:
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(
+        None,
+        lambda: compute_weight_deltas(
+            checkpoint_before=request.checkpoint_before,
+            checkpoint_after=request.checkpoint_after,
+        ),
+    )
 
 
 def get_full_tensor(

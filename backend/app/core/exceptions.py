@@ -59,3 +59,9 @@ class DatasetResolveError(Exception):
     def __init__(self, message: str) -> None:
         super().__init__(message)
         self.message = message
+
+
+class CheckpointNotFoundError(Exception):
+    def __init__(self, path: str) -> None:
+        super().__init__(f"Checkpoint not found: {path}")
+        self.path = path

@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db_session
 from app.core.exceptions import (
     ActivationSnapshotNotFoundError,
+    CheckpointNotFoundError,
     LayerNotFoundError,
     ModelNotResolvedError,
     ModelResolveError,
@@ -16,12 +17,14 @@ from app.core.exceptions import (
 from app.schemas.model import (
     ActivationCaptureRequest,
     ActivationSnapshotResponse,
+    DeltaComputeRequest,
     FullTensorRequest,
     FullTensorResponse,
     LayerDetailResponse,
     ModelArchitectureResponse,
     ModelProfile,
     ModelResolveRequest,
+    WeightDeltaResponse,
 )
 from app.services import model_service, project_service
 
@@ -144,9 +147,7 @@ async def capture_activations(
             detail={"code": "PROJECT_NOT_FOUND", "message": str(exc), "details": {}},
         ) from exc
     try:
-        return await model_service.capture_activations(
-            project_id=project_id, request=payload
-        )
+        return await model_service.capture_activations(project_id=project_id, request=payload)
     except ModelNotResolvedError as exc:
         raise HTTPException(
             status_code=404,
@@ -176,9 +177,7 @@ async def get_activation_snapshot(
             detail={"code": "PROJECT_NOT_FOUND", "message": str(exc), "details": {}},
         ) from exc
     try:
-        return model_service.get_activation_snapshot(
-            project_id=project_id, snapshot_id=snapshot_id
-        )
+        return model_service.get_activation_snapshot(project_id=project_id, snapshot_id=snapshot_id)
     except ActivationSnapshotNotFoundError as exc:
         raise HTTPException(
             status_code=404,
@@ -212,4 +211,35 @@ async def request_full_tensor(
         raise HTTPException(
             status_code=404,
             detail={"code": "SNAPSHOT_NOT_FOUND", "message": str(exc), "details": {}},
+        ) from exc
+
+
+@router.post(
+    "/{project_id}/models/deltas",
+    response_model=WeightDeltaResponse,
+    status_code=200,
+)
+async def compute_weight_deltas(
+    project_id: str,
+    payload: DeltaComputeRequest,
+    session: DbSession,
+) -> WeightDeltaResponse:
+    try:
+        await project_service.get_project(session=session, project_id=project_id)
+    except ProjectNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "PROJECT_NOT_FOUND", "message": str(exc), "details": {}},
+        ) from exc
+    try:
+        return await model_service.compute_model_deltas(project_id=project_id, request=payload)
+    except CheckpointNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "CHECKPOINT_NOT_FOUND", "message": str(exc), "details": {}},
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "DELTA_COMPUTE_ERROR", "message": str(exc), "details": {}},
         ) from exc

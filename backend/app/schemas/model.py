@@ -91,3 +91,24 @@ class FullTensorRequest(BaseModel):
 class FullTensorResponse(BaseModel):
     snapshot_id: str
     layer_tensors: dict[str, Any]
+
+
+class DeltaComputeRequest(BaseModel):
+    checkpoint_before: str
+    checkpoint_after: str
+
+
+class LayerDelta(BaseModel):
+    layer_name: str
+    l2_norm: float
+    pct_change: float
+    param_count: int
+    before_norm: float
+    after_norm: float
+
+
+class WeightDeltaResponse(BaseModel):
+    checkpoint_before: str
+    checkpoint_after: str
+    layers: list[LayerDelta]
+    total_l2_norm: float
