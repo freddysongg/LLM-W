@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Literal
-
 from pydantic import BaseModel
 
 
@@ -25,5 +23,15 @@ class SuggestionResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class SuggestionListResponse(BaseModel):
+    items: list[SuggestionResponse]
+    total: int
+
+
+class SuggestionGenerateRequest(BaseModel):
+    source_run_id: str | None = None
+    notes: str | None = None
+
+
 class SuggestionResolve(BaseModel):
-    action: Literal["accept", "reject"]
+    action: str
