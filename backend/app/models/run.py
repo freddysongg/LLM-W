@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, Index, Integer, Real, Text
+from sqlalchemy import Float, ForeignKey, Index, Integer, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -33,7 +33,7 @@ class Run(Base):
     current_stage: Mapped[str | None] = mapped_column(Text, nullable=True)
     current_step: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     total_steps: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    progress_pct: Mapped[float] = mapped_column(Real, nullable=False, default=0.0)
+    progress_pct: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     started_at: Mapped[str | None] = mapped_column(Text, nullable=True)
     completed_at: Mapped[str | None] = mapped_column(Text, nullable=True)
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
