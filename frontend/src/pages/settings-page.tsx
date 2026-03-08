@@ -2,6 +2,8 @@ import * as React from "react";
 import { useState } from "react";
 import { useSettings, useUpdateSettings, useTestAiConnection } from "@/hooks/useSettings";
 import { SettingsForm } from "@/components/settings/settings-form";
+import { DefaultRetentionPolicy } from "@/components/settings/default-retention-policy";
+import { ExperimentRetentionDays } from "@/components/settings/experiment-retention-days";
 import type { UpdateSettingsRequest } from "@/types/settings";
 
 interface TestResult {
@@ -45,6 +47,9 @@ export default function SettingsPage(): React.JSX.Element {
           testConnectionResult={testResult}
         />
       )}
+
+      <DefaultRetentionPolicy onChange={() => undefined} />
+      <ExperimentRetentionDays onChange={() => undefined} />
     </div>
   );
 }
