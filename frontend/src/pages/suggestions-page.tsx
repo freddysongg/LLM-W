@@ -108,7 +108,7 @@ export default function SuggestionsPage(): React.JSX.Element {
 
       <div className="flex flex-1 overflow-hidden">
         <div className="w-80 shrink-0 flex flex-col border-r overflow-hidden">
-          <div className="px-4 py-2 border-b">
+          <div className="px-4 py-2">
             <Select value={statusFilter ?? "all"} onValueChange={handleStatusFilterChange}>
               <SelectTrigger className="h-8 text-sm">
                 <SelectValue />
