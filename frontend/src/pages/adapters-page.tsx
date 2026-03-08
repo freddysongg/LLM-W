@@ -3,6 +3,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { useAppStore } from "@/stores/app-store";
 import { useActiveConfig, useSaveConfig } from "@/hooks/useConfigs";
 import { AdaptersForm } from "@/components/adapters/adapters-form";
+import { TrainableParamsPreview } from "@/components/adapters/trainable-params-preview";
 import type {
   AdaptersConfig,
   OptimizationConfig,
@@ -84,20 +85,23 @@ export default function AdaptersPage(): React.JSX.Element {
       {error && <div className="text-sm text-destructive">Failed to load config.</div>}
 
       {localAdapters && localOptimization && localQuantization && (
-        <AdaptersForm
-          adapters={localAdapters}
-          optimization={localOptimization}
-          quantization={localQuantization}
-          onAdaptersChange={(updates) =>
-            setLocalAdapters((prev) => (prev ? { ...prev, ...updates } : null))
-          }
-          onOptimizationChange={(updates) =>
-            setLocalOptimization((prev) => (prev ? { ...prev, ...updates } : null))
-          }
-          onQuantizationChange={(updates) =>
-            setLocalQuantization((prev) => (prev ? { ...prev, ...updates } : null))
-          }
-        />
+        <>
+          <TrainableParamsPreview adapters={localAdapters} projectId={activeProjectId} />
+          <AdaptersForm
+            adapters={localAdapters}
+            optimization={localOptimization}
+            quantization={localQuantization}
+            onAdaptersChange={(updates) =>
+              setLocalAdapters((prev) => (prev ? { ...prev, ...updates } : null))
+            }
+            onOptimizationChange={(updates) =>
+              setLocalOptimization((prev) => (prev ? { ...prev, ...updates } : null))
+            }
+            onQuantizationChange={(updates) =>
+              setLocalQuantization((prev) => (prev ? { ...prev, ...updates } : null))
+            }
+          />
+        </>
       )}
     </div>
   );

@@ -7,6 +7,9 @@ import { ConfigDiffViewer } from "@/components/compare/config-diff-viewer";
 import { MetricOverlayChart } from "@/components/compare/metric-overlay-chart";
 import { MetricComparisonTable } from "@/components/compare/metric-comparison-table";
 import { ArtifactComparisonPanel } from "@/components/compare/artifact-comparison-panel";
+import { OutputComparisonPanel } from "@/components/compare/output-comparison-panel";
+import { ActivationComparisonPanel } from "@/components/compare/activation-comparison-panel";
+import { AISummaryCard } from "@/components/compare/ai-summary-card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const OVERLAY_METRICS: ReadonlyArray<{ name: string; title: string }> = [
@@ -76,6 +79,9 @@ export default function ComparePage(): React.JSX.Element {
                 <TabsTrigger value="metrics">Metrics</TabsTrigger>
                 <TabsTrigger value="config">Config Diff</TabsTrigger>
                 <TabsTrigger value="artifacts">Artifacts</TabsTrigger>
+                <TabsTrigger value="output">Output</TabsTrigger>
+                <TabsTrigger value="activations">Activations</TabsTrigger>
+                <TabsTrigger value="ai">AI Summary</TabsTrigger>
               </TabsList>
             </div>
 
@@ -115,6 +121,23 @@ export default function ComparePage(): React.JSX.Element {
                 runIds={selectedRunIds}
                 artifactComparison={compareData?.artifactComparison ?? {}}
               />
+            </TabsContent>
+
+            <TabsContent value="output" className="flex-1 p-6 mt-0">
+              <h2 className="text-sm font-medium mb-3">Evaluation Output</h2>
+              <OutputComparisonPanel
+                runIds={selectedRunIds}
+                metricComparison={compareData?.metricComparison ?? {}}
+              />
+            </TabsContent>
+
+            <TabsContent value="activations" className="flex-1 p-6 mt-0">
+              <h2 className="text-sm font-medium mb-3">Activation Comparison</h2>
+              <ActivationComparisonPanel runIds={selectedRunIds} />
+            </TabsContent>
+
+            <TabsContent value="ai" className="flex-1 p-6 mt-0">
+              <AISummaryCard runIds={selectedRunIds} projectId={projectId} />
             </TabsContent>
           </Tabs>
         )}
