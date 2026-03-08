@@ -64,5 +64,20 @@
 		"status": "active",
 		"createdAt": "2026-03-08T07:31:16.052Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-93ca7e30",
+		"name": "code-review-batch",
+		"memberIssueIds": [
+			"llm-interactive-48d6",
+			"llm-interactive-7646",
+			"llm-interactive-39e4",
+			"llm-interactive-dcd6",
+			"llm-interactive-37a3",
+			"llm-interactive-ab3c"
+		],
+		"status": "active",
+		"createdAt": "2026-03-08T08:56:38.826Z",
+		"completedAt": null
 	}
 ]
