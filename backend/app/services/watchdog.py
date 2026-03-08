@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import shutil
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import async_session_factory
+from app.models.decision_log import DecisionLog
 from app.models.run import Run
 
 logger = logging.getLogger(__name__)
@@ -148,6 +150,19 @@ async def recover_stale_runs() -> None:
                 failure_stage=failure_stage,
                 last_checkpoint_path=last_checkpoint,
             )
+
+            decision = DecisionLog(
+                id=str(uuid.uuid4()),
+                project_id=target_run.project_id,
+                action_type="run_cancelled",
+                actor="system",
+                target_type="run",
+                target_id=target_run.id,
+                notes="Process terminated unexpectedly — watchdog recovery",
+                created_at=datetime.now(UTC).isoformat(),
+            )
+            session.add(decision)
+            await session.commit()
 
 
 async def check_run_health(*, run_id: str) -> bool:

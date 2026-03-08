@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import ArtifactFileNotFoundError, ArtifactNotFoundError
 from app.models.artifact import Artifact
 from app.models.config_version import ConfigVersion
+from app.models.decision_log import DecisionLog
 from app.models.project import Project
 from app.models.run import Run
 from app.models.storage_record import StorageRecord
@@ -220,6 +221,21 @@ async def _apply_retention_for_run(
                                 ckpt_path.unlink()
                             freed_bytes += file_bytes
                             deleted += 1
+                            decision = DecisionLog(
+                                id=str(uuid.uuid4()),
+                                project_id=run.project_id,
+                                action_type="checkpoint_deleted",
+                                actor="system",
+                                target_type="checkpoint",
+                                target_id=ckpt.id,
+                                notes=(
+                                    f"Retention policy applied: keep_last_n={keep_last_n}, "
+                                    f"always_keep_best_eval={always_keep_best_eval}, "
+                                    f"always_keep_final={always_keep_final}"
+                                ),
+                                created_at=datetime.now(UTC).isoformat(),
+                            )
+                            session.add(decision)
                             await session.delete(ckpt)
                         except OSError:
                             pass
