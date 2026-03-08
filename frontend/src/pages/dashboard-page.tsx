@@ -7,6 +7,7 @@ import { ResourceSnapshot } from "@/components/dashboard/resource-snapshot";
 import { LatestRunStatusCard } from "@/components/dashboard/latest-run-status-card";
 import { RecentRunsList } from "@/components/dashboard/recent-runs-list";
 import { QuickLaunchActions } from "@/components/dashboard/quick-launch-actions";
+import { StoragePanel } from "@/components/dashboard/storage-panel";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export default function DashboardPage(): React.JSX.Element {
@@ -51,6 +52,8 @@ export default function DashboardPage(): React.JSX.Element {
           </Card>
 
           {systemHealth && <ResourceSnapshot health={systemHealth} />}
+
+          <StoragePanel projectId={activeProjectId} />
 
           <Card className="md:col-span-2 xl:col-span-3">
             <CardHeader>
