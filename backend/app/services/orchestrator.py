@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import yaml
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +28,7 @@ from app.models.project import Project
 from app.models.run import Run
 from app.models.run_stage import RunStage
 from app.schemas.run import RunCreate, RunResponse
+from app.services import suggestion_service
 
 _STAGE_ORDER: dict[str, int] = {
     "config_validation": 1,
@@ -108,9 +110,7 @@ async def get_run_metrics(
     return list(result.scalars().all())
 
 
-async def compare_runs(
-    *, session: AsyncSession, run_ids: list[str]
-) -> dict[str, Any]:
+async def compare_runs(*, session: AsyncSession, run_ids: list[str]) -> dict[str, Any]:
     runs = []
     for run_id in run_ids:
         run = await session.get(Run, run_id)
@@ -281,9 +281,7 @@ async def _update_stage(
 ) -> None:
     async with async_session_factory() as session:
         result = await session.execute(
-            select(RunStage).where(
-                RunStage.run_id == run_id, RunStage.stage_name == stage_name
-            )
+            select(RunStage).where(RunStage.run_id == run_id, RunStage.stage_name == stage_name)
         )
         stage_row = result.scalar_one_or_none()
         if stage_row is None:
@@ -579,6 +577,29 @@ async def _process_trainer_event(
     return ""
 
 
+async def _auto_analyze_if_enabled(*, run_id: str, project_id: str) -> None:
+    try:
+        async with async_session_factory() as session:
+            run = await session.get(Run, run_id)
+            if run is None:
+                return
+            config_version = await session.get(ConfigVersion, run.config_version_id)
+            if config_version is None:
+                return
+            config: dict[str, Any] = yaml.safe_load(config_version.yaml_blob) or {}
+            ai_cfg = config.get("ai_assistant", {})
+            if not ai_cfg.get("auto_analyze_on_completion", True):
+                return
+            await suggestion_service.generate_suggestions(
+                session=session,
+                project_id=project_id,
+                source_run_id=run_id,
+            )
+    except Exception:
+        # Non-blocking: analysis failure must not affect run completion state
+        pass
+
+
 async def _run_trainer_subprocess(
     *,
     run_id: str,
@@ -677,6 +698,7 @@ async def _run_trainer_subprocess(
                     },
                 },
             )
+            asyncio.create_task(_auto_analyze_if_enabled(run_id=run_id, project_id=project_id))
         elif terminal_status == "cancelled":
             await _update_run_status(run_id=run_id, status="cancelled")
             await event_bus.publish(
@@ -768,9 +790,7 @@ async def pause_run(*, session: AsyncSession, run_id: str) -> Run:
     return run
 
 
-async def resume_run(
-    *, session: AsyncSession, project_id: str, run_id: str
-) -> Run:
+async def resume_run(*, session: AsyncSession, project_id: str, run_id: str) -> Run:
     """Create a new child run that resumes from the last checkpoint."""
     parent_run = await get_run(session=session, run_id=run_id)
     if parent_run.status not in ("failed", "cancelled", "paused"):
