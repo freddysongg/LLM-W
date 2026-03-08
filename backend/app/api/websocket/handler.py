@@ -60,6 +60,8 @@ async def websocket_endpoint(
                     {
                         "channel": "system",
                         "event": "error",
+                        "run_id": None,
+                        "timestamp": datetime.now(UTC).isoformat(),
                         "payload": {"message": "invalid JSON"},
                     },
                 )
@@ -78,6 +80,7 @@ async def websocket_endpoint(
                     {
                         "channel": "system",
                         "event": "subscribed",
+                        "run_id": None,
                         "timestamp": datetime.now(UTC).isoformat(),
                         "payload": {"channels": list(active_channels)},
                     },
@@ -93,6 +96,7 @@ async def websocket_endpoint(
                     {
                         "channel": "system",
                         "event": "pong",
+                        "run_id": None,
                         "timestamp": datetime.now(UTC).isoformat(),
                         "payload": {},
                     },
