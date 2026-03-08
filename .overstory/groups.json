@@ -54,5 +54,15 @@
 		"status": "active",
 		"createdAt": "2026-03-08T07:07:51.715Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-4174c1d1",
+		"name": "phase-6-final",
+		"memberIssueIds": [
+			"llm-interactive-0366"
+		],
+		"status": "active",
+		"createdAt": "2026-03-08T07:31:16.052Z",
+		"completedAt": null
 	}
 ]
