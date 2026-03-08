@@ -94,5 +94,16 @@
 		"status": "active",
 		"createdAt": "2026-03-08T09:34:34.900Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-c02fa401",
+		"name": "ui-drawer-sidebar",
+		"memberIssueIds": [
+			"llm-interactive-055b",
+			"llm-interactive-5297"
+		],
+		"status": "active",
+		"createdAt": "2026-03-08T20:25:27.919Z",
+		"completedAt": null
 	}
 ]
