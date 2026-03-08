@@ -14,6 +14,7 @@ from app.api.routes.models import router as models_router
 from app.api.routes.projects import router as projects_router
 from app.api.routes.runs import router as runs_router
 from app.api.routes.settings import router as settings_router
+from app.api.websocket import connection_manager
 from app.api.websocket.handler import router as ws_router
 from app.core.config import settings
 from app.core.database import create_tables
@@ -28,7 +29,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await create_tables()
     _load_persisted_overrides()
     await recover_stale_runs()
+    await connection_manager.start_resource_poller()
     yield
+    await connection_manager.stop_resource_poller()
 
 
 app = FastAPI(
