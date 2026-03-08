@@ -6,8 +6,8 @@ import {
   createProject,
   updateProject,
   deleteProject,
-  fetchProjectStorage,
 } from "@/api/projects";
+import { fetchProjectStorage } from "@/api/storage";
 
 const PROJECTS_QUERY_KEY = ["projects"] as const;
 

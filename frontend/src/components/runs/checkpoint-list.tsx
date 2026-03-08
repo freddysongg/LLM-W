@@ -1,5 +1,5 @@
 import * as React from "react";
-import type { Checkpoint } from "@/api/runs";
+import type { Checkpoint } from "@/types/run";
 import {
   Table,
   TableBody,
