@@ -31,5 +31,17 @@
 		"status": "active",
 		"createdAt": "2026-03-08T06:09:25.248Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-ccee083b",
+		"name": "phase-3-frontend-4-7",
+		"memberIssueIds": [
+			"llm-interactive-65bf",
+			"llm-interactive-b353",
+			"llm-interactive-716e"
+		],
+		"status": "active",
+		"createdAt": "2026-03-08T06:32:42.497Z",
+		"completedAt": null
 	}
 ]
