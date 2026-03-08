@@ -2,19 +2,70 @@ import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app-store";
 import { Button } from "@/components/ui/button";
+import { RunDetailPanel } from "./drawer-panels/run-detail-panel";
+import { LayerDetailPanel } from "./drawer-panels/layer-detail-panel";
+import { ProjectDetailPanel } from "./drawer-panels/project-detail-panel";
+import { AiSuggestionDetailPanel } from "./drawer-panels/ai-suggestion-detail-panel";
+import type { DrawerContent } from "@/stores/app-store";
 
-const DRAWER_LABELS: Record<string, string> = {
+const DRAWER_LABELS: Record<Exclude<DrawerContent, null>, string> = {
   "ai-suggestions": "AI Suggestions",
   "layer-detail": "Layer Detail",
   "run-detail": "Run Detail",
   "project-detail": "Project Detail",
 };
 
-export function RightDrawer(): React.JSX.Element {
-  const { isRightDrawerOpen, rightDrawerContent, closeRightDrawer } = useAppStore();
+interface DrawerBodyProps {
+  readonly content: Exclude<DrawerContent, null>;
+  readonly projectId: string | null;
+  readonly runId: string | null;
+  readonly layerName: string | null;
+  readonly suggestionId: string | null;
+}
 
-  const label =
-    rightDrawerContent !== null ? (DRAWER_LABELS[rightDrawerContent] ?? rightDrawerContent) : "";
+function DrawerBody({
+  content,
+  projectId,
+  runId,
+  layerName,
+  suggestionId,
+}: DrawerBodyProps): React.JSX.Element {
+  if (!projectId) {
+    return <p className="text-sm text-muted-foreground">No context selected.</p>;
+  }
+
+  switch (content) {
+    case "run-detail":
+      if (!runId) return <p className="text-sm text-muted-foreground">No run selected.</p>;
+      return <RunDetailPanel projectId={projectId} runId={runId} />;
+    case "layer-detail":
+      if (!layerName) return <p className="text-sm text-muted-foreground">No layer selected.</p>;
+      return <LayerDetailPanel projectId={projectId} layerName={layerName} />;
+    case "project-detail":
+      return <ProjectDetailPanel projectId={projectId} />;
+    case "ai-suggestions":
+      if (!suggestionId)
+        return <p className="text-sm text-muted-foreground">No suggestion selected.</p>;
+      return <AiSuggestionDetailPanel projectId={projectId} suggestionId={suggestionId} />;
+    default: {
+      const _exhaustive: never = content;
+      return _exhaustive;
+    }
+  }
+}
+
+export function RightDrawer(): React.JSX.Element {
+  const {
+    isRightDrawerOpen,
+    rightDrawerContent,
+    closeRightDrawer,
+    drawerProjectId,
+    drawerRunId,
+    drawerLayerName,
+    drawerSuggestionId,
+  } = useAppStore();
+
+  const label = rightDrawerContent !== null ? DRAWER_LABELS[rightDrawerContent] : "";
 
   return (
     <aside
@@ -24,7 +75,7 @@ export function RightDrawer(): React.JSX.Element {
       )}
       aria-hidden={!isRightDrawerOpen}
     >
-      {isRightDrawerOpen && (
+      {isRightDrawerOpen && rightDrawerContent !== null && (
         <>
           <div className="flex items-center justify-between h-14 px-4 border-b border-border shrink-0">
             <span className="text-sm font-medium">{label}</span>
@@ -38,7 +89,13 @@ export function RightDrawer(): React.JSX.Element {
             </Button>
           </div>
           <div className="flex-1 overflow-y-auto p-4">
-            <p className="text-sm text-muted-foreground">Coming soon</p>
+            <DrawerBody
+              content={rightDrawerContent}
+              projectId={drawerProjectId}
+              runId={drawerRunId}
+              layerName={drawerLayerName}
+              suggestionId={drawerSuggestionId}
+            />
           </div>
         </>
       )}
