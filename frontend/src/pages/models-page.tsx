@@ -32,7 +32,7 @@ export default function ModelsPage(): React.JSX.Element {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center px-6 py-4 border-b">
+      <div className="flex items-center h-14 px-6 border-b">
         <h1 className="text-xl font-semibold">Models</h1>
       </div>
 

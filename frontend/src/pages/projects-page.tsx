@@ -64,7 +64,7 @@ export default function ProjectsPage(): React.JSX.Element {
   return (
     <div className="flex h-full">
       <div className="flex-1 flex flex-col min-w-0">
-        <div className="flex items-center justify-between px-6 py-4 border-b">
+        <div className="flex items-center justify-between h-14 px-6 border-b">
           <h1 className="text-xl font-semibold">Projects</h1>
           <div className="flex items-center gap-2">
             <ImportExportActions
