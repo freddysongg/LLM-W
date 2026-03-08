@@ -112,6 +112,7 @@ def _write_heartbeat(
     heartbeat_path: Path,
     run_id: str,
     current_step: int,
+    total_steps: int,
     stage: str,
     metrics: dict[str, float],
 ) -> None:
@@ -119,6 +120,7 @@ def _write_heartbeat(
         "run_id": run_id,
         "pid": os.getpid(),
         "current_step": current_step,
+        "total_steps": total_steps,
         "timestamp": datetime.now(UTC).isoformat(),
         "stage": stage,
         "metrics": metrics,
@@ -142,6 +144,7 @@ def _start_heartbeat_thread(
                     heartbeat_path=heartbeat_path,
                     run_id=run_id,
                     current_step=state.get("current_step", 0),
+                    total_steps=state.get("total_steps", 0),
                     stage=state.get("stage", ""),
                     metrics=state.get("metrics", {}),
                 )
@@ -206,13 +209,14 @@ class WorkbenchCallback:
             if isinstance(value, (int, float)):
                 metrics[key] = float(value)
 
+        total_steps = state.max_steps or 1
+
         if metrics:
             _emit_metric(step=step, epoch=epoch, metrics=metrics)
             self._last_metrics = metrics
             self._heartbeat_state["current_step"] = step
+            self._heartbeat_state["total_steps"] = total_steps
             self._heartbeat_state["metrics"] = metrics
-
-        total_steps = state.max_steps or 1
         progress_pct = min(100.0, step / total_steps * 100)
         _emit_progress(
             current_step=step,
@@ -679,6 +683,7 @@ def main() -> int:
     heartbeat_path = project_dir / ".heartbeat"
     heartbeat_state: dict[str, Any] = {
         "current_step": 0,
+        "total_steps": 0,
         "stage": "config_validation",
         "metrics": {},
         "done": False,
