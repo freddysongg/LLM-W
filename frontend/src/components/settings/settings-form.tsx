@@ -18,7 +18,6 @@ import { Badge } from "@/components/ui/badge";
 interface SettingsFormProps {
   readonly settings: AppSettings;
   readonly onSave: (updates: UpdateSettingsRequest) => void;
-  readonly isSaving: boolean;
   readonly onTestConnection: () => void;
   readonly isTestingConnection: boolean;
   readonly testConnectionResult: { readonly success: boolean; readonly message: string } | null;
@@ -27,7 +26,6 @@ interface SettingsFormProps {
 export function SettingsForm({
   settings,
   onSave,
-  isSaving,
   onTestConnection,
   isTestingConnection,
   testConnectionResult,
@@ -72,7 +70,7 @@ export function SettingsForm({
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
+    <form id="settings-form" onSubmit={handleSubmit} className="space-y-6">
       <Card>
         <CardHeader>
           <CardTitle className="text-sm">AI Provider</CardTitle>
@@ -210,12 +208,6 @@ export function SettingsForm({
           </div>
         </CardContent>
       </Card>
-
-      <div className="flex justify-end">
-        <Button type="submit" disabled={isSaving}>
-          {isSaving ? "Saving..." : "Save Settings"}
-        </Button>
-      </div>
     </form>
   );
 }
