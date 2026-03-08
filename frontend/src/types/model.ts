@@ -33,40 +33,88 @@ export interface ModelProfile {
   readonly updatedAt: string;
 }
 
-export interface ArchitectureNode {
+// -- Architecture (matches backend LayerNode / ModelArchitectureResponse) --
+
+export interface LayerNode {
   readonly name: string;
   readonly type: string;
-  readonly paramCount: number;
-  readonly isTrainable: boolean;
-  readonly children: ReadonlyArray<ArchitectureNode>;
+  readonly params: number | null;
+  readonly trainable: boolean | null;
+  readonly dtype: string | null;
+  readonly shape: ReadonlyArray<number> | null;
+  readonly children: ReadonlyArray<LayerNode> | null;
 }
 
-export interface LayerDetail {
+export interface ModelArchitectureResponse {
+  readonly model_id: string;
+  readonly architecture_name: string;
+  readonly total_parameters: number;
+  readonly trainable_parameters: number;
+  readonly tree: LayerNode;
+}
+
+// -- Layer Detail (matches backend LayerDetailResponse) --
+
+export interface LayerDetailResponse {
   readonly name: string;
   readonly type: string;
-  readonly paramCount: number;
-  readonly dtype: string;
-  readonly shape: ReadonlyArray<number>;
-  readonly isTrainable: boolean;
-  readonly hasAdapter: boolean;
+  readonly params: number;
+  readonly trainable: boolean;
+  readonly dtype: string | null;
+  readonly shape: ReadonlyArray<number> | null;
 }
 
-export interface ActivationSummary {
+// -- Activations (matches backend schemas) --
+
+export interface TierOneStats {
   readonly mean: number;
   readonly std: number;
   readonly min: number;
   readonly max: number;
-  readonly histogramBins: ReadonlyArray<number>;
-  readonly histogramCounts: ReadonlyArray<number>;
+  readonly histogram_bins: ReadonlyArray<number>;
 }
 
-export interface ActivationSnapshot {
+export interface ActivationLayerSnapshot {
+  readonly layer_name: string;
+  readonly tier1: TierOneStats;
+  readonly shape: ReadonlyArray<number>;
+}
+
+export interface ActivationSnapshotResponse {
   readonly id: string;
-  readonly runId: string;
-  readonly checkpointStep: number;
+  readonly created_at: string;
+  readonly layers: ReadonlyArray<ActivationLayerSnapshot>;
+}
+
+export interface ActivationCaptureRequest {
+  readonly layer_names: ReadonlyArray<string>;
+  readonly sample_input: string;
+}
+
+export interface FullTensorRequest {
+  readonly layer_names: ReadonlyArray<string> | null;
+}
+
+export interface FullTensorResponse {
+  readonly snapshot_id: string;
+  readonly layer_tensors: Record<string, unknown>;
+}
+
+// -- UI-only computed types --
+
+export interface WeightDelta {
   readonly layerName: string;
-  readonly summary: ActivationSummary;
-  readonly fullTensorPath: string | null;
-  readonly sampleInputHash: string | null;
-  readonly createdAt: string;
+  readonly deltaMagnitude: number;
+  readonly meanBefore: number;
+  readonly meanAfter: number;
+  readonly stdBefore: number;
+  readonly stdAfter: number;
+}
+
+export interface ParameterRow {
+  readonly path: string;
+  readonly type: string;
+  readonly params: number;
+  readonly trainable: boolean | null;
+  readonly dtype: string | null;
 }
