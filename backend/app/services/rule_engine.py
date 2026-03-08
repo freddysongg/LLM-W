@@ -316,13 +316,16 @@ def _check_memory_limit(
     grouped: dict[str, list[tuple[int, float]]],
     current_batch_size: int,
     current_gradient_checkpointing: bool,
+    max_memory_gb: float | None,
 ) -> AISuggestionCreate | None:
-    series = grouped.get("gpu_memory_allocated") or grouped.get("memory_allocated")
+    series = grouped.get("gpu_memory_allocated_mb") or grouped.get("memory_allocated")
     if not series:
         return None
 
-    latest_usage = series[-1][1]
-    if latest_usage <= 0.90:
+    latest_usage_mb = series[-1][1]
+    # Fall back to a generous 16 GB default when no hardware cap is configured
+    max_memory_mb = (max_memory_gb * 1024) if max_memory_gb else 16384.0
+    if latest_usage_mb <= max_memory_mb * 0.90:
         return None
 
     diff: dict[str, dict[str, Any]] = {}
@@ -340,19 +343,21 @@ def _check_memory_limit(
     if not diff:
         return None
 
+    utilisation_pct = latest_usage_mb / max_memory_mb * 100
     return AISuggestionCreate(
         config_diff=diff,
         rationale=(
-            f"GPU memory utilisation is at {latest_usage * 100:.1f}%, "
+            f"GPU memory usage is {latest_usage_mb:.0f} MB "
+            f"({utilisation_pct:.1f}% of {max_memory_mb:.0f} MB limit), "
             "approaching the limit. Reducing batch size and enabling gradient "
             "checkpointing will reduce peak memory usage."
         ),
         evidence=[
             {
                 "type": "metric",
-                "reference_id": "gpu_memory_allocated",
-                "label": "GPU memory utilisation",
-                "value": f"{latest_usage * 100:.1f}%",
+                "reference_id": "gpu_memory_allocated_mb",
+                "label": "GPU memory usage (MB)",
+                "value": f"{latest_usage_mb:.0f} MB",
             }
         ],
         provider="rule_engine",
@@ -378,6 +383,7 @@ def evaluate_rules(
     optimization = config.get("optimization", {})
     adapters = config.get("adapters", {})
     preprocessing = config.get("preprocessing", {})
+    execution = config.get("execution", {})
 
     current_lr: float = float(training.get("learning_rate", 2e-4))
     current_epochs: int = int(training.get("epochs", 2))
@@ -388,6 +394,7 @@ def evaluate_rules(
     current_gradient_checkpointing: bool = bool(optimization.get("gradient_checkpointing", True))
     current_dropout: float = float(adapters.get("dropout", 0.05))
     current_rank: int = int(adapters.get("rank", 8))
+    max_memory_gb: float | None = execution.get("max_memory_gb")
 
     rules = [
         _check_loss_plateau(grouped, current_lr),
@@ -396,7 +403,9 @@ def evaluate_rules(
         _check_eval_diverging(grouped, current_epochs, current_dropout, current_rank),
         _check_very_low_loss(grouped),
         _check_high_truncation(grouped, current_max_seq_length),
-        _check_memory_limit(grouped, current_batch_size, current_gradient_checkpointing),
+        _check_memory_limit(
+            grouped, current_batch_size, current_gradient_checkpointing, max_memory_gb
+        ),
     ]
 
     return [r for r in rules if r is not None]
