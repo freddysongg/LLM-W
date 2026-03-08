@@ -329,9 +329,13 @@ workers/      -> (background tasks)
 
 * Never push to git -- only stage and commit, user pushes manually
 * Never mention AI, Claude, or automation in commit messages
+* Never include "Co-authored-by" or "Co-worked-by" lines in commits
 * Never commit, stage, or `git add` any CLAUDE.md file
 * Never commit `.env` files, API keys, or credentials
 * Prefer specific `git add <file>` over `git add .` or `git add -A`
+* Commit messages must be lowercase, no capitalization
+* List changes with commas, not bullet points or line breaks
+* Example: `"added button, integrated dropdown options with config selection, added health check"`
 
 ---
 
