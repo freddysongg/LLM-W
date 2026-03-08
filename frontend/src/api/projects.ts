@@ -1,17 +1,36 @@
-import type {
-  Project,
-  CreateProjectRequest,
-  UpdateProjectRequest,
-  ProjectStorageResponse,
-} from "@/types/project";
+import type { Project, CreateProjectRequest, UpdateProjectRequest } from "@/types/project";
 import { fetchApi } from "./client";
 
+interface RawProject {
+  readonly id: string;
+  readonly name: string;
+  readonly description: string;
+  readonly directory_path: string;
+  readonly active_config_version_id: string | null;
+  readonly created_at: string;
+  readonly updated_at: string;
+}
+
+function normalizeProject(raw: RawProject): Project {
+  return {
+    id: raw.id,
+    name: raw.name,
+    description: raw.description,
+    directoryPath: raw.directory_path,
+    activeConfigVersionId: raw.active_config_version_id,
+    createdAt: raw.created_at,
+    updatedAt: raw.updated_at,
+  };
+}
+
 export async function fetchProjects(): Promise<ReadonlyArray<Project>> {
-  return fetchApi<ReadonlyArray<Project>>({ path: "/projects" });
+  const raw = await fetchApi<ReadonlyArray<RawProject>>({ path: "/projects" });
+  return raw.map(normalizeProject);
 }
 
 export async function fetchProject({ projectId }: { projectId: string }): Promise<Project> {
-  return fetchApi<Project>({ path: `/projects/${projectId}` });
+  const raw = await fetchApi<RawProject>({ path: `/projects/${projectId}` });
+  return normalizeProject(raw);
 }
 
 export async function createProject({
@@ -19,7 +38,8 @@ export async function createProject({
 }: {
   request: CreateProjectRequest;
 }): Promise<Project> {
-  return fetchApi<Project>({ path: "/projects", method: "POST", body: request });
+  const raw = await fetchApi<RawProject>({ path: "/projects", method: "POST", body: request });
+  return normalizeProject(raw);
 }
 
 export async function updateProject({
@@ -29,17 +49,14 @@ export async function updateProject({
   projectId: string;
   request: UpdateProjectRequest;
 }): Promise<Project> {
-  return fetchApi<Project>({ path: `/projects/${projectId}`, method: "PATCH", body: request });
+  const raw = await fetchApi<RawProject>({
+    path: `/projects/${projectId}`,
+    method: "PATCH",
+    body: request,
+  });
+  return normalizeProject(raw);
 }
 
 export async function deleteProject({ projectId }: { projectId: string }): Promise<void> {
   return fetchApi<void>({ path: `/projects/${projectId}?confirm=true`, method: "DELETE" });
-}
-
-export async function fetchProjectStorage({
-  projectId,
-}: {
-  projectId: string;
-}): Promise<ProjectStorageResponse> {
-  return fetchApi<ProjectStorageResponse>({ path: `/projects/${projectId}/storage` });
 }

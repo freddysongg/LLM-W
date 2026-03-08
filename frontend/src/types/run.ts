@@ -106,4 +106,43 @@ export interface ResumeRunResponse {
   readonly newRunId: string;
   readonly parentRunId: string;
   readonly checkpointPath: string;
+  readonly resumeFromStep: number | null;
+  readonly status: RunStatus;
+}
+
+export interface LogEntry {
+  readonly severity: "debug" | "info" | "warning" | "error" | "critical";
+  readonly stage: string | null;
+  readonly message: string;
+  readonly source: string | null;
+  readonly timestamp: string;
+}
+
+export interface LogsResponse {
+  readonly logs: ReadonlyArray<LogEntry>;
+  readonly total: number;
+  readonly hasMore: boolean;
+}
+
+export interface MetricsParams {
+  readonly names?: ReadonlyArray<MetricName>;
+  readonly stepMin?: number;
+  readonly stepMax?: number;
+}
+
+export interface LogsParams {
+  readonly severity?: string;
+  readonly stage?: string;
+  readonly offset?: number;
+  readonly limit?: number;
+}
+
+export interface Checkpoint {
+  readonly id: string;
+  readonly runId: string;
+  readonly step: number;
+  readonly path: string;
+  readonly sizeBytes: number;
+  readonly isRetained: boolean;
+  readonly createdAt: string;
 }

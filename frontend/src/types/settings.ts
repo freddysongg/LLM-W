@@ -21,3 +21,8 @@ export interface UpdateSettingsRequest {
   readonly watchdogStaleTimeoutSeconds?: number;
   readonly watchdogHeartbeatIntervalSeconds?: number;
 }
+
+export interface TestConnectionResult {
+  readonly success: boolean;
+  readonly message: string;
+}

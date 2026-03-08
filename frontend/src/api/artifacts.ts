@@ -56,6 +56,19 @@ export async function fetchArtifacts({
   return raw.map(normalizeArtifact);
 }
 
+export async function fetchArtifact({
+  projectId,
+  artifactId,
+}: {
+  projectId: string;
+  artifactId: string;
+}): Promise<Artifact> {
+  const raw = await fetchApi<RawArtifact>({
+    path: `/projects/${projectId}/artifacts/${artifactId}`,
+  });
+  return normalizeArtifact(raw);
+}
+
 export async function deleteArtifact({
   projectId,
   artifactId,
