@@ -7,9 +7,13 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.api.routes.configs import router as configs_router
 from app.api.routes.health import router as health_router
+from app.api.routes.projects import router as projects_router
+from app.api.routes.settings import router as settings_router
 from app.core.config import settings
 from app.core.database import create_tables
+from app.services.settings_service import _load_persisted_overrides
 
 
 @asynccontextmanager
@@ -17,6 +21,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     settings.projects_dir.mkdir(parents=True, exist_ok=True)
     await create_tables()
+    _load_persisted_overrides()
     yield
 
 
@@ -35,6 +40,9 @@ app.add_middleware(
 )
 
 app.include_router(health_router, tags=["health"])
+app.include_router(projects_router)
+app.include_router(configs_router)
+app.include_router(settings_router)
 
 
 @app.exception_handler(Exception)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, Index, Real, Text
+from sqlalchemy import Float, ForeignKey, Index, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -29,7 +29,7 @@ class AISuggestion(Base):
     evidence_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     expected_effect: Mapped[str | None] = mapped_column(Text, nullable=True)
     tradeoffs: Mapped[str | None] = mapped_column(Text, nullable=True)
-    confidence: Mapped[float | None] = mapped_column(Real, nullable=True)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     risk_level: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
     applied_config_version_id: Mapped[str | None] = mapped_column(

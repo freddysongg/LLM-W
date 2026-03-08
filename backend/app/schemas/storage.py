@@ -18,3 +18,29 @@ class StorageBreakdownResponse(BaseModel):
     project_id: str
     records: list[StorageRecordResponse]
     total_bytes: int
+
+
+class StorageCategoryDetail(BaseModel):
+    bytes: int
+    file_count: int
+
+
+class RunStorageSummary(BaseModel):
+    run_id: str
+    total_bytes: int
+    checkpoint_count: int
+    status: str
+
+
+class RetentionPolicySummary(BaseModel):
+    keep_last_n: int
+    reclaimable_bytes: int
+    reclaimable_checkpoints: int
+
+
+class ProjectStorageResponse(BaseModel):
+    project_id: str
+    total_bytes: int
+    breakdown: dict[str, StorageCategoryDetail]
+    per_run: list[RunStorageSummary]
+    retention_policy: RetentionPolicySummary
