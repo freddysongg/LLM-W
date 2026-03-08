@@ -484,22 +484,8 @@ async def _process_trainer_event(
         )
 
     elif event_type == "log":
-        await event_bus.publish(
-            event_type=f"project.{project_id}.ws",
-            payload={
-                "channel": "logs",
-                "event": "log_line",
-                "run_id": run_id,
-                "timestamp": timestamp,
-                "payload": {
-                    "run_id": run_id,
-                    "severity": event.get("severity", "info"),
-                    "stage": event.get("stage", ""),
-                    "message": event.get("message", ""),
-                    "source": "trainer",
-                },
-            },
-        )
+        # log events are handled by the caller via log_buffer — nothing to emit here
+        pass
 
     elif event_type == "checkpoint":
         step = event["step"]
@@ -555,26 +541,31 @@ async def _process_trainer_event(
         return event.get("status", "completed")
 
     elif event_type == "error":
-        stage = event.get("stage", "unknown")
-        message = event.get("message", "unknown error")
-        await event_bus.publish(
-            event_type=f"project.{project_id}.ws",
-            payload={
-                "channel": "logs",
-                "event": "log_line",
-                "run_id": run_id,
-                "timestamp": timestamp,
-                "payload": {
-                    "run_id": run_id,
-                    "severity": "error",
-                    "stage": stage,
-                    "message": message,
-                    "source": "trainer",
-                },
-            },
-        )
+        # error log events are handled by the caller via log_buffer — nothing to emit here
+        pass
 
     return ""
+
+
+_LOG_BATCH_MAX = 50
+
+
+async def _flush_log_batch(
+    *, run_id: str, project_id: str, log_buffer: list[dict[str, str]]
+) -> None:
+    if not log_buffer:
+        return
+    await event_bus.publish(
+        event_type=f"project.{project_id}.ws",
+        payload={
+            "channel": "logs",
+            "event": "log_batch",
+            "run_id": run_id,
+            "timestamp": datetime.now(UTC).isoformat(),
+            "payload": {"run_id": run_id, "lines": list(log_buffer)},
+        },
+    )
+    log_buffer.clear()
 
 
 async def _auto_analyze_if_enabled(*, run_id: str, project_id: str) -> None:
@@ -640,6 +631,7 @@ async def _run_trainer_subprocess(
         stage_start_times: dict[str, str] = {}
         final_metrics: dict[str, float] = {}
         terminal_status = ""
+        log_buffer: list[dict[str, str]] = []
 
         # Read stdout line by line
         assert proc.stdout is not None
@@ -649,31 +641,62 @@ async def _run_trainer_subprocess(
                 continue
             try:
                 event = json.loads(line)
-                terminal_status = await _process_trainer_event(
-                    event=event,
-                    run_id=run_id,
-                    project_id=project_id,
-                    stage_start_times=stage_start_times,
-                    final_metrics=final_metrics,
-                )
+                event_type = event.get("type", "")
+                if event_type == "log":
+                    log_buffer.append(
+                        {
+                            "severity": event.get("severity", "info"),
+                            "stage": event.get("stage", ""),
+                            "message": event.get("message", ""),
+                            "source": "trainer",
+                        }
+                    )
+                    if len(log_buffer) >= _LOG_BATCH_MAX:
+                        await _flush_log_batch(
+                            run_id=run_id, project_id=project_id, log_buffer=log_buffer
+                        )
+                elif event_type == "error":
+                    log_buffer.append(
+                        {
+                            "severity": "error",
+                            "stage": event.get("stage", "unknown"),
+                            "message": event.get("message", "unknown error"),
+                            "source": "trainer",
+                        }
+                    )
+                    if len(log_buffer) >= _LOG_BATCH_MAX:
+                        await _flush_log_batch(
+                            run_id=run_id, project_id=project_id, log_buffer=log_buffer
+                        )
+                else:
+                    # Non-log event: flush pending log buffer before processing
+                    await _flush_log_batch(
+                        run_id=run_id, project_id=project_id, log_buffer=log_buffer
+                    )
+                    terminal_status = await _process_trainer_event(
+                        event=event,
+                        run_id=run_id,
+                        project_id=project_id,
+                        stage_start_times=stage_start_times,
+                        final_metrics=final_metrics,
+                    )
             except json.JSONDecodeError:
-                # Non-JSON stdout (e.g., Python warnings) — emit as log
-                await event_bus.publish(
-                    event_type=f"project.{project_id}.ws",
-                    payload={
-                        "channel": "logs",
-                        "event": "log_line",
-                        "run_id": run_id,
-                        "timestamp": datetime.now(UTC).isoformat(),
-                        "payload": {
-                            "run_id": run_id,
-                            "severity": "debug",
-                            "stage": "",
-                            "message": line,
-                            "source": "trainer_stdout",
-                        },
-                    },
+                # Non-JSON stdout (e.g., Python warnings) — buffer as debug log
+                log_buffer.append(
+                    {
+                        "severity": "debug",
+                        "stage": "",
+                        "message": line,
+                        "source": "trainer_stdout",
+                    }
                 )
+                if len(log_buffer) >= _LOG_BATCH_MAX:
+                    await _flush_log_batch(
+                        run_id=run_id, project_id=project_id, log_buffer=log_buffer
+                    )
+
+        # Flush any remaining log lines after stdout closes
+        await _flush_log_batch(run_id=run_id, project_id=project_id, log_buffer=log_buffer)
 
         await proc.wait()
         _active_processes.pop(run_id, None)
