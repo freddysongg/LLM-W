@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 
 export type DrawerContent =
   | "ai-suggestions"
@@ -7,6 +8,10 @@ export type DrawerContent =
   | "project-detail"
   | null;
 
+export type NavGroupKey = "overview" | "modelData" | "training" | "execution" | "intelligence";
+
+type NavGroupExpandedState = Record<NavGroupKey, boolean>;
+
 interface AppState {
   readonly activeProjectId: string | null;
   readonly isSidebarCollapsed: boolean;
@@ -14,10 +19,7 @@ interface AppState {
   readonly rightDrawerContent: DrawerContent;
   readonly isBottomPanelVisible: boolean;
   readonly bottomPanelHeight: number;
-  readonly drawerRunId: string | null;
-  readonly drawerLayerName: string | null;
-  readonly drawerProjectId: string | null;
-  readonly drawerSuggestionId: string | null;
+  readonly navGroupExpanded: NavGroupExpandedState;
 }
 
 interface AppActions {
@@ -28,58 +30,52 @@ interface AppActions {
   closeRightDrawer: () => void;
   toggleBottomPanel: () => void;
   setBottomPanelHeight: (height: number) => void;
-  openRunDetail: (params: { projectId: string; runId: string }) => void;
-  openLayerDetail: (params: { projectId: string; layerName: string }) => void;
-  openProjectDetail: (params: { projectId: string }) => void;
-  openSuggestionDetail: (params: { projectId: string; suggestionId: string }) => void;
+  toggleNavGroup: (group: NavGroupKey) => void;
 }
 
 type AppStore = AppState & AppActions;
 
-export const useAppStore = create<AppStore>((set) => ({
-  activeProjectId: null,
-  isSidebarCollapsed: false,
-  isRightDrawerOpen: false,
-  rightDrawerContent: null,
-  isBottomPanelVisible: true,
-  bottomPanelHeight: 200,
-  drawerRunId: null,
-  drawerLayerName: null,
-  drawerProjectId: null,
-  drawerSuggestionId: null,
+const DEFAULT_NAV_GROUP_EXPANDED: NavGroupExpandedState = {
+  overview: true,
+  modelData: true,
+  training: true,
+  execution: true,
+  intelligence: true,
+};
 
-  setActiveProjectId: (projectId) => set({ activeProjectId: projectId }),
-  toggleSidebar: () => set((state) => ({ isSidebarCollapsed: !state.isSidebarCollapsed })),
-  setSidebarCollapsed: (collapsed) => set({ isSidebarCollapsed: collapsed }),
-  openRightDrawer: (content) => set({ isRightDrawerOpen: true, rightDrawerContent: content }),
-  closeRightDrawer: () => set({ isRightDrawerOpen: false, rightDrawerContent: null }),
-  toggleBottomPanel: () => set((state) => ({ isBottomPanelVisible: !state.isBottomPanelVisible })),
-  setBottomPanelHeight: (height) => set({ bottomPanelHeight: height }),
-  openRunDetail: ({ projectId, runId }) =>
-    set({
-      isRightDrawerOpen: true,
-      rightDrawerContent: "run-detail",
-      drawerProjectId: projectId,
-      drawerRunId: runId,
+export const useAppStore = create<AppStore>()(
+  persist(
+    (set) => ({
+      activeProjectId: null,
+      isSidebarCollapsed: false,
+      isRightDrawerOpen: false,
+      rightDrawerContent: null,
+      isBottomPanelVisible: true,
+      bottomPanelHeight: 200,
+      navGroupExpanded: DEFAULT_NAV_GROUP_EXPANDED,
+
+      setActiveProjectId: (projectId) => set({ activeProjectId: projectId }),
+      toggleSidebar: () => set((state) => ({ isSidebarCollapsed: !state.isSidebarCollapsed })),
+      setSidebarCollapsed: (collapsed) => set({ isSidebarCollapsed: collapsed }),
+      openRightDrawer: (content) => set({ isRightDrawerOpen: true, rightDrawerContent: content }),
+      closeRightDrawer: () => set({ isRightDrawerOpen: false, rightDrawerContent: null }),
+      toggleBottomPanel: () =>
+        set((state) => ({ isBottomPanelVisible: !state.isBottomPanelVisible })),
+      setBottomPanelHeight: (height) => set({ bottomPanelHeight: height }),
+      toggleNavGroup: (group) =>
+        set((state) => ({
+          navGroupExpanded: {
+            ...state.navGroupExpanded,
+            [group]: !state.navGroupExpanded[group],
+          },
+        })),
     }),
-  openLayerDetail: ({ projectId, layerName }) =>
-    set({
-      isRightDrawerOpen: true,
-      rightDrawerContent: "layer-detail",
-      drawerProjectId: projectId,
-      drawerLayerName: layerName,
-    }),
-  openProjectDetail: ({ projectId }) =>
-    set({
-      isRightDrawerOpen: true,
-      rightDrawerContent: "project-detail",
-      drawerProjectId: projectId,
-    }),
-  openSuggestionDetail: ({ projectId, suggestionId }) =>
-    set({
-      isRightDrawerOpen: true,
-      rightDrawerContent: "ai-suggestions",
-      drawerProjectId: projectId,
-      drawerSuggestionId: suggestionId,
-    }),
-}));
+    {
+      name: "app-store",
+      partialize: (state) => ({
+        navGroupExpanded: state.navGroupExpanded,
+        isSidebarCollapsed: state.isSidebarCollapsed,
+      }),
+    },
+  ),
+);
