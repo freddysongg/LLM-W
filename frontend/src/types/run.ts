@@ -76,10 +76,26 @@ export interface MetricPoint {
   readonly recordedAt: string;
 }
 
-export interface RunComparison {
-  readonly runs: ReadonlyArray<Run>;
-  readonly configDiffs: Record<string, unknown>;
-  readonly metricOverlays: Record<MetricName, ReadonlyArray<MetricPoint>>;
+export interface RunMetricSummary {
+  readonly final: number;
+  readonly min: number;
+  readonly trend: string;
+}
+
+export interface RunArtifactSummary {
+  readonly checkpoints: number;
+  readonly totalSizeMb: number;
+}
+
+export interface RunConfigDiff {
+  readonly changed?: Record<string, Record<string, unknown>>;
+}
+
+export interface RunCompareResponse {
+  readonly runs: ReadonlyArray<string>;
+  readonly configDiff: RunConfigDiff;
+  readonly metricComparison: Record<string, Record<string, RunMetricSummary>>;
+  readonly artifactComparison: Record<string, RunArtifactSummary>;
 }
 
 export interface ResumeRunRequest {
