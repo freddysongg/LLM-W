@@ -1,5 +1,13 @@
-import type { Run, RunStage, MetricPoint, ResumeRunResponse } from "@/types/run";
-import type { MetricName } from "@/types/run";
+import type {
+  Run,
+  RunStage,
+  MetricPoint,
+  MetricName,
+  ResumeRunResponse,
+  RunCompareResponse,
+  RunMetricSummary,
+  RunArtifactSummary,
+} from "@/types/run";
 import { fetchApi } from "./client";
 
 export interface LogEntry {
@@ -161,4 +169,65 @@ export async function fetchCheckpoints({
   return fetchApi<ReadonlyArray<Checkpoint>>({
     path: `/projects/${projectId}/runs/${runId}/checkpoints`,
   });
+}
+
+interface RawRunMetricSummary {
+  readonly final: number;
+  readonly min: number;
+  readonly trend: string;
+}
+
+interface RawRunArtifactSummary {
+  readonly checkpoints: number;
+  readonly total_size_mb: number;
+}
+
+interface RawRunCompareResponse {
+  readonly runs: ReadonlyArray<string>;
+  readonly config_diff: Record<string, Record<string, Record<string, unknown>>>;
+  readonly metric_comparison: Record<string, Record<string, RawRunMetricSummary>>;
+  readonly artifact_comparison: Record<string, RawRunArtifactSummary>;
+}
+
+function normalizeMetricSummary(raw: RawRunMetricSummary): RunMetricSummary {
+  return { final: raw.final, min: raw.min, trend: raw.trend };
+}
+
+function normalizeArtifactSummary(raw: RawRunArtifactSummary): RunArtifactSummary {
+  return { checkpoints: raw.checkpoints, totalSizeMb: raw.total_size_mb };
+}
+
+function normalizeRunCompare(raw: RawRunCompareResponse): RunCompareResponse {
+  const metricComparison: Record<string, Record<string, RunMetricSummary>> = {};
+  for (const [metric, byRun] of Object.entries(raw.metric_comparison)) {
+    metricComparison[metric] = {};
+    for (const [runId, summary] of Object.entries(byRun)) {
+      metricComparison[metric][runId] = normalizeMetricSummary(summary);
+    }
+  }
+
+  const artifactComparison: Record<string, RunArtifactSummary> = {};
+  for (const [runId, summary] of Object.entries(raw.artifact_comparison)) {
+    artifactComparison[runId] = normalizeArtifactSummary(summary);
+  }
+
+  return {
+    runs: raw.runs,
+    configDiff: raw.config_diff,
+    metricComparison,
+    artifactComparison,
+  };
+}
+
+export async function fetchRunComparison({
+  projectId,
+  runIds,
+}: {
+  projectId: string;
+  runIds: ReadonlyArray<string>;
+}): Promise<RunCompareResponse> {
+  const raw = await fetchApi<RawRunCompareResponse>({
+    path: `/projects/${projectId}/runs/compare?run_ids=${runIds.join(",")}`,
+  });
+  return normalizeRunCompare(raw);
 }
