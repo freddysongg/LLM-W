@@ -15,3 +15,14 @@ class ArtifactResponse(BaseModel):
     created_at: str
 
     model_config = {"from_attributes": True}
+
+
+class ArtifactListResponse(BaseModel):
+    items: list[ArtifactResponse]
+    total: int
+
+
+class ArtifactCleanupResponse(BaseModel):
+    deleted_count: int
+    freed_bytes: int
+    retained_count: int

@@ -91,3 +91,15 @@ class SuggestionNotFoundError(Exception):
     def __init__(self, suggestion_id: str) -> None:
         super().__init__(f"Suggestion not found: {suggestion_id}")
         self.suggestion_id = suggestion_id
+
+
+class ArtifactNotFoundError(Exception):
+    def __init__(self, artifact_id: str) -> None:
+        super().__init__(f"Artifact not found: {artifact_id}")
+        self.artifact_id = artifact_id
+
+
+class ArtifactFileNotFoundError(Exception):
+    def __init__(self, artifact_id: str) -> None:
+        super().__init__(f"Artifact file not found on disk: {artifact_id}")
+        self.artifact_id = artifact_id

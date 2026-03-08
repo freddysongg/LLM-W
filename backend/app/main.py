@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.api.routes.artifacts import router as artifacts_router
 from app.api.routes.configs import router as configs_router
 from app.api.routes.datasets import router as datasets_router
 from app.api.routes.health import router as health_router
@@ -14,8 +15,10 @@ from app.api.routes.models import router as models_router
 from app.api.routes.projects import router as projects_router
 from app.api.routes.runs import router as runs_router
 from app.api.routes.settings import router as settings_router
+from app.api.routes.storage import router as storage_router
 from app.api.routes.suggestions import router as suggestions_router
 from app.api.websocket.handler import router as ws_router
+from app.api.websocket.stream import connection_manager
 from app.core.config import settings
 from app.core.database import create_tables
 from app.services.settings_service import _load_persisted_overrides
@@ -55,6 +58,8 @@ app.include_router(models_router)
 app.include_router(datasets_router)
 app.include_router(settings_router)
 app.include_router(runs_router)
+app.include_router(artifacts_router)
+app.include_router(storage_router)
 app.include_router(suggestions_router)
 app.include_router(ws_router)
 

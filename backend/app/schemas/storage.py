@@ -44,3 +44,9 @@ class ProjectStorageResponse(BaseModel):
     breakdown: dict[str, StorageCategoryDetail]
     per_run: list[RunStorageSummary]
     retention_policy: RetentionPolicySummary
+
+
+class StorageTotalResponse(BaseModel):
+    total_bytes: int
+    per_project: dict[str, int]
+    project_count: int
