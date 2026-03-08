@@ -1,8 +1,17 @@
 from __future__ import annotations
 
+import math
+from pathlib import Path
 from typing import Any
 
-from app.schemas.model import LayerNode, ModelArchitectureResponse, ResourceEstimate
+from app.core.exceptions import CheckpointNotFoundError
+from app.schemas.model import (
+    LayerDelta,
+    LayerNode,
+    ModelArchitectureResponse,
+    ResourceEstimate,
+    WeightDeltaResponse,
+)
 
 # Bytes per parameter by dtype
 _DTYPE_BYTES: dict[str, float] = {
@@ -88,6 +97,91 @@ def build_architecture_response(
         total_parameters=total_parameters,
         trainable_parameters=trainable_parameters,
         tree=tree,
+    )
+
+
+def _load_state_dict(checkpoint_path: str) -> dict[str, Any]:
+    """Load a state dict from a checkpoint directory or file (safetensors or pytorch)."""
+    try:
+        import torch
+    except ImportError as exc:
+        raise RuntimeError("torch is required for delta computation.") from exc
+
+    path = Path(checkpoint_path)
+    if not path.exists():
+        raise CheckpointNotFoundError(checkpoint_path)
+
+    # Try safetensors first (preferred format from save_pretrained)
+    safetensors_files = list(path.glob("*.safetensors")) if path.is_dir() else []
+    if safetensors_files:
+        try:
+            from safetensors.torch import load_file as st_load_file
+        except ImportError as exc:
+            raise RuntimeError("safetensors is required to load .safetensors checkpoints.") from exc
+        merged: dict[str, Any] = {}
+        for shard in sorted(safetensors_files):
+            merged.update(st_load_file(str(shard), device="cpu"))
+        return merged
+
+    # Fall back to pytorch .bin files
+    bin_files = list(path.glob("*.bin")) if path.is_dir() else []
+    if bin_files:
+        merged = {}
+        for shard in sorted(bin_files):
+            merged.update(torch.load(str(shard), map_location="cpu", weights_only=True))
+        return merged
+
+    # Single file: .pt or .bin
+    if path.is_file():
+        return torch.load(str(path), map_location="cpu", weights_only=True)
+
+    raise CheckpointNotFoundError(checkpoint_path)
+
+
+def compute_weight_deltas(*, checkpoint_before: str, checkpoint_after: str) -> WeightDeltaResponse:
+    """Compute per-layer L2 norm of weight changes between two checkpoints."""
+    try:
+        import torch
+    except ImportError as exc:
+        raise RuntimeError("torch is required for delta computation.") from exc
+
+    before_state = _load_state_dict(checkpoint_before)
+    after_state = _load_state_dict(checkpoint_after)
+
+    layer_deltas: list[LayerDelta] = []
+    total_sq_sum = 0.0
+
+    common_keys = sorted(set(before_state) & set(after_state))
+    for key in common_keys:
+        before_tensor = before_state[key].float()
+        after_tensor = after_state[key].float()
+
+        delta = after_tensor - before_tensor
+        l2_norm = float(torch.norm(delta).item())
+        before_norm = float(torch.norm(before_tensor).item())
+        after_norm = float(torch.norm(after_tensor).item())
+        pct_change = (l2_norm / before_norm * 100.0) if before_norm > 0.0 else 0.0
+        param_count = before_tensor.numel()
+
+        total_sq_sum += l2_norm**2
+        layer_deltas.append(
+            LayerDelta(
+                layer_name=key,
+                l2_norm=round(l2_norm, 6),
+                pct_change=round(pct_change, 4),
+                param_count=param_count,
+                before_norm=round(before_norm, 6),
+                after_norm=round(after_norm, 6),
+            )
+        )
+
+    layer_deltas.sort(key=lambda d: d.l2_norm, reverse=True)
+
+    return WeightDeltaResponse(
+        checkpoint_before=checkpoint_before,
+        checkpoint_after=checkpoint_after,
+        layers=layer_deltas,
+        total_l2_norm=round(math.sqrt(total_sq_sum), 6),
     )
 
 
