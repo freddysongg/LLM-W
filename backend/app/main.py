@@ -12,10 +12,13 @@ from app.api.routes.datasets import router as datasets_router
 from app.api.routes.health import router as health_router
 from app.api.routes.models import router as models_router
 from app.api.routes.projects import router as projects_router
+from app.api.routes.runs import router as runs_router
 from app.api.routes.settings import router as settings_router
+from app.api.websocket.handler import router as ws_router
 from app.core.config import settings
 from app.core.database import create_tables
 from app.services.settings_service import _load_persisted_overrides
+from app.services.watchdog import recover_stale_runs
 
 
 @asynccontextmanager
@@ -24,6 +27,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     settings.projects_dir.mkdir(parents=True, exist_ok=True)
     await create_tables()
     _load_persisted_overrides()
+    await recover_stale_runs()
     yield
 
 
@@ -47,6 +51,8 @@ app.include_router(configs_router)
 app.include_router(models_router)
 app.include_router(datasets_router)
 app.include_router(settings_router)
+app.include_router(runs_router)
+app.include_router(ws_router)
 
 
 @app.exception_handler(Exception)
