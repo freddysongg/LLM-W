@@ -18,8 +18,7 @@ import type {
   RunCancelledPayload,
 } from "@/types/websocket";
 import type { MetricPoint, RunStage } from "@/types/run";
-import type { LogEntry } from "@/api/runs";
-import type { Checkpoint } from "@/api/runs";
+import type { LogEntry, Checkpoint } from "@/types/run";
 
 interface LiveMetrics {
   readonly byStep: ReadonlyArray<MetricPoint>;
@@ -196,6 +195,7 @@ export function useRunStream({
     return () => {
       removeConnectionListener();
       removeMessageListener();
+      wsClient.disconnect();
     };
   }, [projectId, runId, queryClient]);
 

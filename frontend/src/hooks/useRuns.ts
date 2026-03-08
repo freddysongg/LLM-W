@@ -11,7 +11,7 @@ import {
   fetchRunLogs,
   fetchCheckpoints,
 } from "@/api/runs";
-import type { MetricsParams, LogsParams } from "@/api/runs";
+import type { MetricsParams, LogsParams } from "@/types/run";
 
 const RUNS_KEY = (projectId: string) => ["projects", projectId, "runs"] as const;
 const RUN_KEY = (projectId: string, runId: string) =>

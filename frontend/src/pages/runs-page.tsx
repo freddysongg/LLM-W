@@ -20,7 +20,7 @@ import { CheckpointList } from "@/components/runs/checkpoint-list";
 import { FailurePanel } from "@/components/runs/failure-panel";
 import { RunActions } from "@/components/runs/run-actions";
 import { ResumeFromCheckpointDialog } from "@/components/runs/resume-from-checkpoint-dialog";
-import type { Checkpoint } from "@/api/runs";
+import type { Checkpoint } from "@/types/run";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export default function RunsPage(): React.JSX.Element {

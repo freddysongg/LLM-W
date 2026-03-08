@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { ModelResolveRequest } from "@/types/model";
-import { resolveModel, fetchModelProfile, fetchModelArchitecture } from "@/api/models";
+import { resolveModel, fetchModelProfile } from "@/api/models";
+import { fetchModelArchitecture } from "@/api/model-explorer";
 
 const modelQueryKey = (projectId: string) => ["projects", projectId, "models"] as const;
 

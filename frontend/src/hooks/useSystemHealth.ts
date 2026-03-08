@@ -1,14 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import type { HealthResponse, SystemHealthResponse } from "@/types/health";
-import { fetchApi } from "@/api/client";
-
-async function fetchHealth(): Promise<HealthResponse> {
-  return fetchApi<HealthResponse>({ path: "/health" });
-}
-
-async function fetchSystemHealth(): Promise<SystemHealthResponse> {
-  return fetchApi<SystemHealthResponse>({ path: "/health/system" });
-}
+import { fetchHealth, fetchSystemHealth } from "@/api/health";
 
 export function useHealth() {
   return useQuery({

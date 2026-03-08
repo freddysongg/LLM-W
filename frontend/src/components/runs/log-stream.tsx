@@ -1,5 +1,5 @@
 import * as React from "react";
-import type { LogEntry } from "@/api/runs";
+import type { LogEntry } from "@/types/run";
 import { Badge } from "@/components/ui/badge";
 import {
   Select,
