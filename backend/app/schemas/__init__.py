@@ -10,7 +10,18 @@ from app.schemas.config_version import (
 from app.schemas.health import HealthResponse, SystemHealthResponse
 from app.schemas.metric import MetricPointResponse
 from app.schemas.project import ProjectCreate, ProjectResponse, ProjectUpdate
-from app.schemas.run import RunCreate, RunResponse, RunStageResponse
+from app.schemas.run import (
+    RunArtifactCompareSummary,
+    RunCompareResponse,
+    RunCreate,
+    RunListResponse,
+    RunLogLine,
+    RunLogsResponse,
+    RunMetricSummary,
+    RunResponse,
+    RunResumeResponse,
+    RunStageResponse,
+)
 from app.schemas.storage import StorageBreakdownResponse, StorageRecordResponse
 from app.schemas.suggestion import SuggestionResolve, SuggestionResponse
 
@@ -26,8 +37,15 @@ __all__ = [
     "ProjectCreate",
     "ProjectResponse",
     "ProjectUpdate",
+    "RunArtifactCompareSummary",
+    "RunCompareResponse",
     "RunCreate",
+    "RunListResponse",
+    "RunLogLine",
+    "RunLogsResponse",
+    "RunMetricSummary",
     "RunResponse",
+    "RunResumeResponse",
     "RunStageResponse",
     "StorageBreakdownResponse",
     "StorageRecordResponse",

@@ -44,3 +44,50 @@ class RunStageResponse(BaseModel):
     created_at: str
 
     model_config = {"from_attributes": True}
+
+
+class RunListResponse(BaseModel):
+    items: list[RunResponse]
+    total: int
+    limit: int
+    offset: int
+
+
+class RunResumeResponse(BaseModel):
+    new_run_id: str
+    parent_run_id: str
+    resume_from_checkpoint: str
+    resume_from_step: int | None
+    status: str
+
+
+class RunLogLine(BaseModel):
+    severity: str
+    stage: str | None
+    message: str
+    source: str | None
+    timestamp: str
+
+
+class RunLogsResponse(BaseModel):
+    lines: list[RunLogLine]
+    total: int
+    has_more: bool
+
+
+class RunMetricSummary(BaseModel):
+    final: float
+    min: float
+    trend: str
+
+
+class RunArtifactCompareSummary(BaseModel):
+    checkpoints: int
+    total_size_mb: float
+
+
+class RunCompareResponse(BaseModel):
+    runs: list[str]
+    config_diff: dict[str, object]
+    metric_comparison: dict[str, dict[str, RunMetricSummary]]
+    artifact_comparison: dict[str, RunArtifactCompareSummary]

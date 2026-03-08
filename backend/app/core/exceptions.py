@@ -59,3 +59,23 @@ class DatasetResolveError(Exception):
     def __init__(self, message: str) -> None:
         super().__init__(message)
         self.message = message
+
+
+class RunNotFoundError(Exception):
+    def __init__(self, run_id: str) -> None:
+        super().__init__(f"Run not found: {run_id}")
+        self.run_id = run_id
+
+
+class RunStateError(Exception):
+    def __init__(self, *, run_id: str, action: str, current_status: str) -> None:
+        super().__init__(f"Cannot {action} run {run_id}: current status is {current_status}")
+        self.run_id = run_id
+        self.action = action
+        self.current_status = current_status
+
+
+class NoCheckpointError(Exception):
+    def __init__(self, run_id: str) -> None:
+        super().__init__(f"No valid checkpoint found for run: {run_id}")
+        self.run_id = run_id
