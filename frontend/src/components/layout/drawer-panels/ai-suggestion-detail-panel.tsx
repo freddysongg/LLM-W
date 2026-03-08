@@ -16,11 +16,11 @@ export function AiSuggestionDetailPanel({
   const { mutate: reject, isPending: isRejecting } = useRejectSuggestion();
 
   if (isLoading) {
-    return <p className="text-sm text-muted-foreground p-4">Loading…</p>;
+    return <p className="text-sm text-muted-foreground">Loading…</p>;
   }
 
   if (!suggestion) {
-    return <p className="text-sm text-muted-foreground p-4">Suggestion not found.</p>;
+    return <p className="text-sm text-muted-foreground">Suggestion not found.</p>;
   }
 
   return (

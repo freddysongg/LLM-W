@@ -25,9 +25,7 @@ function formatDate(iso: string): string {
   });
 }
 
-function lastRunStatusVariant(
-  status: RunStatus,
-): "default" | "secondary" | "destructive" | "outline" {
+function runStatusVariant(status: RunStatus): "default" | "secondary" | "destructive" | "outline" {
   switch (status) {
     case "running":
       return "default";
@@ -46,18 +44,29 @@ function lastRunStatusVariant(
   }
 }
 
-function InfoRow({
-  label,
-  value,
-}: {
+interface InfoRowProps {
   readonly label: string;
   readonly value: React.ReactNode;
-}): React.JSX.Element {
+}
+
+function InfoRow({ label, value }: InfoRowProps): React.JSX.Element {
   return (
     <div className="py-1.5">
       <p className="text-xs text-muted-foreground mb-0.5">{label}</p>
       <p className="text-xs break-all">{value}</p>
     </div>
+  );
+}
+
+interface SectionHeaderProps {
+  readonly title: string;
+}
+
+function SectionHeader({ title }: SectionHeaderProps): React.JSX.Element {
+  return (
+    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+      {title}
+    </p>
   );
 }
 
@@ -67,11 +76,11 @@ export function ProjectDetailPanel({ projectId }: ProjectDetailPanelProps): Reac
   const { data: runs = [] } = useRuns({ projectId });
 
   if (isProjectLoading) {
-    return <p className="text-sm text-muted-foreground p-4">Loading…</p>;
+    return <p className="text-sm text-muted-foreground">Loading…</p>;
   }
 
   if (!project) {
-    return <p className="text-sm text-muted-foreground p-4">Project not found.</p>;
+    return <p className="text-sm text-muted-foreground">Project not found.</p>;
   }
 
   const { name, description, directoryPath, createdAt, updatedAt } = project;
@@ -100,9 +109,7 @@ export function ProjectDetailPanel({ projectId }: ProjectDetailPanelProps): Reac
       <Separator />
 
       <div>
-        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-          Storage
-        </p>
+        <SectionHeader title="Storage" />
         {storage ? (
           <div className="space-y-1">
             <div className="flex justify-between text-xs">
@@ -121,6 +128,18 @@ export function ProjectDetailPanel({ projectId }: ProjectDetailPanelProps): Reac
               <span className="text-muted-foreground">Activations</span>
               <span className="font-mono">{formatBytes(storage.breakdown.activations.bytes)}</span>
             </div>
+            <div className="flex justify-between text-xs">
+              <span className="text-muted-foreground">Exports</span>
+              <span className="font-mono">{formatBytes(storage.breakdown.exports.bytes)}</span>
+            </div>
+            {storage.retentionPolicy.reclaimableBytes > 0 && (
+              <div className="flex justify-between text-xs">
+                <span className="text-muted-foreground">Reclaimable</span>
+                <span className="font-mono text-amber-500">
+                  {formatBytes(storage.retentionPolicy.reclaimableBytes)}
+                </span>
+              </div>
+            )}
           </div>
         ) : (
           <p className="text-xs text-muted-foreground">No storage data.</p>
@@ -130,18 +149,18 @@ export function ProjectDetailPanel({ projectId }: ProjectDetailPanelProps): Reac
       <Separator />
 
       <div>
-        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-          Run history
-        </p>
+        <SectionHeader title="Run history" />
         <div className="flex justify-between text-xs mb-2">
           <span className="text-muted-foreground">Total runs</span>
           <span className="font-mono">{runs.length}</span>
         </div>
-        {lastRun && (
+        {lastRun ? (
           <div className="flex items-center justify-between text-xs">
             <span className="text-muted-foreground">Last run</span>
-            <Badge variant={lastRunStatusVariant(lastRun.status)}>{lastRun.status}</Badge>
+            <Badge variant={runStatusVariant(lastRun.status)}>{lastRun.status}</Badge>
           </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">No runs yet.</p>
         )}
       </div>
     </div>
