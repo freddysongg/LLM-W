@@ -4,6 +4,7 @@ import { useSettings, useUpdateSettings, useTestAiConnection } from "@/hooks/use
 import { SettingsForm } from "@/components/settings/settings-form";
 import { DefaultRetentionPolicy } from "@/components/settings/default-retention-policy";
 import { ExperimentRetentionDays } from "@/components/settings/experiment-retention-days";
+import { Button } from "@/components/ui/button";
 import type { UpdateSettingsRequest } from "@/types/settings";
 
 interface TestResult {
@@ -30,26 +31,33 @@ export default function SettingsPage(): React.JSX.Element {
   };
 
   return (
-    <div className="p-6 max-w-2xl">
+    <div className="p-6 max-w-2xl pb-20">
       <h1 className="text-xl font-semibold mb-6">Settings</h1>
 
       {isLoading && <div className="text-sm text-muted-foreground">Loading settings...</div>}
 
       {error && <div className="text-sm text-destructive">Failed to load settings.</div>}
 
-      {settings && (
-        <SettingsForm
-          settings={settings}
-          onSave={handleSave}
-          isSaving={updateSettings.isPending}
-          onTestConnection={handleTestConnection}
-          isTestingConnection={testConnection.isPending}
-          testConnectionResult={testResult}
-        />
-      )}
+      <div className="space-y-6">
+        {settings && (
+          <SettingsForm
+            settings={settings}
+            onSave={handleSave}
+            onTestConnection={handleTestConnection}
+            isTestingConnection={testConnection.isPending}
+            testConnectionResult={testResult}
+          />
+        )}
 
-      <DefaultRetentionPolicy onChange={() => undefined} />
-      <ExperimentRetentionDays onChange={() => undefined} />
+        <DefaultRetentionPolicy onChange={() => undefined} />
+        <ExperimentRetentionDays onChange={() => undefined} />
+      </div>
+
+      <div className="fixed bottom-0 right-0 z-10 flex justify-end border-t border-border bg-background px-6 py-4 shadow-md w-full">
+        <Button type="submit" form="settings-form" disabled={updateSettings.isPending}>
+          {updateSettings.isPending ? "Saving..." : "Save Settings"}
+        </Button>
+      </div>
     </div>
   );
 }
