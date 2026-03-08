@@ -79,5 +79,20 @@
 		"status": "active",
 		"createdAt": "2026-03-08T08:56:38.826Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-a7bf8967",
+		"name": "review-fixes",
+		"memberIssueIds": [
+			"llm-interactive-d8fe",
+			"llm-interactive-1f40",
+			"llm-interactive-4e4c",
+			"llm-interactive-1dc9",
+			"llm-interactive-70c0",
+			"llm-interactive-f0fe"
+		],
+		"status": "active",
+		"createdAt": "2026-03-08T09:34:34.900Z",
+		"completedAt": null
 	}
 ]
