@@ -31,7 +31,7 @@ export function SuggestionList({
 }: SuggestionListProps): React.JSX.Element {
   if (suggestions.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-40 text-muted-foreground text-sm">
+      <div className="flex flex-col items-center justify-center h-40 px-4 text-center text-muted-foreground text-sm">
         No suggestions yet. Click Generate to analyse the current run.
       </div>
     );
