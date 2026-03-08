@@ -79,3 +79,15 @@ class NoCheckpointError(Exception):
     def __init__(self, run_id: str) -> None:
         super().__init__(f"No valid checkpoint found for run: {run_id}")
         self.run_id = run_id
+
+
+class CheckpointNotFoundError(Exception):
+    def __init__(self, checkpoint_id: str) -> None:
+        super().__init__(f"Checkpoint not found: {checkpoint_id}")
+        self.checkpoint_id = checkpoint_id
+
+
+class SuggestionNotFoundError(Exception):
+    def __init__(self, suggestion_id: str) -> None:
+        super().__init__(f"Suggestion not found: {suggestion_id}")
+        self.suggestion_id = suggestion_id

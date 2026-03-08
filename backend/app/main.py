@@ -14,7 +14,7 @@ from app.api.routes.models import router as models_router
 from app.api.routes.projects import router as projects_router
 from app.api.routes.runs import router as runs_router
 from app.api.routes.settings import router as settings_router
-from app.api.websocket import connection_manager
+from app.api.routes.suggestions import router as suggestions_router
 from app.api.websocket.handler import router as ws_router
 from app.core.config import settings
 from app.core.database import create_tables
@@ -55,6 +55,7 @@ app.include_router(models_router)
 app.include_router(datasets_router)
 app.include_router(settings_router)
 app.include_router(runs_router)
+app.include_router(suggestions_router)
 app.include_router(ws_router)
 
 
