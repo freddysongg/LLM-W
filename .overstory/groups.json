@@ -1,0 +1,24 @@
+[
+	{
+		"id": "group-24a9d078",
+		"name": "phase-1-foundation",
+		"memberIssueIds": [
+			"llm-interactive-809c",
+			"llm-interactive-fc10"
+		],
+		"status": "completed",
+		"createdAt": "2026-03-08T05:17:52.384Z",
+		"completedAt": "2026-03-08T05:43:41.506Z"
+	},
+	{
+		"id": "group-644effbb",
+		"name": "phase-2-core-app",
+		"memberIssueIds": [
+			"llm-interactive-036e",
+			"llm-interactive-9a81"
+		],
+		"status": "completed",
+		"createdAt": "2026-03-08T05:42:56.494Z",
+		"completedAt": "2026-03-08T06:05:47.021Z"
+	}
+]
