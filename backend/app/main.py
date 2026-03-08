@@ -3,7 +3,8 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -62,6 +63,38 @@ app.include_router(artifacts_router)
 app.include_router(storage_router)
 app.include_router(suggestions_router)
 app.include_router(ws_router)
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    if isinstance(exc.detail, dict) and "code" in exc.detail:
+        error_body = exc.detail
+    else:
+        error_body = {
+            "code": "HTTP_ERROR",
+            "message": str(exc.detail),
+            "details": {},
+        }
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": error_body},
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": {
+                "code": "VALIDATION_ERROR",
+                "message": "Request validation failed",
+                "details": {"errors": exc.errors()},
+            }
+        },
+    )
 
 
 @app.exception_handler(Exception)
