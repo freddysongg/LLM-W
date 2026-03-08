@@ -1,3 +1,7 @@
+import type { StorageCategory } from "./project";
+
+export type { StorageCategory };
+
 export type ArtifactType =
   | "checkpoint"
   | "config_snapshot"
@@ -8,8 +12,6 @@ export type ArtifactType =
   | "log_file"
   | "activation_summary"
   | "weight_delta";
-
-export type StorageCategory = "checkpoints" | "logs" | "activations" | "exports" | "models";
 
 export interface Artifact {
   readonly id: string;

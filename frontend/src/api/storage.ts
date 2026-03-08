@@ -28,6 +28,18 @@ interface RawProjectStorageResponse {
   readonly retention_policy: RawRetentionPolicy;
 }
 
+interface RawTotalStorageResponse {
+  readonly total_bytes: number;
+  readonly per_project: Record<string, number>;
+  readonly project_count: number;
+}
+
+export interface TotalStorageResponse {
+  readonly totalBytes: number;
+  readonly perProject: Record<string, number>;
+  readonly projectCount: number;
+}
+
 function normalizeCategoryDetail(raw: RawStorageCategoryDetail | undefined): {
   bytes: number;
   fileCount: number;
@@ -74,6 +86,15 @@ export async function fetchProjectStorage({
     path: `/projects/${projectId}/storage`,
   });
   return normalizeProjectStorage(raw);
+}
+
+export async function fetchTotalStorage(): Promise<TotalStorageResponse> {
+  const raw = await fetchApi<RawTotalStorageResponse>({ path: "/storage/total" });
+  return {
+    totalBytes: raw.total_bytes,
+    perProject: raw.per_project,
+    projectCount: raw.project_count,
+  };
 }
 
 export async function cleanupProjectStorage({ projectId }: { projectId: string }): Promise<void> {
