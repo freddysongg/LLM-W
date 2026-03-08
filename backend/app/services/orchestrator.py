@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import signal as _signal
 import sys
 import uuid
@@ -29,6 +30,8 @@ from app.models.run import Run
 from app.models.run_stage import RunStage
 from app.schemas.run import RunCreate, RunResponse
 from app.services import suggestion_service
+
+logger = logging.getLogger(__name__)
 
 _STAGE_ORDER: dict[str, int] = {
     "config_validation": 1,
@@ -597,7 +600,7 @@ async def _auto_analyze_if_enabled(*, run_id: str, project_id: str) -> None:
             )
     except Exception:
         # Non-blocking: analysis failure must not affect run completion state
-        pass
+        logger.warning("Auto-analysis failed for run %s", run_id, exc_info=True)
 
 
 async def _run_trainer_subprocess(
@@ -793,7 +796,7 @@ async def pause_run(*, session: AsyncSession, run_id: str) -> Run:
 async def resume_run(*, session: AsyncSession, project_id: str, run_id: str) -> Run:
     """Create a new child run that resumes from the last checkpoint."""
     parent_run = await get_run(session=session, run_id=run_id)
-    if parent_run.status not in ("failed", "cancelled", "paused"):
+    if parent_run.status not in ("failed", "cancelled", "paused", "completed"):
         raise ValueError(f"Run {run_id} cannot be resumed from status {parent_run.status}")
 
     # If paused and process still alive, just resume it

@@ -97,7 +97,7 @@ async def _fetch_run_metrics(
         .limit(limit)
     )
     rows = result.scalars().all()
-    return [{"step": r.step, "metric_name": r.metric_name, "value": r.value} for r in rows]
+    return [{"step": r.step, "metric_name": r.metric_name, "value": r.metric_value} for r in rows]
 
 
 def _set_nested(config: dict[str, Any], dot_path: str, value: Any) -> None:
@@ -265,9 +265,7 @@ async def accept_suggestion(
         target_type="ai_suggestion",
         target_id=suggestion_id,
         before_state=json.dumps({"status": "pending"}),
-        after_state=json.dumps(
-            {"status": "accepted", "applied_config_version_id": new_version.id}
-        ),
+        after_state=json.dumps({"status": "accepted", "applied_config_version_id": new_version.id}),
         notes=f"New config version {new_version.id} created from AI suggestion",
         created_at=now,
     )
