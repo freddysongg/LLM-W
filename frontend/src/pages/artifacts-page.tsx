@@ -106,7 +106,7 @@ export default function ArtifactsPage(): React.JSX.Element {
 
       <div className="flex flex-1 overflow-hidden">
         <div className="flex-1 flex flex-col overflow-hidden">
-          <div className="flex items-center gap-3 px-6 py-3 border-b">
+          <div className="flex items-center gap-3 px-6 py-3">
             <TypeFilter value={typeFilter} onChange={setTypeFilter} />
             <RunFilter runs={runs} value={runFilter} onChange={setRunFilter} />
           </div>
