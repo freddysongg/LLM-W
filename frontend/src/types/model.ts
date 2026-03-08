@@ -1,72 +1,48 @@
-import type { ModelFamily, ModelSource } from "./config";
+import type { ModelSource } from "./config";
 
-export interface ModelCapabilities {
-  readonly supportedTasks: ReadonlyArray<string>;
-  readonly supportedAdapters: ReadonlyArray<string>;
-  readonly supportedQuantModes: ReadonlyArray<string>;
+export type { ModelSource };
+
+export interface ModelResolveRequest {
+  readonly source: ModelSource;
+  readonly model_id: string;
+  readonly revision?: string;
+  readonly trust_remote_code?: boolean;
 }
 
 export interface ResourceEstimate {
-  readonly vramMb: number;
-  readonly ramMb: number;
-  readonly diskMb: number;
+  readonly vram_gb: number;
+  readonly disk_gb: number;
+  readonly training_memory_gb: number;
 }
 
 export interface ModelProfile {
-  readonly id: string;
-  readonly projectId: string;
+  readonly model_id: string;
   readonly source: ModelSource;
-  readonly modelId: string;
-  readonly family: ModelFamily;
-  readonly architectureName: string | null;
-  readonly parameterCount: number | null;
-  readonly trainableCount: number | null;
-  readonly tokenizerType: string | null;
-  readonly vocabSize: number | null;
-  readonly maxPositionEmbeddings: number | null;
-  readonly hiddenSize: number | null;
-  readonly numLayers: number | null;
-  readonly numAttentionHeads: number | null;
-  readonly capabilities: ModelCapabilities | null;
-  readonly resourceEstimate: ResourceEstimate | null;
-  readonly createdAt: string;
-  readonly updatedAt: string;
+  readonly family: string;
+  readonly architecture_name: string;
+  readonly total_parameters: number;
+  readonly trainable_parameters: number;
+  readonly resource_estimate: ResourceEstimate;
+  readonly torch_dtype: string;
+  readonly vocabulary_size: number | null;
+  readonly context_length: number | null;
+  readonly resolved_at: string;
 }
 
-export interface ArchitectureNode {
+export interface LayerNode {
   readonly name: string;
   readonly type: string;
-  readonly paramCount: number;
-  readonly isTrainable: boolean;
-  readonly children: ReadonlyArray<ArchitectureNode>;
+  readonly params: number | null;
+  readonly trainable: boolean | null;
+  readonly dtype: string | null;
+  readonly shape: ReadonlyArray<number> | null;
+  readonly children: ReadonlyArray<LayerNode> | null;
 }
 
-export interface LayerDetail {
-  readonly name: string;
-  readonly type: string;
-  readonly paramCount: number;
-  readonly dtype: string;
-  readonly shape: ReadonlyArray<number>;
-  readonly isTrainable: boolean;
-  readonly hasAdapter: boolean;
-}
-
-export interface ActivationSummary {
-  readonly mean: number;
-  readonly std: number;
-  readonly min: number;
-  readonly max: number;
-  readonly histogramBins: ReadonlyArray<number>;
-  readonly histogramCounts: ReadonlyArray<number>;
-}
-
-export interface ActivationSnapshot {
-  readonly id: string;
-  readonly runId: string;
-  readonly checkpointStep: number;
-  readonly layerName: string;
-  readonly summary: ActivationSummary;
-  readonly fullTensorPath: string | null;
-  readonly sampleInputHash: string | null;
-  readonly createdAt: string;
+export interface ModelArchitectureResponse {
+  readonly model_id: string;
+  readonly architecture_name: string;
+  readonly total_parameters: number;
+  readonly trainable_parameters: number;
+  readonly tree: LayerNode;
 }
