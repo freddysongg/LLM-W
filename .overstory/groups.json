@@ -20,5 +20,16 @@
 		"status": "completed",
 		"createdAt": "2026-03-08T05:42:56.494Z",
 		"completedAt": "2026-03-08T06:05:47.021Z"
+	},
+	{
+		"id": "group-e8d5401e",
+		"name": "phase-3-and-45",
+		"memberIssueIds": [
+			"llm-interactive-f135",
+			"llm-interactive-1ae2"
+		],
+		"status": "active",
+		"createdAt": "2026-03-08T06:09:25.248Z",
+		"completedAt": null
 	}
 ]
