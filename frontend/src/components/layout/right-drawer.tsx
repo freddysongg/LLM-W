@@ -77,7 +77,7 @@ export function RightDrawer(): React.JSX.Element {
     >
       {isRightDrawerOpen && rightDrawerContent !== null && (
         <>
-          <div className="flex items-center justify-between h-14 px-4 border-b border-border shrink-0">
+          <div className="flex items-center justify-between h-14 px-6 border-b border-border shrink-0">
             <span className="text-sm font-medium">{label}</span>
             <Button
               variant="ghost"

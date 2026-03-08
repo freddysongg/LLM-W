@@ -201,7 +201,7 @@ export function Sidebar(): React.JSX.Element {
             </div>
           )}
         </nav>
-        <div className="border-t border-border p-2 shrink-0">
+        <div className="border-t border-border shrink-0 flex items-center justify-center h-9 px-2">
           <Button
             variant="ghost"
             size="icon"
