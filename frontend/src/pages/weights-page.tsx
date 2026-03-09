@@ -124,9 +124,21 @@ export default function WeightsPage(): React.JSX.Element {
   const projectId = activeProjectId ?? "";
 
   const { data: architecture, isLoading: isArchLoading } = useModelArchitecture({ projectId });
+
+  // The frontend tree paths are prefixed with the root class name (e.g. "Qwen2ForCausalLM.lm_head"),
+  // but PyTorch named_modules() keys omit the root prefix (e.g. "lm_head"). Strip it before fetching.
+  const backendLayerName = React.useMemo((): string | null => {
+    if (!selectedLayerName || !architecture) return null;
+    const rootPrefix = `${architecture.tree.name}.`;
+    if (selectedLayerName.startsWith(rootPrefix)) {
+      return selectedLayerName.slice(rootPrefix.length);
+    }
+    return selectedLayerName;
+  }, [selectedLayerName, architecture]);
+
   const { data: layerDetail, isLoading: isLayerLoading } = useLayerDetail({
     projectId,
-    layerName: selectedLayerName,
+    layerName: backendLayerName,
   });
 
   const captureActivations = useCaptureActivations({ projectId });
