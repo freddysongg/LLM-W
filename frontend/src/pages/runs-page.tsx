@@ -7,9 +7,12 @@ import {
   useCancelRun,
   usePauseRun,
   useResumeRun,
+  useCreateRun,
 } from "@/hooks/useRuns";
+import { useActiveConfig } from "@/hooks/useConfigs";
 import { useRunStream } from "@/hooks/useRunStream";
 import { RunList } from "@/components/runs/run-list";
+import { Button } from "@/components/ui/button";
 import { ActiveRunBanner } from "@/components/runs/active-run-banner";
 import { RunTimeline } from "@/components/runs/run-timeline";
 import { StageDetailPanel } from "@/components/runs/stage-detail-panel";
@@ -53,14 +56,26 @@ export default function RunsPage(): React.JSX.Element {
   const cancelRun = useCancelRun();
   const pauseRun = usePauseRun();
   const resumeRun = useResumeRun();
+  const createRunMutation = useCreateRun();
+
+  const { data: activeConfig } = useActiveConfig({ projectId: activeProjectId ?? "" });
 
   const activeRun = runs.find((r) => r.status === "running" || r.status === "pending") ?? null;
+  const canStartRun = Boolean(activeConfig) && !activeRun;
   const selectedStage = stages.find((s) => s.id === selectedStageId) ?? null;
 
   const allCheckpoints: ReadonlyArray<Checkpoint> = [
     ...checkpoints,
     ...streamState.liveCheckpoints,
   ];
+
+  const handleStartRun = (): void => {
+    if (!activeProjectId || !activeConfig) return;
+    createRunMutation.mutate(
+      { projectId: activeProjectId, configVersionId: activeConfig.id },
+      { onSuccess: (newRun) => setSelectedRunId(newRun.id) },
+    );
+  };
 
   const handleCancelRun = (): void => {
     if (!activeProjectId || !selectedRunId) return;
@@ -102,17 +117,26 @@ export default function RunsPage(): React.JSX.Element {
     <div className="p-6 space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Runs</h1>
-        {selectedRun && (
-          <RunActions
-            run={selectedRun}
-            onCancel={handleCancelRun}
-            onPause={handlePauseRun}
-            onResume={handleResumeRun}
-            isCancelling={cancelRun.isPending}
-            isPausing={pauseRun.isPending}
-            isResuming={resumeRun.isPending}
-          />
-        )}
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            onClick={handleStartRun}
+            disabled={!canStartRun || createRunMutation.isPending}
+          >
+            {createRunMutation.isPending ? "Starting…" : "Start Run"}
+          </Button>
+          {selectedRun && (
+            <RunActions
+              run={selectedRun}
+              onCancel={handleCancelRun}
+              onPause={handlePauseRun}
+              onResume={handleResumeRun}
+              isCancelling={cancelRun.isPending}
+              isPausing={pauseRun.isPending}
+              isResuming={resumeRun.isPending}
+            />
+          )}
+        </div>
       </div>
 
       {activeRun && selectedRunId === activeRun.id && (
@@ -135,6 +159,9 @@ export default function RunsPage(): React.JSX.Element {
             setSelectedRunId(id);
             setSelectedStageId(null);
           }}
+          onStartRun={handleStartRun}
+          isStartingRun={createRunMutation.isPending}
+          canStartRun={canStartRun}
         />
       )}
 
