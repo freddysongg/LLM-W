@@ -659,7 +659,7 @@ def _stage_training_preparation(
             args=sft_config,
             train_dataset=train_dataset,
             eval_dataset=eval_dataset,
-            tokenizer=tokenizer,
+            processing_class=tokenizer,
             callbacks=[callback],
         )
     except Exception as exc:
