@@ -47,10 +47,22 @@ _PAUSE_REQUESTED = threading.Event()
 
 # Candidate field names tried in order when the configured name is missing
 _INPUT_FIELD_CANDIDATES: list[str] = [
-    "text", "prompt", "instruction", "input", "query", "question", "content", "context"
+    "text",
+    "prompt",
+    "instruction",
+    "input",
+    "query",
+    "question",
+    "content",
+    "context",
 ]
 _TARGET_FIELD_CANDIDATES: list[str] = [
-    "response", "output", "answer", "target", "completion", "label"
+    "response",
+    "output",
+    "answer",
+    "target",
+    "completion",
+    "label",
 ]
 
 
@@ -584,6 +596,7 @@ def _stage_training_preparation(
     resume_from_checkpoint: str | None,
     run_id: str,
     heartbeat_state: dict[str, Any],
+    device: str,
 ) -> Any:
     stage_name = "training_preparation"
     _emit_stage_enter(stage_name=stage_name, stage_order=7)
@@ -594,6 +607,20 @@ def _stage_training_preparation(
 
     checkpoints_dir = project_dir / "checkpoints"
     checkpoints_dir.mkdir(parents=True, exist_ok=True)
+
+    mixed_precision: str = optimization_cfg.get("mixed_precision", "no")
+    if mixed_precision in ("bf16", "fp16") and device != "cuda":
+        _emit_log(
+            severity="warning",
+            message=(
+                f"{mixed_precision} requested but no CUDA GPU available"
+                f" (device={device}), falling back to no mixed precision"
+            ),
+            stage=stage_name,
+        )
+        mixed_precision = "no"
+
+    is_cpu = device == "cpu"
 
     try:
         from trl import SFTConfig, SFTTrainer  # noqa: PLC0415
@@ -613,6 +640,9 @@ def _stage_training_preparation(
             warmup_ratio=optimization_cfg.get("warmup_ratio", 0.03),
             lr_scheduler_type=optimization_cfg.get("scheduler", "cosine"),
             gradient_checkpointing=optimization_cfg.get("gradient_checkpointing", True),
+            fp16=mixed_precision == "fp16",
+            bf16=mixed_precision == "bf16",
+            use_cpu=is_cpu,
             report_to="none",
             resume_from_checkpoint=resume_from_checkpoint,
             max_length=raw_config.get("preprocessing", {}).get("max_seq_length", 512),
@@ -835,6 +865,7 @@ def main() -> int:
             resume_from_checkpoint=resume_from_checkpoint,
             run_id=run_id,
             heartbeat_state=heartbeat_state,
+            device=device,
         )
         if _CANCEL_REQUESTED.is_set():
             _emit_complete(status="cancelled", final_metrics=final_metrics)
