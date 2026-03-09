@@ -91,3 +91,15 @@ class RunCompareResponse(BaseModel):
     config_diff: dict[str, object]
     metric_comparison: dict[str, dict[str, RunMetricSummary]]
     artifact_comparison: dict[str, RunArtifactCompareSummary]
+
+
+class CheckpointResponse(BaseModel):
+    id: str
+    run_id: str
+    project_id: str
+    step: int | None
+    file_path: str
+    file_size_bytes: int | None
+    metadata_json: str | None
+    is_retained: bool
+    created_at: str

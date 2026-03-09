@@ -23,6 +23,7 @@ from app.models.project import Project
 from app.models.run import Run
 from app.models.run_stage import RunStage
 from app.schemas.run import (
+    CheckpointResponse,
     RunArtifactCompareSummary,
     RunCompareResponse,
     RunCreate,
@@ -68,9 +69,7 @@ async def list_runs(
     )
 
 
-async def get_run(
-    *, session: AsyncSession, run_id: str, project_id: str | None = None
-) -> Run:
+async def get_run(*, session: AsyncSession, run_id: str, project_id: str | None = None) -> Run:
     query = select(Run).where(Run.id == run_id)
     if project_id is not None:
         query = query.where(Run.project_id == project_id)
@@ -81,9 +80,7 @@ async def get_run(
     return run
 
 
-async def create_run(
-    *, session: AsyncSession, project_id: str, payload: RunCreate
-) -> Run:
+async def create_run(*, session: AsyncSession, project_id: str, payload: RunCreate) -> Run:
     project_result = await session.execute(select(Project).where(Project.id == project_id))
     if project_result.scalar_one_or_none() is None:
         raise ProjectNotFoundError(project_id)
@@ -148,9 +145,7 @@ async def pause_run(*, session: AsyncSession, run_id: str, project_id: str) -> R
     return run
 
 
-async def resume_run(
-    *, session: AsyncSession, run_id: str, project_id: str
-) -> RunResumeResponse:
+async def resume_run(*, session: AsyncSession, run_id: str, project_id: str) -> RunResumeResponse:
     run = await get_run(session=session, run_id=run_id, project_id=project_id)
     if run.status not in _RESUMABLE_STATUSES:
         raise RunStateError(run_id=run_id, action="resume", current_status=run.status)
@@ -195,9 +190,7 @@ async def resume_run(
     )
 
 
-async def get_run_stages(
-    *, session: AsyncSession, run_id: str
-) -> list[RunStageResponse]:
+async def get_run_stages(*, session: AsyncSession, run_id: str) -> list[RunStageResponse]:
     result = await session.execute(
         select(RunStage).where(RunStage.run_id == run_id).order_by(RunStage.stage_order)
     )
@@ -280,6 +273,32 @@ def get_run_logs(
     return RunLogsResponse(lines=page, total=total, has_more=(offset + limit) < total)
 
 
+async def list_checkpoints(
+    *, session: AsyncSession, run_id: str, project_id: str
+) -> list[CheckpointResponse]:
+    await get_run(session=session, run_id=run_id, project_id=project_id)
+    result = await session.execute(
+        select(Artifact)
+        .where(Artifact.run_id == run_id, Artifact.artifact_type == "checkpoint")
+        .order_by(Artifact.created_at)
+    )
+    artifacts = list(result.scalars().all())
+    return [
+        CheckpointResponse(
+            id=a.id,
+            run_id=a.run_id,
+            project_id=a.project_id,
+            step=_extract_step_from_checkpoint_path(a.file_path),
+            file_path=a.file_path,
+            file_size_bytes=a.file_size_bytes,
+            metadata_json=a.metadata_json,
+            is_retained=bool(a.is_retained),
+            created_at=a.created_at,
+        )
+        for a in artifacts
+    ]
+
+
 async def compare_runs(
     *,
     session: AsyncSession,
@@ -314,9 +333,7 @@ async def compare_runs(
     metric_comparison: dict[str, dict[str, RunMetricSummary]] = {}
     for run in runs:
         metrics_result = await session.execute(
-            select(MetricPoint)
-            .where(MetricPoint.run_id == run.id)
-            .order_by(MetricPoint.step)
+            select(MetricPoint).where(MetricPoint.run_id == run.id).order_by(MetricPoint.step)
         )
         metric_points = list(metrics_result.scalars().all())
         by_name: dict[str, list[MetricPoint]] = {}
@@ -341,9 +358,7 @@ async def compare_runs(
             )
         )
         checkpoints = list(artifacts_result.scalars().all())
-        total_bytes = sum(
-            a.file_size_bytes for a in checkpoints if a.file_size_bytes is not None
-        )
+        total_bytes = sum(a.file_size_bytes for a in checkpoints if a.file_size_bytes is not None)
         artifact_comparison[run.id] = RunArtifactCompareSummary(
             checkpoints=len(checkpoints),
             total_size_mb=round(total_bytes / (1024 * 1024), 2),
@@ -360,7 +375,7 @@ async def compare_runs(
 def _extract_step_from_checkpoint_path(checkpoint_path: str) -> int | None:
     name = Path(checkpoint_path).name
     if name.startswith("checkpoint-"):
-        step_str = name[len("checkpoint-"):]
+        step_str = name[len("checkpoint-") :]
         if step_str.isdigit():
             return int(step_str)
     return None

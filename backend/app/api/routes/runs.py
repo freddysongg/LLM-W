@@ -15,6 +15,7 @@ from app.core.exceptions import (
 )
 from app.schemas.metric import MetricPointResponse
 from app.schemas.run import (
+    CheckpointResponse,
     RunCompareResponse,
     RunCreate,
     RunListResponse,
@@ -244,6 +245,25 @@ async def get_run_metrics(
         limit=limit,
     )
     return [MetricPointResponse.model_validate(mp) for mp in metric_points]
+
+
+@router.get("/{project_id}/runs/{run_id}/checkpoints", response_model=list[CheckpointResponse])
+async def list_checkpoints(
+    project_id: str,
+    run_id: str,
+    session: DbSession,
+) -> list[CheckpointResponse]:
+    try:
+        return await run_service.list_checkpoints(
+            session=session,
+            run_id=run_id,
+            project_id=project_id,
+        )
+    except RunNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "RUN_NOT_FOUND", "message": str(exc), "details": {}},
+        ) from exc
 
 
 @router.get("/{project_id}/runs/{run_id}/logs", response_model=RunLogsResponse)
