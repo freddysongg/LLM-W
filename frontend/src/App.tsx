@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { Toaster } from "@/components/ui/toaster";
 import { AppShell } from "@/components/layout/app-shell";
 import DashboardPage from "@/pages/dashboard-page";
 import ProjectsPage from "@/pages/projects-page";
@@ -44,6 +45,7 @@ export default function App(): React.JSX.Element {
           </Route>
         </Routes>
       </BrowserRouter>
+      <Toaster />
     </QueryClientProvider>
   );
 }

@@ -6,6 +6,7 @@ import { TrainingForm } from "@/components/training/training-form";
 import { NoProjectSelected } from "@/components/shared/no-project-selected";
 import type { TrainingConfig, WorkbenchConfig } from "@/types/config";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
 
 export default function TrainingPage(): React.JSX.Element {
   const { activeProjectId } = useAppStore();
@@ -17,6 +18,7 @@ export default function TrainingPage(): React.JSX.Element {
     projectId: activeProjectId ?? "",
   });
   const saveConfig = useSaveConfig({ projectId: activeProjectId ?? "" });
+  const { toast } = useToast();
 
   const [localTraining, setLocalTraining] = React.useState<TrainingConfig | null>(null);
 
@@ -42,13 +44,30 @@ export default function TrainingPage(): React.JSX.Element {
   const handleSave = (): void => {
     if (!parsedConfig || !localTraining || !configVersion) return;
     const updated: WorkbenchConfig = { ...parsedConfig, training: localTraining };
-    saveConfig.mutate({
-      request: {
-        projectId: activeProjectId ?? "",
-        yamlContent: stringifyYaml(updated),
-        sourceTag: "user",
+    saveConfig.mutate(
+      {
+        request: {
+          projectId: activeProjectId ?? "",
+          yamlContent: stringifyYaml(updated),
+          sourceTag: "user",
+        },
       },
-    });
+      {
+        onSuccess: () => {
+          toast({
+            title: "Config saved",
+            description: "Training configuration saved successfully.",
+          });
+        },
+        onError: () => {
+          toast({
+            title: "Save failed",
+            description: "Failed to save training configuration.",
+            variant: "destructive",
+          });
+        },
+      },
+    );
   };
 
   if (!activeProjectId) {
