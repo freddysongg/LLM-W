@@ -3,6 +3,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { useAppStore } from "@/stores/app-store";
 import { useActiveConfig, useSaveConfig } from "@/hooks/useConfigs";
 import { TrainingForm } from "@/components/training/training-form";
+import { NoProjectSelected } from "@/components/shared/no-project-selected";
 import type { TrainingConfig, WorkbenchConfig } from "@/types/config";
 import { Button } from "@/components/ui/button";
 
@@ -52,10 +53,10 @@ export default function TrainingPage(): React.JSX.Element {
 
   if (!activeProjectId) {
     return (
-      <div className="p-6">
-        <h1 className="text-xl font-semibold mb-2">Training</h1>
-        <p className="text-sm text-muted-foreground">Select a project to configure training.</p>
-      </div>
+      <NoProjectSelected
+        pageTitle="Training"
+        description="Select a project on the Dashboard to configure its training settings."
+      />
     );
   }
 
