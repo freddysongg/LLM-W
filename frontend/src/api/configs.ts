@@ -1,5 +1,5 @@
 import type { ConfigVersion, SaveConfigRequest, ConfigDiff, ConfigSourceTag } from "@/types/config";
-import { fetchApi } from "./client";
+import { fetchApi, fetchTextApi } from "./client";
 
 interface RawConfigDiff {
   readonly added?: Record<string, unknown>;
@@ -78,7 +78,11 @@ export async function fetchActiveConfig({
   const raw = await fetchApi<RawConfigVersion>({
     path: `/projects/${projectId}/configs/active`,
   });
-  return normalizeConfigVersion(raw);
+  const version = normalizeConfigVersion(raw);
+  const yamlBlob = await fetchTextApi({
+    path: `/projects/${projectId}/configs/${version.id}/yaml`,
+  });
+  return { ...version, yamlBlob };
 }
 
 export async function fetchConfigVersions({
@@ -173,5 +177,5 @@ export async function fetchConfigYaml({
   projectId: string;
   versionId: string;
 }): Promise<string> {
-  return fetchApi<string>({ path: `/projects/${projectId}/configs/${versionId}/yaml` });
+  return fetchTextApi({ path: `/projects/${projectId}/configs/${versionId}/yaml` });
 }

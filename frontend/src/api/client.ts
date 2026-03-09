@@ -80,3 +80,32 @@ export async function fetchApi<T>({
 
   return response.json() as Promise<T>;
 }
+
+export async function fetchTextApi({ path }: { path: string }): Promise<string> {
+  const response = await fetch(`${API_BASE_URL}${path}`);
+
+  if (!response.ok) {
+    let code = "UNKNOWN_ERROR";
+    let message = response.statusText;
+    let details: Record<string, unknown> = {};
+
+    try {
+      const errorBody = (await response.json()) as ApiErrorBody;
+      code = errorBody.error.code;
+      message = errorBody.error.message;
+      details = errorBody.error.details;
+    } catch {
+      // Non-JSON error body — use defaults
+    }
+
+    throw new ApiError({
+      status: response.status,
+      statusText: response.statusText,
+      code,
+      message,
+      details,
+    });
+  }
+
+  return response.text();
+}
