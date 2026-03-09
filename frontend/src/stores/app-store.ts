@@ -12,11 +12,23 @@ export type NavGroupKey = "overview" | "modelData" | "training" | "execution" | 
 
 type NavGroupExpandedState = Record<NavGroupKey, boolean>;
 
+interface DrawerContext {
+  readonly content: Exclude<DrawerContent, null>;
+  readonly projectId?: string | null;
+  readonly runId?: string | null;
+  readonly layerName?: string | null;
+  readonly suggestionId?: string | null;
+}
+
 interface AppState {
   readonly activeProjectId: string | null;
   readonly isSidebarCollapsed: boolean;
   readonly isRightDrawerOpen: boolean;
   readonly rightDrawerContent: DrawerContent;
+  readonly drawerProjectId: string | null;
+  readonly drawerRunId: string | null;
+  readonly drawerLayerName: string | null;
+  readonly drawerSuggestionId: string | null;
   readonly isBottomPanelVisible: boolean;
   readonly bottomPanelHeight: number;
   readonly navGroupExpanded: NavGroupExpandedState;
@@ -26,7 +38,7 @@ interface AppActions {
   setActiveProjectId: (projectId: string | null) => void;
   toggleSidebar: () => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
-  openRightDrawer: (content: Exclude<DrawerContent, null>) => void;
+  openRightDrawer: (context: DrawerContext) => void;
   closeRightDrawer: () => void;
   toggleBottomPanel: () => void;
   setBottomPanelHeight: (height: number) => void;
@@ -50,6 +62,10 @@ export const useAppStore = create<AppStore>()(
       isSidebarCollapsed: false,
       isRightDrawerOpen: false,
       rightDrawerContent: null,
+      drawerProjectId: null,
+      drawerRunId: null,
+      drawerLayerName: null,
+      drawerSuggestionId: null,
       isBottomPanelVisible: true,
       bottomPanelHeight: 200,
       navGroupExpanded: DEFAULT_NAV_GROUP_EXPANDED,
@@ -57,8 +73,24 @@ export const useAppStore = create<AppStore>()(
       setActiveProjectId: (projectId) => set({ activeProjectId: projectId }),
       toggleSidebar: () => set((state) => ({ isSidebarCollapsed: !state.isSidebarCollapsed })),
       setSidebarCollapsed: (collapsed) => set({ isSidebarCollapsed: collapsed }),
-      openRightDrawer: (content) => set({ isRightDrawerOpen: true, rightDrawerContent: content }),
-      closeRightDrawer: () => set({ isRightDrawerOpen: false, rightDrawerContent: null }),
+      openRightDrawer: ({ content, projectId = null, runId = null, layerName = null, suggestionId = null }) =>
+        set({
+          isRightDrawerOpen: true,
+          rightDrawerContent: content,
+          drawerProjectId: projectId,
+          drawerRunId: runId,
+          drawerLayerName: layerName,
+          drawerSuggestionId: suggestionId,
+        }),
+      closeRightDrawer: () =>
+        set({
+          isRightDrawerOpen: false,
+          rightDrawerContent: null,
+          drawerProjectId: null,
+          drawerRunId: null,
+          drawerLayerName: null,
+          drawerSuggestionId: null,
+        }),
       toggleBottomPanel: () =>
         set((state) => ({ isBottomPanelVisible: !state.isBottomPanelVisible })),
       setBottomPanelHeight: (height) => set({ bottomPanelHeight: height }),

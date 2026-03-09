@@ -8,16 +8,9 @@ import type {
   LogBatchPayload,
   ResourceUpdatePayload,
   CheckpointSavedPayload,
-  StageEnteredPayload,
-  StageCompletedPayload,
-  StageFailedPayload,
   ProgressUpdatePayload,
-  RunCompletedPayload,
-  RunFailedPayload,
-  RunPausedPayload,
-  RunCancelledPayload,
 } from "@/types/websocket";
-import type { MetricPoint, RunStage } from "@/types/run";
+import type { MetricPoint } from "@/types/run";
 import type { LogEntry, Checkpoint } from "@/types/run";
 
 interface LiveMetrics {

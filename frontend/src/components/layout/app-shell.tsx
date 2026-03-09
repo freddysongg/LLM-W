@@ -13,7 +13,7 @@ export function AppShell(): React.JSX.Element {
     if (isRightDrawerOpen) {
       useAppStore.getState().closeRightDrawer();
     } else {
-      openRightDrawer(rightDrawerContent ?? "run-detail");
+      openRightDrawer({ content: rightDrawerContent ?? "run-detail" });
     }
   };
 

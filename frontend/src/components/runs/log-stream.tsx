@@ -8,7 +8,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface LogStreamProps {
   readonly logs: ReadonlyArray<LogEntry>;
