@@ -615,7 +615,7 @@ def _stage_training_preparation(
             gradient_checkpointing=optimization_cfg.get("gradient_checkpointing", True),
             report_to="none",
             resume_from_checkpoint=resume_from_checkpoint,
-            max_seq_length=raw_config.get("preprocessing", {}).get("max_seq_length", 512),
+            max_length=raw_config.get("preprocessing", {}).get("max_seq_length", 512),
         )
 
         callback = WorkbenchCallback(
