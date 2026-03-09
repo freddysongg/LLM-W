@@ -162,6 +162,16 @@ export const useAppStore = create<AppStore>()(
     }),
     {
       name: "app-store",
+      version: 2,
+      migrate: (persisted, version) => {
+        const state = persisted as Partial<AppState>;
+        // v1 → v2: datasetForm gained trainRatio/valRatio/testRatio; reset to defaults
+        // to avoid stale trainSplit or missing fields being coerced by the backend
+        if (version < 2) {
+          return { ...state, datasetForm: DEFAULT_DATASET_FORM };
+        }
+        return state as AppState;
+      },
       partialize: (state) => ({
         activeProjectId: state.activeProjectId,
         navGroupExpanded: state.navGroupExpanded,
