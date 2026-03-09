@@ -1,4 +1,5 @@
 import * as React from "react";
+import { Loader2 } from "lucide-react";
 import { useAppStore } from "@/stores/app-store";
 import { useModelArchitecture, useLayerDetail } from "@/hooks/useModelArchitecture";
 import { useCaptureActivations, useRequestFullTensor } from "@/hooks/useActivations";
@@ -247,7 +248,10 @@ export default function WeightsPage(): React.JSX.Element {
       </div>
 
       {isArchLoading && (
-        <div className="text-sm text-muted-foreground">Loading model architecture…</div>
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading model architecture…
+        </div>
       )}
 
       {!isArchLoading && !architecture && (
