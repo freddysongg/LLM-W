@@ -224,7 +224,11 @@ def _resolve_local(
 
 
 async def _write_resolved_dataset_to_config(
-    *, session: AsyncSession, project_id: str, profile: DatasetProfile
+    *,
+    session: AsyncSession,
+    project_id: str,
+    profile: DatasetProfile,
+    request: DatasetResolveRequest,
 ) -> None:
     """Persist resolved dataset_id and source into the active config YAML version."""
     active = await config_service.get_active_config_version(session=session, project_id=project_id)
@@ -235,6 +239,16 @@ async def _write_resolved_dataset_to_config(
     dataset_section: dict[str, Any] = parsed.setdefault("dataset", {})
     dataset_section["dataset_id"] = profile.dataset_id
     dataset_section["source"] = profile.source
+    dataset_section["train_split"] = request.train_split
+    if request.eval_split is not None:
+        dataset_section["eval_split"] = request.eval_split
+    else:
+        dataset_section.pop("eval_split", None)
+    if request.max_samples is not None:
+        dataset_section["max_samples"] = request.max_samples
+    else:
+        dataset_section.pop("max_samples", None)
+    dataset_section.pop("filter_expression", None)
     updated_yaml = yaml.dump(parsed, default_flow_style=False, allow_unicode=True, sort_keys=False)
     new_version = await config_service.create_config_version(
         session=session,
@@ -267,6 +281,9 @@ async def resolve_dataset(
         rows = _resolve_local(dataset_id=request.dataset_id, source=request.source)
         split_counts = SplitCounts(train=len(rows))
 
+    if request.max_samples is not None and len(rows) > request.max_samples:
+        rows = rows[: request.max_samples]
+
     detected_format = request.format if request.format != "default" else _detect_format(rows)
     detected_fields = _collect_fields(rows)
     token_stats = _compute_token_stats(rows)
@@ -292,7 +309,7 @@ async def resolve_dataset(
     _samples[project_id] = rows
     try:
         await _write_resolved_dataset_to_config(
-            session=session, project_id=project_id, profile=profile
+            session=session, project_id=project_id, profile=profile, request=request
         )
     except ConfigVersionNotFoundError:
         _profiles.pop(project_id, None)

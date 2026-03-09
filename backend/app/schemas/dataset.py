@@ -11,6 +11,7 @@ class DatasetResolveRequest(BaseModel):
     subset: str | None = None
     train_split: str = "train"
     eval_split: str | None = "validation"
+    max_samples: int | None = None
     format: Literal["default", "sharegpt", "openai", "alpaca", "custom"] = "default"
     format_mapping: dict[str, str] | None = None
 

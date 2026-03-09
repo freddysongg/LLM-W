@@ -29,7 +29,6 @@ class DatasetConfig(BaseModel):
     target_field: str = "response"
     format: Literal["default", "sharegpt", "openai", "alpaca", "custom"] = "default"
     format_mapping: dict[str, str] | None = None
-    filter_expression: str | None = None
     max_samples: int | None = None
     subset: str | None = None
 
