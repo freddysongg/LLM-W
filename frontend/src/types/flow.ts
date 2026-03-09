@@ -1,6 +1,8 @@
 export interface FlowNode {
   readonly fullPath: string;
   readonly name: string;
+  readonly depth: number;
+  readonly isGroupHeader: boolean;
   readonly type: string;
   readonly params: number | null;
   readonly shape: ReadonlyArray<number> | null;
