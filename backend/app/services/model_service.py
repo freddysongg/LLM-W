@@ -5,13 +5,18 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+import yaml
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.adapters.causal_lm import CausalLMAdapter
 from app.core.exceptions import (
     ActivationSnapshotNotFoundError,
+    ConfigVersionNotFoundError,
     LayerNotFoundError,
     ModelNotResolvedError,
     ModelResolveError,
 )
+from app.schemas.config_version import ConfigVersionCreate
 from app.schemas.model import (
     ActivationCaptureRequest,
     ActivationLayerSnapshot,
@@ -26,6 +31,7 @@ from app.schemas.model import (
     TierOneStats,
     WeightDeltaResponse,
 )
+from app.services import config_service, project_service
 from app.services.introspection import (
     build_architecture_from_config,
     build_architecture_response,
@@ -114,7 +120,38 @@ def _resolve_model_sync(*, project_id: str, request: ModelResolveRequest) -> Mod
     )
 
 
-async def resolve_model(*, project_id: str, request: ModelResolveRequest) -> ModelProfile:
+async def _write_resolved_model_to_config(
+    *, session: AsyncSession, project_id: str, profile: ModelProfile
+) -> None:
+    """Persist resolved model_id and source into the active config YAML version."""
+    active = await config_service.get_active_config_version(
+        session=session, project_id=project_id
+    )
+    raw_yaml = await config_service.get_config_yaml(
+        session=session, project_id=project_id, version_id=active.id
+    )
+    parsed: dict[str, Any] = yaml.safe_load(raw_yaml) or {}
+    model_section: dict[str, Any] = parsed.setdefault("model", {})
+    model_section["model_id"] = profile.model_id
+    model_section["source"] = profile.source
+    updated_yaml = yaml.dump(parsed, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    new_version = await config_service.create_config_version(
+        session=session,
+        project_id=project_id,
+        payload=ConfigVersionCreate(
+            yaml_content=updated_yaml,
+            source_tag="system",
+            source_detail=f"model resolved: {profile.model_id}",
+        ),
+    )
+    await project_service.set_active_config_version(
+        session=session, project_id=project_id, config_version_id=new_version.id
+    )
+
+
+async def resolve_model(
+    *, project_id: str, request: ModelResolveRequest, session: AsyncSession
+) -> ModelProfile:
     # Clear stale architecture cache so re-resolving a different model updates the response
     _architecture_cache.pop(project_id, None)
     loop = asyncio.get_event_loop()
@@ -123,6 +160,13 @@ async def resolve_model(*, project_id: str, request: ModelResolveRequest) -> Mod
         lambda: _resolve_model_sync(project_id=project_id, request=request),
     )
     _profiles[project_id] = profile
+    try:
+        await _write_resolved_model_to_config(
+            session=session, project_id=project_id, profile=profile
+        )
+    except ConfigVersionNotFoundError:
+        _profiles.pop(project_id, None)
+        raise
     return profile
 
 
