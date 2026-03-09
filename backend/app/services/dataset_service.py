@@ -248,7 +248,6 @@ async def _write_resolved_dataset_to_config(
         dataset_section["max_samples"] = request.max_samples
     else:
         dataset_section.pop("max_samples", None)
-    dataset_section.pop("filter_expression", None)
     updated_yaml = yaml.dump(parsed, default_flow_style=False, allow_unicode=True, sort_keys=False)
     new_version = await config_service.create_config_version(
         session=session,

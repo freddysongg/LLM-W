@@ -9,7 +9,7 @@ import { DatasetSourceSelector } from "@/components/dataset/dataset-source-selec
 import { DatasetIdInput } from "@/components/dataset/dataset-id-input";
 import { FormatSelector } from "@/components/dataset/format-selector";
 import { FieldMappingEditor } from "@/components/dataset/field-mapping-editor";
-import { FilterExpressionInput } from "@/components/dataset/filter-expression-input";
+import { DatasetSubsetSelector } from "@/components/dataset/dataset-subset-selector";
 import { DatasetResolveButton } from "@/components/dataset/dataset-resolve-button";
 import { SplitInfoCards } from "@/components/dataset/split-info-cards";
 import { SamplePreview } from "@/components/dataset/sample-preview";
@@ -53,11 +53,12 @@ export default function DatasetsPage(): React.JSX.Element {
       source: datasetForm.source,
       datasetId: datasetForm.datasetId,
       subset: null,
-      trainSplit: "train",
-      evalSplit: "validation",
+      trainSplit: datasetForm.trainSplit,
+      evalSplit: datasetForm.evalSplit,
       format: datasetForm.format,
       formatMapping:
         Object.keys(datasetForm.formatMapping).length > 0 ? datasetForm.formatMapping : null,
+      maxSamples: datasetForm.maxSamples,
     };
     resolveDataset.mutate(request);
   };
@@ -119,9 +120,16 @@ export default function DatasetsPage(): React.JSX.Element {
             />
           )}
 
-          <FilterExpressionInput
-            value={datasetForm.filterExpression}
-            onChange={(filterExpression) => setDatasetForm({ filterExpression })}
+          <DatasetSubsetSelector
+            trainSplit={datasetForm.trainSplit}
+            evalSplit={datasetForm.evalSplit}
+            sampleMode={datasetForm.sampleMode}
+            maxSamples={datasetForm.maxSamples}
+            totalRows={profile?.totalRows ?? null}
+            onTrainSplitChange={(trainSplit) => setDatasetForm({ trainSplit })}
+            onEvalSplitChange={(evalSplit) => setDatasetForm({ evalSplit })}
+            onSampleModeChange={(sampleMode) => setDatasetForm({ sampleMode })}
+            onMaxSamplesChange={(maxSamples) => setDatasetForm({ maxSamples })}
           />
 
           {resolveDataset.error instanceof Error && (
