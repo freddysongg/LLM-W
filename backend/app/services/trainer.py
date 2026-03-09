@@ -402,6 +402,13 @@ def _stage_dataset_resolution(*, raw_config: dict[str, Any], tokenizer: Any) -> 
     train_split = dataset_cfg.get("train_split", "train")
     max_samples = dataset_cfg.get("max_samples")
 
+    if not dataset_id or not dataset_id.strip():
+        error_msg = (
+            "dataset_id is empty — configure a dataset on the Datasets page before starting a run"
+        )
+        _emit_stage_fail(stage_name=stage_name, error=error_msg)
+        raise ValueError(error_msg)
+
     try:
         from datasets import load_dataset  # noqa: PLC0415
 
