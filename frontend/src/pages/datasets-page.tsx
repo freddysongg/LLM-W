@@ -177,7 +177,7 @@ export default function DatasetsPage(): React.JSX.Element {
           </Card>
 
           <PreprocessingPreview
-            format={form.format}
+            format={datasetForm.format}
             isPending={previewTransform.isPending}
             response={previewResponse}
             onPreview={handlePreviewTransform}
