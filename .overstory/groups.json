@@ -165,5 +165,16 @@
 		"status": "active",
 		"createdAt": "2026-03-09T01:37:11.721Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-a796cebe",
+		"name": "toast-and-flow-fixes",
+		"memberIssueIds": [
+			"llm-interactive-f873",
+			"llm-interactive-1778"
+		],
+		"status": "active",
+		"createdAt": "2026-03-09T02:03:52.187Z",
+		"completedAt": null
 	}
 ]
