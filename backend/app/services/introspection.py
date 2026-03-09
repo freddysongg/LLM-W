@@ -201,3 +201,21 @@ def count_parameters_from_config(hf_config: Any) -> tuple[int, int]:
     total = sum(p.numel() for p in meta_model.parameters())
     trainable = sum(p.numel() for p in meta_model.parameters() if p.requires_grad)
     return total, trainable
+
+
+def build_architecture_from_config(*, hf_config: Any, model_id: str) -> ModelArchitectureResponse:
+    """
+    Build an architecture response using a meta-device model.
+
+    Meta-device instantiation creates the full module hierarchy with correct shapes and dtypes
+    but loads no weight data, making this cheap enough to call at resolve time.
+    """
+    try:
+        import torch
+        from transformers import AutoModelForCausalLM
+    except ImportError as exc:
+        raise RuntimeError("torch and transformers are required for architecture building.") from exc
+
+    with torch.device("meta"):
+        meta_model = AutoModelForCausalLM.from_config(hf_config)
+    return build_architecture_response(model=meta_model, model_id=model_id)
