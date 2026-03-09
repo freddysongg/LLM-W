@@ -153,5 +153,17 @@
 		"status": "active",
 		"createdAt": "2026-03-09T01:13:04.799Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-2841b7fa",
+		"name": "ui-polish-3",
+		"memberIssueIds": [
+			"llm-interactive-b29b",
+			"llm-interactive-644f",
+			"llm-interactive-c58e"
+		],
+		"status": "active",
+		"createdAt": "2026-03-09T01:37:11.721Z",
+		"completedAt": null
 	}
 ]
