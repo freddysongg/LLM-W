@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import signal as _signal
 import sys
 import uuid
@@ -604,6 +605,7 @@ async def _run_trainer_subprocess(
 ) -> None:
     cmd = [
         sys.executable,
+        "-u",
         "-m",
         "app.services.trainer",
         "--run-id",
@@ -621,11 +623,13 @@ async def _run_trainer_subprocess(
     await _update_run_status(run_id=run_id, status="running")
 
     try:
+        subprocess_env = {**os.environ, "PYTHONUNBUFFERED": "1"}
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=str(Path(__file__).parent.parent.parent),
+            env=subprocess_env,
         )
         _active_processes[run_id] = proc
 
