@@ -119,5 +119,15 @@
 		"status": "active",
 		"createdAt": "2026-03-08T20:40:26.080Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-bf1da973",
+		"name": "training-screens-fix",
+		"memberIssueIds": [
+			"llm-interactive-133f"
+		],
+		"status": "active",
+		"createdAt": "2026-03-09T00:38:27.653Z",
+		"completedAt": null
 	}
 ]
