@@ -493,6 +493,15 @@ def _stage_tokenization_preprocessing(
     input_field = dataset_cfg.get("input_field", "prompt")
     target_field = dataset_cfg.get("target_field", "response")
 
+    available_columns: list[str] = list(train_dataset.column_names)
+    if input_field not in available_columns:
+        error_msg = (
+            f"input_field '{input_field}' not found in dataset columns {available_columns}. "
+            f"Update the Datasets page to set the correct input field name."
+        )
+        _emit_stage_fail(stage_name=stage_name, error=error_msg)
+        raise ValueError(error_msg)
+
     def _tokenize(batch: dict[str, list[Any]]) -> dict[str, list[Any]]:
         inputs = batch.get(input_field, [])
         targets = batch.get(target_field, inputs)
