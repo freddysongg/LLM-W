@@ -635,6 +635,8 @@ async def _run_trainer_subprocess(
         final_metrics: dict[str, float] = {}
         terminal_status = ""
         log_buffer: list[dict[str, str]] = []
+        captured_failure_reason: str = ""
+        captured_failure_stage: str = ""
 
         # Read stdout line by line
         assert proc.stdout is not None
@@ -659,6 +661,8 @@ async def _run_trainer_subprocess(
                             run_id=run_id, project_id=project_id, log_buffer=log_buffer
                         )
                 elif event_type == "error":
+                    captured_failure_reason = event.get("message", "unknown error")
+                    captured_failure_stage = event.get("stage", captured_failure_stage)
                     log_buffer.append(
                         {
                             "severity": "error",
@@ -672,6 +676,9 @@ async def _run_trainer_subprocess(
                             run_id=run_id, project_id=project_id, log_buffer=log_buffer
                         )
                 else:
+                    if event_type == "stage_fail":
+                        captured_failure_stage = event.get("stage_name", captured_failure_stage)
+                        captured_failure_reason = event.get("error", captured_failure_reason)
                     # Non-log event: flush pending log buffer before processing
                     await _flush_log_batch(
                         run_id=run_id, project_id=project_id, log_buffer=log_buffer
@@ -704,8 +711,21 @@ async def _run_trainer_subprocess(
         await proc.wait()
         _active_processes.pop(run_id, None)
 
+        stderr_output = ""
+        if proc.stderr is not None:
+            stderr_bytes = await proc.stderr.read()
+            stderr_output = stderr_bytes.decode("utf-8", errors="replace").strip()
+            if stderr_output:
+                logger.warning("Trainer stderr for run %s:\n%s", run_id, stderr_output)
+
         if not terminal_status:
             terminal_status = "completed" if proc.returncode == 0 else "failed"
+
+        if terminal_status == "failed" and not captured_failure_reason:
+            if stderr_output:
+                captured_failure_reason = stderr_output[-2000:]
+            else:
+                captured_failure_reason = f"Trainer process exited with code {proc.returncode}"
 
         now = datetime.now(UTC).isoformat()
         if terminal_status == "completed":
@@ -741,7 +761,8 @@ async def _run_trainer_subprocess(
             await _update_run_status(
                 run_id=run_id,
                 status="failed",
-                failure_reason="Trainer process exited with non-zero status",
+                failure_reason=captured_failure_reason,
+                failure_stage=captured_failure_stage or None,
             )
             await event_bus.publish(
                 event_type=f"project.{project_id}.ws",
@@ -752,8 +773,8 @@ async def _run_trainer_subprocess(
                     "timestamp": now,
                     "payload": {
                         "run_id": run_id,
-                        "failure_reason": "Trainer process exited with non-zero status",
-                        "failure_stage": None,
+                        "failure_reason": captured_failure_reason,
+                        "failure_stage": captured_failure_stage or None,
                         "last_step": 0,
                     },
                 },
