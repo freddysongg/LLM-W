@@ -7,6 +7,7 @@ import { TrainingPresetsPanel } from "@/components/training/training-presets-pan
 import { NoProjectSelected } from "@/components/shared/no-project-selected";
 import { CopyForAI } from "@/components/shared/copy-for-ai";
 import { buildTrainingPrompt } from "@/lib/ai-copy-prompts";
+import { normalizeYamlConfig, denormalizeYamlConfig } from "@/lib/yaml-config";
 import type { TrainingConfig, WorkbenchConfig } from "@/types/config";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -28,7 +29,7 @@ export default function TrainingPage(): React.JSX.Element {
   const parsedConfig = React.useMemo((): WorkbenchConfig | null => {
     if (!configVersion?.yamlBlob) return null;
     try {
-      return parseYaml(configVersion.yamlBlob) as WorkbenchConfig;
+      return normalizeYamlConfig<WorkbenchConfig>(parseYaml(configVersion.yamlBlob));
     } catch {
       return null;
     }
@@ -51,7 +52,7 @@ export default function TrainingPage(): React.JSX.Element {
       {
         request: {
           projectId: activeProjectId ?? "",
-          yamlContent: stringifyYaml(updated),
+          yamlContent: stringifyYaml(denormalizeYamlConfig(updated)),
           sourceTag: "user",
         },
       },

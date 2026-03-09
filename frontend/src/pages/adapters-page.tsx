@@ -9,6 +9,7 @@ import { TrainableParamsPreview } from "@/components/adapters/trainable-params-p
 import { NoProjectSelected } from "@/components/shared/no-project-selected";
 import { CopyForAI } from "@/components/shared/copy-for-ai";
 import { buildAdaptersPrompt } from "@/lib/ai-copy-prompts";
+import { normalizeYamlConfig, denormalizeYamlConfig } from "@/lib/yaml-config";
 import type {
   AdaptersConfig,
   OptimizationConfig,
@@ -37,7 +38,7 @@ export default function AdaptersPage(): React.JSX.Element {
   const parsedConfig = React.useMemo((): WorkbenchConfig | null => {
     if (!configVersion?.yamlBlob) return null;
     try {
-      return parseYaml(configVersion.yamlBlob) as WorkbenchConfig;
+      return normalizeYamlConfig<WorkbenchConfig>(parseYaml(configVersion.yamlBlob));
     } catch {
       return null;
     }
@@ -66,7 +67,7 @@ export default function AdaptersPage(): React.JSX.Element {
       {
         request: {
           projectId: activeProjectId ?? "",
-          yamlContent: stringifyYaml(updated),
+          yamlContent: stringifyYaml(denormalizeYamlConfig(updated)),
           sourceTag: "user",
         },
       },
