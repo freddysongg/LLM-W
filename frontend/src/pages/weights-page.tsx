@@ -20,6 +20,7 @@ import { CheckpointBackupNotice } from "@/components/weights/checkpoint-backup-n
 import { RevertButton } from "@/components/weights/revert-button";
 import { FlowVisualization } from "@/components/weights/flow-visualization";
 import { flattenToFlowColumns } from "@/lib/flatten-to-flow-columns";
+import { NoProjectSelected } from "@/components/shared/no-project-selected";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { FlowMode } from "@/types/flow";
 import type {
@@ -207,10 +208,10 @@ export default function WeightsPage(): React.JSX.Element {
 
   if (!activeProjectId) {
     return (
-      <div className="p-6">
-        <h1 className="text-xl font-semibold mb-2">Weights & Architecture</h1>
-        <p className="text-sm text-muted-foreground">Select a project to explore its model.</p>
-      </div>
+      <NoProjectSelected
+        pageTitle="Weights & Architecture"
+        description="Select a project on the Dashboard to explore its model weights and architecture."
+      />
     );
   }
 

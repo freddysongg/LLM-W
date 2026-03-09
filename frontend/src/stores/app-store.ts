@@ -73,7 +73,13 @@ export const useAppStore = create<AppStore>()(
       setActiveProjectId: (projectId) => set({ activeProjectId: projectId }),
       toggleSidebar: () => set((state) => ({ isSidebarCollapsed: !state.isSidebarCollapsed })),
       setSidebarCollapsed: (collapsed) => set({ isSidebarCollapsed: collapsed }),
-      openRightDrawer: ({ content, projectId = null, runId = null, layerName = null, suggestionId = null }) =>
+      openRightDrawer: ({
+        content,
+        projectId = null,
+        runId = null,
+        layerName = null,
+        suggestionId = null,
+      }) =>
         set({
           isRightDrawerOpen: true,
           rightDrawerContent: content,
@@ -105,6 +111,7 @@ export const useAppStore = create<AppStore>()(
     {
       name: "app-store",
       partialize: (state) => ({
+        activeProjectId: state.activeProjectId,
         navGroupExpanded: state.navGroupExpanded,
         isSidebarCollapsed: state.isSidebarCollapsed,
       }),

@@ -4,6 +4,7 @@ import { useAppStore } from "@/stores/app-store";
 import { useActiveConfig, useSaveConfig } from "@/hooks/useConfigs";
 import { AdaptersForm } from "@/components/adapters/adapters-form";
 import { TrainableParamsPreview } from "@/components/adapters/trainable-params-preview";
+import { NoProjectSelected } from "@/components/shared/no-project-selected";
 import type {
   AdaptersConfig,
   OptimizationConfig,
@@ -63,10 +64,10 @@ export default function AdaptersPage(): React.JSX.Element {
 
   if (!activeProjectId) {
     return (
-      <div className="p-6">
-        <h1 className="text-xl font-semibold mb-2">Adapters &amp; Optimization</h1>
-        <p className="text-sm text-muted-foreground">Select a project to configure adapters.</p>
-      </div>
+      <NoProjectSelected
+        pageTitle="Adapters & Optimization"
+        description="Select a project on the Dashboard to configure its adapters and optimization settings."
+      />
     );
   }
 
