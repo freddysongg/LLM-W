@@ -6,6 +6,7 @@ import type { ActivationSnapshotResponse, TierOneStats } from "@/types/model";
 const COLUMN_WIDTH = 220;
 const COLUMN_GAP = 48;
 const NODE_HEIGHT = 32;
+const GROUP_HEADER_HEIGHT = 24;
 const NODE_GAP = 4;
 const COLUMN_HEADER_HEIGHT = 56;
 const COLUMN_PADDING = 12;
@@ -20,10 +21,13 @@ function formatParamCount(params: number): string {
   return String(params);
 }
 
-function columnHeight(nodeCount: number): number {
-  return (
-    COLUMN_HEADER_HEIGHT + COLUMN_PADDING + nodeCount * (NODE_HEIGHT + NODE_GAP) + COLUMN_PADDING
-  );
+function nodeHeight(node: FlowNode): number {
+  return node.isGroupHeader ? GROUP_HEADER_HEIGHT : NODE_HEIGHT;
+}
+
+function columnHeight(nodes: ReadonlyArray<FlowNode>): number {
+  const nodesHeight = nodes.reduce((acc, n) => acc + nodeHeight(n) + NODE_GAP, 0);
+  return COLUMN_HEADER_HEIGHT + COLUMN_PADDING + nodesHeight + COLUMN_PADDING;
 }
 
 function activationColumnHeight(tokenCount: number): number {
@@ -62,6 +66,7 @@ function computeColumnMean(
   layerStats: Map<string, TierOneStats>,
 ): number | null {
   const means = column.nodes
+    .filter((n) => !n.isGroupHeader)
     .map((n) => layerStats.get(n.fullPath)?.mean)
     .filter((v): v is number => v !== undefined);
   if (means.length === 0) return null;
@@ -73,6 +78,7 @@ function computeColumnRepresentativeStats(
   layerStats: Map<string, TierOneStats>,
 ): TierOneStats | null {
   for (const node of column.nodes) {
+    if (node.isGroupHeader) continue;
     const stats = layerStats.get(node.fullPath);
     if (stats) return stats;
   }
@@ -87,6 +93,22 @@ interface FlowNodeRowProps {
 }
 
 function FlowNodeRow({ node, onSelect }: FlowNodeRowProps): React.JSX.Element {
+  const indent = node.depth * 12;
+  const height = nodeHeight(node);
+
+  if (node.isGroupHeader) {
+    return (
+      <div
+        className="flex items-center gap-1 text-xs text-muted-foreground/80 select-none"
+        style={{ height, paddingLeft: indent + 4 }}
+        title={`${node.name} · ${node.type}`}
+      >
+        <span className="font-mono font-semibold truncate flex-1">{node.name}</span>
+        <span className="shrink-0 text-muted-foreground/50 text-[10px]">{node.type}</span>
+      </div>
+    );
+  }
+
   const isFrozen = node.trainable === false;
   const isTrainable = node.trainable === true;
 
@@ -108,14 +130,14 @@ function FlowNodeRow({ node, onSelect }: FlowNodeRowProps): React.JSX.Element {
         .filter(Boolean)
         .join(" · ")}
       className={[
-        "flex items-center gap-2 px-2 rounded cursor-pointer select-none text-xs",
+        "flex items-center gap-2 pr-2 rounded cursor-pointer select-none text-xs",
         "hover:bg-muted/60 transition-colors",
         isTrainable ? "border border-primary/30 bg-primary/5" : "",
         isFrozen ? "opacity-50" : "",
       ]
         .filter(Boolean)
         .join(" ")}
-      style={{ height: NODE_HEIGHT }}
+      style={{ height, paddingLeft: indent + 8 }}
     >
       <span className="font-mono truncate flex-1">{node.name}</span>
       <span className="text-muted-foreground shrink-0">{node.type}</span>
@@ -177,7 +199,7 @@ function FlowColumnCard({
             </div>
           )}
         </div>
-        <div className="flex-1 overflow-hidden p-2 space-y-1" style={{ gap: NODE_GAP }}>
+        <div className="flex-1 overflow-hidden p-2" style={{ gap: NODE_GAP }}>
           {column.nodes.map((node) => (
             <FlowNodeRow key={node.fullPath} node={node} onSelect={onSelectNode} />
           ))}
@@ -549,7 +571,7 @@ export function FlowVisualization({
   }
 
   const totalWidth = cursor - COLUMN_GAP + 24;
-  const maxHeight = Math.max(...columns.map((col) => columnHeight(col.nodes.length)), 200);
+  const maxHeight = Math.max(...columns.map((col) => columnHeight(col.nodes)), 200);
   const svgHeight = maxHeight;
   const centerY = svgHeight / 2;
 
@@ -595,7 +617,7 @@ export function FlowVisualization({
         {columns.map((col, idx) => {
           const isExpanded = expandedKeys.has(col.key);
           const baseX = columnPositions[idx]!;
-          const height = columnHeight(col.nodes.length);
+          const height = columnHeight(col.nodes);
 
           if (col.isRepeated && isExpanded) {
             return Array.from({ length: col.repeatCount }, (_, i) => (
