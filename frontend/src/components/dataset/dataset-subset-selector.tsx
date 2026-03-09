@@ -4,31 +4,43 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import type { SampleMode } from "@/stores/app-store";
+import type { SplitCounts } from "@/types/dataset";
 
 interface DatasetSubsetSelectorProps {
-  readonly trainSplit: string;
   readonly evalSplit: string | null;
+  readonly splitCounts: SplitCounts | null;
   readonly sampleMode: SampleMode;
   readonly maxSamples: number | null;
   readonly totalRows: number | null;
-  readonly onTrainSplitChange: (value: string) => void;
   readonly onEvalSplitChange: (value: string | null) => void;
   readonly onSampleModeChange: (mode: SampleMode) => void;
   readonly onMaxSamplesChange: (value: number | null) => void;
 }
 
+type EvalSplitName = "validation" | "test";
+
+const EVAL_SPLIT_OPTIONS: ReadonlyArray<EvalSplitName> = ["validation", "test"];
+
+function formatCount(count: number | null | undefined): string {
+  if (count == null) return "";
+  return ` (${count.toLocaleString()})`;
+}
+
 export function DatasetSubsetSelector({
-  trainSplit,
   evalSplit,
+  splitCounts,
   sampleMode,
   maxSamples,
   totalRows,
-  onTrainSplitChange,
   onEvalSplitChange,
   onSampleModeChange,
   onMaxSamplesChange,
 }: DatasetSubsetSelectorProps): React.JSX.Element {
   const [percentageValue, setPercentageValue] = React.useState<number>(100);
+
+  const handleEvalSplitToggle = (name: EvalSplitName): void => {
+    onEvalSplitChange(evalSplit === name ? null : name);
+  };
 
   const handleSampleModeChange = (mode: SampleMode): void => {
     onSampleModeChange(mode);
@@ -62,38 +74,32 @@ export function DatasetSubsetSelector({
     <div className="space-y-4">
       <div className="space-y-2">
         <Label>Splits</Label>
-        <div className="flex gap-3 items-center">
-          <div className="flex-1 space-y-1">
-            <p className="text-xs text-muted-foreground">Training split</p>
-            <Input
-              value={trainSplit}
-              onChange={(e) => onTrainSplitChange(e.target.value)}
-              placeholder="train"
-            />
-          </div>
-          <div className="flex-1 space-y-1">
-            <p className="text-xs text-muted-foreground">Eval split</p>
-            <div className="flex gap-1">
-              <Input
-                value={evalSplit ?? ""}
-                onChange={(e) => onEvalSplitChange(e.target.value || null)}
-                placeholder="validation"
-                disabled={evalSplit === null}
-              />
+        <div className="flex gap-2">
+          {/* Train is always active — training data is always the train split */}
+          <Button type="button" variant="default" size="sm" disabled>
+            Train{formatCount(splitCounts?.train)}
+          </Button>
+
+          {EVAL_SPLIT_OPTIONS.map((name) => {
+            const count =
+              name === "validation" ? splitCounts?.validation : splitCounts?.test;
+            return (
               <Button
+                key={name}
                 type="button"
-                variant={evalSplit === null ? "default" : "outline"}
+                variant={evalSplit === name ? "default" : "outline"}
                 size="sm"
-                className="shrink-0"
-                onClick={() => onEvalSplitChange(evalSplit === null ? "validation" : null)}
+                onClick={() => handleEvalSplitToggle(name)}
               >
-                {evalSplit === null ? "Add" : "None"}
+                {name.charAt(0).toUpperCase() + name.slice(1)}
+                {formatCount(count)}
               </Button>
-            </div>
-          </div>
+            );
+          })}
         </div>
         <p className="text-xs text-muted-foreground">
-          Named splits to load from the dataset. Use &quot;None&quot; to skip eval.
+          Train is always included. Select Validation or Test as the eval split, or neither to skip
+          eval.
         </p>
       </div>
 

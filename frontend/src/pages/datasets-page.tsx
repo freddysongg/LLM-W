@@ -121,12 +121,11 @@ export default function DatasetsPage(): React.JSX.Element {
           )}
 
           <DatasetSubsetSelector
-            trainSplit={datasetForm.trainSplit}
             evalSplit={datasetForm.evalSplit}
+            splitCounts={profile?.splitCounts ?? null}
             sampleMode={datasetForm.sampleMode}
             maxSamples={datasetForm.maxSamples}
             totalRows={profile?.totalRows ?? null}
-            onTrainSplitChange={(trainSplit) => setDatasetForm({ trainSplit })}
             onEvalSplitChange={(evalSplit) => setDatasetForm({ evalSplit })}
             onSampleModeChange={(sampleMode) => setDatasetForm({ sampleMode })}
             onMaxSamplesChange={(maxSamples) => setDatasetForm({ maxSamples })}
