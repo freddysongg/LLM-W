@@ -38,6 +38,9 @@ export interface DatasetFormState {
   readonly evalSplit: string | null;
   readonly sampleMode: SampleMode;
   readonly maxSamples: number | null;
+  readonly trainRatio: number | null;
+  readonly valRatio: number | null;
+  readonly testRatio: number | null;
 }
 
 interface AppState {
@@ -93,6 +96,9 @@ const DEFAULT_DATASET_FORM: DatasetFormState = {
   evalSplit: "validation",
   sampleMode: "all",
   maxSamples: null,
+  trainRatio: null,
+  valRatio: null,
+  testRatio: null,
 };
 
 export const useAppStore = create<AppStore>()(

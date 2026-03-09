@@ -82,6 +82,9 @@ export async function resolveDataset({
       format: request.format,
       format_mapping: request.formatMapping,
       max_samples: request.maxSamples,
+      train_ratio: request.trainRatio !== null ? request.trainRatio / 100 : null,
+      val_ratio: request.valRatio !== null ? request.valRatio / 100 : null,
+      test_ratio: request.testRatio !== null ? request.testRatio / 100 : null,
     },
   });
   return normalizeProfile(raw);

@@ -6,40 +6,64 @@ import { Slider } from "@/components/ui/slider";
 import type { SampleMode } from "@/stores/app-store";
 import type { SplitCounts } from "@/types/dataset";
 
+type SplitField = "train" | "val" | "test";
+
 interface DatasetSubsetSelectorProps {
-  readonly evalSplit: string | null;
+  readonly trainRatio: number | null;
+  readonly valRatio: number | null;
+  readonly testRatio: number | null;
   readonly splitCounts: SplitCounts | null;
   readonly sampleMode: SampleMode;
   readonly maxSamples: number | null;
   readonly totalRows: number | null;
-  readonly onEvalSplitChange: (value: string | null) => void;
+  readonly onTrainRatioChange: (value: number | null) => void;
+  readonly onValRatioChange: (value: number | null) => void;
+  readonly onTestRatioChange: (value: number | null) => void;
   readonly onSampleModeChange: (mode: SampleMode) => void;
   readonly onMaxSamplesChange: (value: number | null) => void;
 }
 
-type EvalSplitName = "validation" | "test";
-
-const EVAL_SPLIT_OPTIONS: ReadonlyArray<EvalSplitName> = ["validation", "test"];
-
-function formatCount(count: number | null | undefined): string {
-  if (count == null) return "";
-  return ` (${count.toLocaleString()})`;
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
 }
 
 export function DatasetSubsetSelector({
-  evalSplit,
+  trainRatio,
+  valRatio,
+  testRatio,
   splitCounts,
   sampleMode,
   maxSamples,
   totalRows,
-  onEvalSplitChange,
+  onTrainRatioChange,
+  onValRatioChange,
+  onTestRatioChange,
   onSampleModeChange,
   onMaxSamplesChange,
 }: DatasetSubsetSelectorProps): React.JSX.Element {
   const [percentageValue, setPercentageValue] = React.useState<number>(100);
+  const lastEdited = React.useRef<SplitField | null>(null);
 
-  const handleEvalSplitToggle = (name: EvalSplitName): void => {
-    onEvalSplitChange(evalSplit === name ? null : name);
+  const handleRatioChange = (field: SplitField, raw: string): void => {
+    lastEdited.current = field;
+    const parsed = parseInt(raw, 10);
+    const entered = Number.isNaN(parsed) ? null : clamp(parsed, 0, 100);
+
+    const next = { train: trainRatio, val: valRatio, test: testRatio, [field]: entered };
+
+    // Auto-fill the third field when the other two are set
+    const { train, val, test } = next;
+    if (field !== "test" && train !== null && val !== null) {
+      next.test = clamp(100 - train - val, 0, 100);
+    } else if (field !== "val" && train !== null && test !== null) {
+      next.val = clamp(100 - train - test, 0, 100);
+    } else if (field !== "train" && val !== null && test !== null) {
+      next.train = clamp(100 - val - test, 0, 100);
+    }
+
+    onTrainRatioChange(next.train);
+    onValRatioChange(next.val);
+    onTestRatioChange(next.test);
   };
 
   const handleSampleModeChange = (mode: SampleMode): void => {
@@ -65,41 +89,63 @@ export function DatasetSubsetSelector({
     onMaxSamplesChange(Number.isNaN(parsed) || parsed < 1 ? null : parsed);
   };
 
+  const sum =
+    (trainRatio ?? 0) + (valRatio ?? 0) + (testRatio ?? 0);
+  const hasValues = trainRatio !== null || valRatio !== null || testRatio !== null;
+  const isInvalid = hasValues && sum !== 100;
+
   const computedRows =
     sampleMode === "percentage" && totalRows !== null
       ? Math.floor((percentageValue / 100) * totalRows)
       : null;
 
+  const estimateRow = (ratio: number | null): string | null => {
+    if (ratio === null || totalRows === null) return null;
+    return `≈ ${Math.floor((ratio / 100) * totalRows).toLocaleString()} rows`;
+  };
+
   return (
     <div className="space-y-4">
       <div className="space-y-2">
-        <Label>Splits</Label>
-        <div className="flex gap-2">
-          {/* Train is always active — training data is always the train split */}
-          <Button type="button" variant="default" size="sm" disabled>
-            Train{formatCount(splitCounts?.train)}
-          </Button>
-
-          {EVAL_SPLIT_OPTIONS.map((name) => {
-            const count =
-              name === "validation" ? splitCounts?.validation : splitCounts?.test;
-            return (
-              <Button
-                key={name}
-                type="button"
-                variant={evalSplit === name ? "default" : "outline"}
-                size="sm"
-                onClick={() => handleEvalSplitToggle(name)}
-              >
-                {name.charAt(0).toUpperCase() + name.slice(1)}
-                {formatCount(count)}
-              </Button>
-            );
-          })}
+        <Label>Split ratios</Label>
+        <div className="grid grid-cols-3 gap-3">
+          {(
+            [
+              { field: "train" as SplitField, label: "Train", ratio: trainRatio, resolved: splitCounts?.train ?? null },
+              { field: "val" as SplitField, label: "Validation", ratio: valRatio, resolved: splitCounts?.validation ?? null },
+              { field: "test" as SplitField, label: "Test", ratio: testRatio, resolved: splitCounts?.test ?? null },
+            ] as const
+          ).map(({ field, label, ratio, resolved }) => (
+            <div key={field} className="space-y-1">
+              <Label className="text-xs text-muted-foreground">{label}</Label>
+              <div className="flex items-center gap-1">
+                <Input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={ratio ?? ""}
+                  onChange={(e) => handleRatioChange(field, e.target.value)}
+                  placeholder="—"
+                  className="w-full"
+                />
+                <span className="text-xs text-muted-foreground shrink-0">%</span>
+              </div>
+              {estimateRow(ratio) !== null && (
+                <p className="text-xs text-muted-foreground">{estimateRow(ratio)}</p>
+              )}
+              {resolved !== null && (
+                <p className="text-xs text-muted-foreground">
+                  resolved: {resolved.toLocaleString()}
+                </p>
+              )}
+            </div>
+          ))}
         </div>
+        {isInvalid && (
+          <p className="text-xs text-destructive">Percentages must sum to 100 (currently {sum})</p>
+        )}
         <p className="text-xs text-muted-foreground">
-          Train is always included. Select Validation or Test as the eval split, or neither to skip
-          eval.
+          Set two values and the third auto-fills. Leave all blank to skip ratio tracking.
         </p>
       </div>
 

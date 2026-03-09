@@ -248,6 +248,28 @@ async def _write_resolved_dataset_to_config(
         dataset_section["max_samples"] = request.max_samples
     else:
         dataset_section.pop("max_samples", None)
+
+    total = profile.total_rows
+    train_ratio = request.train_ratio
+    val_ratio = request.val_ratio
+    test_ratio = request.test_ratio
+    if train_ratio is None and total > 0 and profile.split_counts.train is not None:
+        train_ratio = profile.split_counts.train / total
+    if val_ratio is None and total > 0 and profile.split_counts.validation is not None:
+        val_ratio = profile.split_counts.validation / total
+    if test_ratio is None and total > 0 and profile.split_counts.test is not None:
+        test_ratio = profile.split_counts.test / total
+
+    for key, value in [
+        ("train_ratio", train_ratio),
+        ("val_ratio", val_ratio),
+        ("test_ratio", test_ratio),
+    ]:
+        if value is not None:
+            dataset_section[key] = round(value, 4)
+        else:
+            dataset_section.pop(key, None)
+
     updated_yaml = yaml.dump(parsed, default_flow_style=False, allow_unicode=True, sort_keys=False)
     new_version = await config_service.create_config_version(
         session=session,

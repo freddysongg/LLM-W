@@ -48,6 +48,18 @@ export default function DatasetsPage(): React.JSX.Element {
     }
   }, [profile, datasetForm.datasetId, setDatasetForm]);
 
+  React.useEffect(() => {
+    if (!profile) return;
+    const { train, validation, test } = profile.splitCounts;
+    const total = profile.totalRows;
+    if (total === 0) return;
+    setDatasetForm({
+      trainRatio: train !== null ? Math.round((train / total) * 100) : null,
+      valRatio: validation !== null ? Math.round((validation / total) * 100) : null,
+      testRatio: test !== null ? Math.round((test / total) * 100) : null,
+    });
+  }, [profile, setDatasetForm]);
+
   const handleResolve = (): void => {
     const request: DatasetResolveRequest = {
       source: datasetForm.source,
@@ -59,6 +71,9 @@ export default function DatasetsPage(): React.JSX.Element {
       formatMapping:
         Object.keys(datasetForm.formatMapping).length > 0 ? datasetForm.formatMapping : null,
       maxSamples: datasetForm.maxSamples,
+      trainRatio: datasetForm.trainRatio,
+      valRatio: datasetForm.valRatio,
+      testRatio: datasetForm.testRatio,
     };
     resolveDataset.mutate(request);
   };
@@ -121,12 +136,16 @@ export default function DatasetsPage(): React.JSX.Element {
           )}
 
           <DatasetSubsetSelector
-            evalSplit={datasetForm.evalSplit}
+            trainRatio={datasetForm.trainRatio}
+            valRatio={datasetForm.valRatio}
+            testRatio={datasetForm.testRatio}
             splitCounts={profile?.splitCounts ?? null}
             sampleMode={datasetForm.sampleMode}
             maxSamples={datasetForm.maxSamples}
             totalRows={profile?.totalRows ?? null}
-            onEvalSplitChange={(evalSplit) => setDatasetForm({ evalSplit })}
+            onTrainRatioChange={(trainRatio) => setDatasetForm({ trainRatio })}
+            onValRatioChange={(valRatio) => setDatasetForm({ valRatio })}
+            onTestRatioChange={(testRatio) => setDatasetForm({ testRatio })}
             onSampleModeChange={(sampleMode) => setDatasetForm({ sampleMode })}
             onMaxSamplesChange={(maxSamples) => setDatasetForm({ maxSamples })}
           />

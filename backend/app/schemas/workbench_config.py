@@ -31,6 +31,9 @@ class DatasetConfig(BaseModel):
     format_mapping: dict[str, str] | None = None
     max_samples: int | None = None
     subset: str | None = None
+    train_ratio: float | None = None
+    val_ratio: float | None = None
+    test_ratio: float | None = None
 
 
 class PreprocessingConfig(BaseModel):

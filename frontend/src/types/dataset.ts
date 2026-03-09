@@ -56,6 +56,9 @@ export interface DatasetResolveRequest {
   readonly format: DatasetFormat;
   readonly formatMapping: Record<string, string> | null;
   readonly maxSamples: number | null;
+  readonly trainRatio: number | null;
+  readonly valRatio: number | null;
+  readonly testRatio: number | null;
 }
 
 export interface PreviewTransformRequest {

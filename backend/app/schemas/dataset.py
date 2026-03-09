@@ -14,6 +14,9 @@ class DatasetResolveRequest(BaseModel):
     max_samples: int | None = None
     format: Literal["default", "sharegpt", "openai", "alpaca", "custom"] = "default"
     format_mapping: dict[str, str] | None = None
+    train_ratio: float | None = None
+    val_ratio: float | None = None
+    test_ratio: float | None = None
 
 
 class SplitCounts(BaseModel):
