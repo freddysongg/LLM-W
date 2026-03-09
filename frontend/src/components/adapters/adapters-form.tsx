@@ -51,7 +51,7 @@ export function AdaptersForm({
   const [customModule, setCustomModule] = React.useState("");
 
   const toggleTargetModule = (module: string): void => {
-    const current = new Set(adapters.targetModules);
+    const current = new Set(adapters.targetModules ?? []);
     if (current.has(module)) {
       current.delete(module);
     } else {
@@ -62,8 +62,9 @@ export function AdaptersForm({
 
   const addCustomModule = (): void => {
     const trimmed = customModule.trim();
-    if (trimmed && !adapters.targetModules.includes(trimmed)) {
-      onAdaptersChange({ targetModules: [...adapters.targetModules, trimmed] });
+    const currentModules = adapters.targetModules ?? [];
+    if (trimmed && !currentModules.includes(trimmed)) {
+      onAdaptersChange({ targetModules: [...currentModules, trimmed] });
       setCustomModule("");
     }
   };
@@ -167,7 +168,7 @@ export function AdaptersForm({
                       type="button"
                       onClick={() => toggleTargetModule(module)}
                       className={`px-2 py-1 text-xs rounded border transition-colors ${
-                        adapters.targetModules.includes(module)
+                        (adapters.targetModules ?? []).includes(module)
                           ? "bg-primary text-primary-foreground border-primary"
                           : "bg-background border-input hover:bg-accent"
                       }`}
@@ -176,7 +177,7 @@ export function AdaptersForm({
                     </button>
                   ))}
                 </div>
-                {adapters.targetModules
+                {(adapters.targetModules ?? [])
                   .filter((m) => !TARGET_MODULE_PRESETS.includes(m))
                   .map((module) => (
                     <div key={module} className="flex items-center gap-2">
