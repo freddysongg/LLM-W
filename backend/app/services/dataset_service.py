@@ -8,7 +8,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from app.core.exceptions import DatasetNotResolvedError, DatasetResolveError
+import yaml
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.exceptions import (
+    ConfigVersionNotFoundError,
+    DatasetNotResolvedError,
+    DatasetResolveError,
+)
+from app.schemas.config_version import ConfigVersionCreate
 from app.schemas.dataset import (
     DatasetProfile,
     DatasetResolveRequest,
@@ -20,6 +28,7 @@ from app.schemas.dataset import (
     SplitCounts,
     TokenStats,
 )
+from app.services import config_service, project_service
 
 # In-memory state keyed by project_id
 _profiles: dict[str, DatasetProfile] = {}
@@ -214,7 +223,36 @@ def _resolve_local(
         return _load_csv(path)
 
 
-def resolve_dataset(*, project_id: str, request: DatasetResolveRequest) -> DatasetProfile:
+async def _write_resolved_dataset_to_config(
+    *, session: AsyncSession, project_id: str, profile: DatasetProfile
+) -> None:
+    """Persist resolved dataset_id and source into the active config YAML version."""
+    active = await config_service.get_active_config_version(session=session, project_id=project_id)
+    raw_yaml = await config_service.get_config_yaml(
+        session=session, project_id=project_id, version_id=active.id
+    )
+    parsed: dict[str, Any] = yaml.safe_load(raw_yaml) or {}
+    dataset_section: dict[str, Any] = parsed.setdefault("dataset", {})
+    dataset_section["dataset_id"] = profile.dataset_id
+    dataset_section["source"] = profile.source
+    updated_yaml = yaml.dump(parsed, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    new_version = await config_service.create_config_version(
+        session=session,
+        project_id=project_id,
+        payload=ConfigVersionCreate(
+            yaml_content=updated_yaml,
+            source_tag="system",
+            source_detail=f"dataset resolved: {profile.dataset_id}",
+        ),
+    )
+    await project_service.set_active_config_version(
+        session=session, project_id=project_id, config_version_id=new_version.id
+    )
+
+
+async def resolve_dataset(
+    *, project_id: str, request: DatasetResolveRequest, session: AsyncSession
+) -> DatasetProfile:
     rows: list[dict[str, Any]]
     split_counts: SplitCounts
 
@@ -229,9 +267,7 @@ def resolve_dataset(*, project_id: str, request: DatasetResolveRequest) -> Datas
         rows = _resolve_local(dataset_id=request.dataset_id, source=request.source)
         split_counts = SplitCounts(train=len(rows))
 
-    detected_format = (
-        request.format if request.format != "default" else _detect_format(rows)
-    )
+    detected_format = request.format if request.format != "default" else _detect_format(rows)
     detected_fields = _collect_fields(rows)
     token_stats = _compute_token_stats(rows)
     quality_warnings, duplicate_count, malformed_count = _compute_quality_warnings(
@@ -254,6 +290,14 @@ def resolve_dataset(*, project_id: str, request: DatasetResolveRequest) -> Datas
 
     _profiles[project_id] = profile
     _samples[project_id] = rows
+    try:
+        await _write_resolved_dataset_to_config(
+            session=session, project_id=project_id, profile=profile
+        )
+    except ConfigVersionNotFoundError:
+        _profiles.pop(project_id, None)
+        _samples.pop(project_id, None)
+        raise
     return profile
 
 

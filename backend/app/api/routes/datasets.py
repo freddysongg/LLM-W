@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
 from app.core.exceptions import (
+    ConfigVersionNotFoundError,
     DatasetNotResolvedError,
     DatasetResolveError,
     ProjectNotFoundError,
@@ -40,11 +41,18 @@ async def resolve_dataset(
             detail={"code": "PROJECT_NOT_FOUND", "message": str(exc), "details": {}},
         ) from exc
     try:
-        return dataset_service.resolve_dataset(project_id=project_id, request=payload)
+        return await dataset_service.resolve_dataset(
+            project_id=project_id, request=payload, session=session
+        )
     except DatasetResolveError as exc:
         raise HTTPException(
             status_code=422,
             detail={"code": "DATASET_RESOLVE_ERROR", "message": exc.message, "details": {}},
+        ) from exc
+    except ConfigVersionNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "CONFIG_NOT_FOUND", "message": str(exc), "details": {}},
         ) from exc
 
 
