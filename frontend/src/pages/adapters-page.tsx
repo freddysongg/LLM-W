@@ -7,6 +7,8 @@ import { AdaptersPresetsPanel } from "@/components/adapters/adapters-presets-pan
 import type { AdaptersPresetValues } from "@/components/adapters/adapters-presets-panel";
 import { TrainableParamsPreview } from "@/components/adapters/trainable-params-preview";
 import { NoProjectSelected } from "@/components/shared/no-project-selected";
+import { CopyForAI } from "@/components/shared/copy-for-ai";
+import { buildAdaptersPrompt } from "@/lib/ai-copy-prompts";
 import type {
   AdaptersConfig,
   OptimizationConfig,
@@ -116,11 +118,24 @@ export default function AdaptersPage(): React.JSX.Element {
       <div className="flex-1 max-w-2xl space-y-4">
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-semibold">Adapters &amp; Optimization</h1>
-          {localAdapters && (
-            <Button onClick={handleSave} disabled={saveConfig.isPending} size="sm">
-              {saveConfig.isPending ? "Saving…" : "Save Config"}
-            </Button>
-          )}
+          <div className="flex items-center gap-2">
+            {localAdapters && localOptimization && localQuantization && (
+              <CopyForAI
+                buildPrompt={() =>
+                  buildAdaptersPrompt({
+                    adapters: localAdapters,
+                    optimization: localOptimization,
+                    quantization: localQuantization,
+                  })
+                }
+              />
+            )}
+            {localAdapters && (
+              <Button onClick={handleSave} disabled={saveConfig.isPending} size="sm">
+                {saveConfig.isPending ? "Saving…" : "Save Config"}
+              </Button>
+            )}
+          </div>
         </div>
 
         {isLoading && <div className="text-sm text-muted-foreground">Loading config…</div>}
