@@ -2,7 +2,6 @@ import * as React from "react";
 import { useAppStore } from "@/stores/app-store";
 import { useDatasetProfile, useResolveDataset } from "@/hooks/useDatasetProfile";
 import { useDatasetSamples, usePreviewTransform } from "@/hooks/useDatasetSamples";
-import type { DatasetSource, DatasetFormat } from "@/types/config";
 import type { DatasetResolveRequest, PreviewTransformResponse } from "@/types/dataset";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -18,25 +17,8 @@ import { TokenStatsChart } from "@/components/dataset/token-stats-chart";
 import { QualityWarnings } from "@/components/dataset/quality-warnings";
 import { PreprocessingPreview } from "@/components/dataset/preprocessing-preview";
 
-interface DatasetFormState {
-  readonly source: DatasetSource;
-  readonly datasetId: string;
-  readonly format: DatasetFormat;
-  readonly formatMapping: Record<string, string>;
-  readonly filterExpression: string;
-}
-
-const INITIAL_FORM: DatasetFormState = {
-  source: "huggingface",
-  datasetId: "",
-  format: "default",
-  formatMapping: {},
-  filterExpression: "",
-};
-
 export default function DatasetsPage(): React.JSX.Element {
-  const { activeProjectId } = useAppStore();
-  const [form, setForm] = React.useState<DatasetFormState>(INITIAL_FORM);
+  const { activeProjectId, datasetForm, setDatasetForm } = useAppStore();
   const [previewResponse, setPreviewResponse] = React.useState<PreviewTransformResponse | null>(
     null,
   );
@@ -60,19 +42,16 @@ export default function DatasetsPage(): React.JSX.Element {
 
   const previewTransform = usePreviewTransform({ projectId });
 
-  const handleFormChange = (updates: Partial<DatasetFormState>): void => {
-    setForm((prev) => ({ ...prev, ...updates }));
-  };
-
   const handleResolve = (): void => {
     const request: DatasetResolveRequest = {
-      source: form.source,
-      datasetId: form.datasetId,
+      source: datasetForm.source,
+      datasetId: datasetForm.datasetId,
       subset: null,
       trainSplit: "train",
       evalSplit: "validation",
-      format: form.format,
-      formatMapping: Object.keys(form.formatMapping).length > 0 ? form.formatMapping : null,
+      format: datasetForm.format,
+      formatMapping:
+        Object.keys(datasetForm.formatMapping).length > 0 ? datasetForm.formatMapping : null,
     };
     resolveDataset.mutate(request);
   };
@@ -80,8 +59,9 @@ export default function DatasetsPage(): React.JSX.Element {
   const handlePreviewTransform = (): void => {
     previewTransform.mutate(
       {
-        format: form.format,
-        formatMapping: Object.keys(form.formatMapping).length > 0 ? form.formatMapping : null,
+        format: datasetForm.format,
+        formatMapping:
+          Object.keys(datasetForm.formatMapping).length > 0 ? datasetForm.formatMapping : null,
         sampleCount: 5,
       },
       {
@@ -90,7 +70,7 @@ export default function DatasetsPage(): React.JSX.Element {
     );
   };
 
-  const isResolveDisabled = !form.datasetId.trim();
+  const isResolveDisabled = !datasetForm.datasetId.trim();
 
   if (!activeProjectId) {
     return (
@@ -111,28 +91,31 @@ export default function DatasetsPage(): React.JSX.Element {
         </CardHeader>
         <CardContent className="space-y-4">
           <DatasetSourceSelector
-            value={form.source}
-            onChange={(source) => handleFormChange({ source })}
+            value={datasetForm.source}
+            onChange={(source) => setDatasetForm({ source })}
           />
 
           <DatasetIdInput
-            source={form.source}
-            value={form.datasetId}
-            onChange={(datasetId) => handleFormChange({ datasetId })}
+            source={datasetForm.source}
+            value={datasetForm.datasetId}
+            onChange={(datasetId) => setDatasetForm({ datasetId })}
           />
 
-          <FormatSelector value={form.format} onChange={(format) => handleFormChange({ format })} />
+          <FormatSelector
+            value={datasetForm.format}
+            onChange={(format) => setDatasetForm({ format })}
+          />
 
-          {(form.format === "custom" || form.format === "sharegpt") && (
+          {(datasetForm.format === "custom" || datasetForm.format === "sharegpt") && (
             <FieldMappingEditor
-              mapping={form.formatMapping}
-              onChange={(formatMapping) => handleFormChange({ formatMapping })}
+              mapping={datasetForm.formatMapping}
+              onChange={(formatMapping) => setDatasetForm({ formatMapping })}
             />
           )}
 
           <FilterExpressionInput
-            value={form.filterExpression}
-            onChange={(filterExpression) => handleFormChange({ filterExpression })}
+            value={datasetForm.filterExpression}
+            onChange={(filterExpression) => setDatasetForm({ filterExpression })}
           />
 
           {resolveDataset.error instanceof Error && (

@@ -12,25 +12,24 @@ import { LayerSummaryTable } from "@/components/model/layer-summary-table";
 import { Card, CardContent } from "@/components/ui/card";
 import { CopyForAI } from "@/components/shared/copy-for-ai";
 import { buildModelPrompt } from "@/lib/ai-copy-prompts";
-import type { ModelSource } from "@/types/model";
 
 export default function ModelsPage(): React.JSX.Element {
-  const { activeProjectId } = useAppStore();
+  const { activeProjectId, modelForm, setModelForm } = useAppStore();
   const projectId = activeProjectId ?? "";
 
   const { data: profile, isLoading: isLoadingProfile } = useModelProfile({ projectId });
   const { data: architecture } = useModelArchitecture({ projectId });
   const resolveModel = useResolveModel();
 
-  const [source, setSource] = React.useState<ModelSource>("huggingface");
-  const [modelId, setModelId] = React.useState("");
-
   const handleResolve = (): void => {
-    if (!projectId || !modelId.trim()) return;
-    resolveModel.mutate({ projectId, request: { source, model_id: modelId.trim() } });
+    if (!projectId || !modelForm.modelId.trim()) return;
+    resolveModel.mutate({
+      projectId,
+      request: { source: modelForm.source, model_id: modelForm.modelId.trim() },
+    });
   };
 
-  const canResolve = Boolean(projectId) && modelId.trim().length > 0;
+  const canResolve = Boolean(projectId) && modelForm.modelId.trim().length > 0;
 
   return (
     <div className="flex flex-col h-full">
@@ -54,16 +53,19 @@ export default function ModelsPage(): React.JSX.Element {
                   <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
                     Source
                   </p>
-                  <ModelSourceSelector source={source} onChange={setSource} />
+                  <ModelSourceSelector
+                    source={modelForm.source}
+                    onChange={(source) => setModelForm({ source })}
+                  />
                 </div>
                 <div className="space-y-1.5">
                   <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
                     Model ID
                   </p>
                   <ModelIdInput
-                    source={source}
-                    value={modelId}
-                    onChange={setModelId}
+                    source={modelForm.source}
+                    value={modelForm.modelId}
+                    onChange={(modelId) => setModelForm({ modelId })}
                     isDisabled={resolveModel.isPending}
                   />
                 </div>
