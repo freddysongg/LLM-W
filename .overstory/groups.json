@@ -129,5 +129,16 @@
 		"status": "active",
 		"createdAt": "2026-03-09T00:38:27.653Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-94ec9e63",
+		"name": "layer-and-blank-fixes",
+		"memberIssueIds": [
+			"llm-interactive-3aa8",
+			"llm-interactive-b021"
+		],
+		"status": "active",
+		"createdAt": "2026-03-09T00:49:11.730Z",
+		"completedAt": null
 	}
 ]
