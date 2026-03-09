@@ -80,21 +80,22 @@ export default function TrainingPage(): React.JSX.Element {
   }
 
   return (
-    <div className="p-6 max-w-2xl space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Training</h1>
-        {localTraining && (
-          <Button onClick={handleSave} disabled={saveConfig.isPending} size="sm">
-            {saveConfig.isPending ? "Saving…" : "Save Config"}
-          </Button>
-        )}
-      </div>
+    <div className="p-6 max-w-2xl space-y-4 pb-20">
+      <h1 className="text-xl font-semibold">Training</h1>
 
       {isLoading && <div className="text-sm text-muted-foreground">Loading config…</div>}
       {error && <div className="text-sm text-destructive">Failed to load config.</div>}
 
       {localTraining && (
         <TrainingForm config={localTraining} datasetSize={null} onChange={handleChange} />
+      )}
+
+      {localTraining && (
+        <div className="fixed bottom-0 right-0 z-10 flex justify-end border-t border-border bg-background px-6 py-4 shadow-md w-full">
+          <Button onClick={handleSave} disabled={saveConfig.isPending} size="sm">
+            {saveConfig.isPending ? "Saving…" : "Save Config"}
+          </Button>
+        </div>
       )}
     </div>
   );

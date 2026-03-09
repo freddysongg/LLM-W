@@ -9,7 +9,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 
 interface RunListProps {
   readonly runs: ReadonlyArray<Run>;
@@ -53,23 +52,11 @@ function formatDuration(startedAt: string | null, completedAt: string | null): s
   return `${seconds}s`;
 }
 
-export function RunList({
-  runs,
-  selectedRunId,
-  onSelectRun,
-  onStartRun,
-  isStartingRun = false,
-  canStartRun = false,
-}: RunListProps): React.JSX.Element {
+export function RunList({ runs, selectedRunId, onSelectRun }: RunListProps): React.JSX.Element {
   if (runs.length === 0) {
     return (
       <div className="py-12 flex flex-col items-center gap-3 text-sm text-muted-foreground">
         <span>No runs yet.</span>
-        {onStartRun && (
-          <Button size="sm" onClick={onStartRun} disabled={!canStartRun || isStartingRun}>
-            {isStartingRun ? "Starting…" : "Start Run"}
-          </Button>
-        )}
       </div>
     );
   }
