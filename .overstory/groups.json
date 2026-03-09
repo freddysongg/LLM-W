@@ -196,5 +196,16 @@
 		"status": "active",
 		"createdAt": "2026-03-09T02:29:40.591Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-6d0a47fe",
+		"name": "trainer-and-checkpoints",
+		"memberIssueIds": [
+			"llm-interactive-0656",
+			"llm-interactive-f733"
+		],
+		"status": "active",
+		"createdAt": "2026-03-09T02:46:36.978Z",
+		"completedAt": null
 	}
 ]
