@@ -5,6 +5,7 @@ import { SettingsForm } from "@/components/settings/settings-form";
 import { DefaultRetentionPolicy } from "@/components/settings/default-retention-policy";
 import { ExperimentRetentionDays } from "@/components/settings/experiment-retention-days";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
 import type { UpdateSettingsRequest } from "@/types/settings";
 
 interface TestResult {
@@ -16,10 +17,28 @@ export default function SettingsPage(): React.JSX.Element {
   const { data: settings, isLoading, error } = useSettings();
   const updateSettings = useUpdateSettings();
   const testConnection = useTestAiConnection();
+  const { toast } = useToast();
   const [testResult, setTestResult] = useState<TestResult | null>(null);
 
   const handleSave = (updates: UpdateSettingsRequest): void => {
-    updateSettings.mutate({ request: updates });
+    updateSettings.mutate(
+      { request: updates },
+      {
+        onSuccess: () => {
+          toast({
+            title: "Settings saved",
+            description: "Settings saved successfully.",
+          });
+        },
+        onError: () => {
+          toast({
+            title: "Save failed",
+            description: "Failed to save settings.",
+            variant: "destructive",
+          });
+        },
+      },
+    );
   };
 
   const handleTestConnection = (): void => {

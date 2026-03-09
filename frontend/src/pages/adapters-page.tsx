@@ -14,9 +14,11 @@ import type {
   WorkbenchConfig,
 } from "@/types/config";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
 
 export default function AdaptersPage(): React.JSX.Element {
   const { activeProjectId } = useAppStore();
+  const { toast } = useToast();
   const {
     data: configVersion,
     isLoading,
@@ -58,13 +60,30 @@ export default function AdaptersPage(): React.JSX.Element {
       optimization: localOptimization,
       quantization: localQuantization,
     };
-    saveConfig.mutate({
-      request: {
-        projectId: activeProjectId ?? "",
-        yamlContent: stringifyYaml(updated),
-        sourceTag: "user",
+    saveConfig.mutate(
+      {
+        request: {
+          projectId: activeProjectId ?? "",
+          yamlContent: stringifyYaml(updated),
+          sourceTag: "user",
+        },
       },
-    });
+      {
+        onSuccess: () => {
+          toast({
+            title: "Config saved",
+            description: "Adapters & Optimization configuration saved successfully.",
+          });
+        },
+        onError: () => {
+          toast({
+            title: "Save failed",
+            description: "Failed to save adapters configuration.",
+            variant: "destructive",
+          });
+        },
+      },
+    );
   };
 
   const handlePresetApply = ({
