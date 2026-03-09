@@ -102,6 +102,7 @@ function buildFlatColumns(
         label: `${col.label} [${i}]`,
         isRepeated: false,
         repeatCount: 1,
+        collapseKey: i === 0 ? col.key : undefined,
       }));
     }
     return [col];
@@ -296,6 +297,7 @@ interface FlowColumnCardProps {
   readonly column: FlowColumn;
   readonly isExpanded: boolean;
   readonly onToggleExpand: () => void;
+  readonly onCollapse?: () => void;
   readonly onSelectNode: (fullPath: string) => void;
   readonly x: number;
   readonly y: number;
@@ -306,6 +308,7 @@ function FlowColumnCard({
   column,
   isExpanded,
   onToggleExpand,
+  onCollapse,
   onSelectNode,
   x,
   y,
@@ -334,16 +337,26 @@ function FlowColumnCard({
               </button>
             )}
           </div>
-          {column.totalParams > 0 && (
-            <div className="text-xs text-muted-foreground mt-0.5">
-              {formatParamCount(column.totalParams)}
-            </div>
-          )}
-          {column.isRepeated && (
-            <div className="text-xs text-muted-foreground/60 mt-0.5">
-              {isExpanded ? "click × to collapse" : "click × to expand"}
-            </div>
-          )}
+          <div className="flex items-center gap-2 mt-0.5">
+            {column.totalParams > 0 && (
+              <span className="text-xs text-muted-foreground">
+                {formatParamCount(column.totalParams)}
+              </span>
+            )}
+            {column.isRepeated && (
+              <span className="text-xs text-muted-foreground/60">
+                {isExpanded ? "click × to collapse" : "click × to expand"}
+              </span>
+            )}
+            {onCollapse && (
+              <button
+                onClick={onCollapse}
+                className="text-xs text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+              >
+                click × to collapse
+              </button>
+            )}
+          </div>
         </div>
         <div
           className="flex-1 overflow-hidden flex flex-col"
@@ -527,6 +540,7 @@ function StructuralCanvas({
               column={col}
               isExpanded={expandedKeys.has(col.key)}
               onToggleExpand={() => onToggleExpand(col.key)}
+              onCollapse={col.collapseKey ? () => onToggleExpand(col.collapseKey!) : undefined}
               onSelectNode={onSelectNode}
               x={CANVAS_PADDING + pos.x}
               y={CANVAS_PADDING + pos.y}

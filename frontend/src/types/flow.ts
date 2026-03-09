@@ -16,6 +16,8 @@ export interface FlowColumn {
   readonly nodes: ReadonlyArray<FlowNode>;
   readonly isRepeated: boolean;
   readonly repeatCount: number;
+  // Set on the first card of an expanded group — the original key used to collapse
+  readonly collapseKey?: string;
 }
 
 export type FlowMode = "structural" | "activation";
