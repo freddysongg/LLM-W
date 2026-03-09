@@ -11,6 +11,9 @@ export function useModelArchitecture({ projectId }: { projectId: string }) {
     queryKey: ARCHITECTURE_KEY(projectId),
     queryFn: () => fetchModelArchitecture({ projectId }),
     enabled: Boolean(projectId),
+    // Architecture is static for a given resolved model — never mark stale to avoid
+    // redundant refetches on window focus while the backend computes it
+    staleTime: Infinity,
   });
 }
 

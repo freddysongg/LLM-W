@@ -27,6 +27,7 @@ from app.schemas.model import (
     WeightDeltaResponse,
 )
 from app.services.introspection import (
+    build_architecture_from_config,
     build_architecture_response,
     compute_weight_deltas,
     count_parameters_from_config,
@@ -37,6 +38,7 @@ from app.services.introspection import (
 _profiles: dict[str, ModelProfile] = {}
 _adapters: dict[str, CausalLMAdapter] = {}
 _activation_snapshots: dict[str, ActivationSnapshotResponse] = {}
+_architecture_cache: dict[str, ModelArchitectureResponse] = {}
 
 
 def _resolve_model_sync(*, project_id: str, request: ModelResolveRequest) -> ModelProfile:
@@ -65,6 +67,15 @@ def _resolve_model_sync(*, project_id: str, request: ModelResolveRequest) -> Mod
         # If meta-device instantiation fails, fall back to zero counts
         total_parameters = 0
         trainable_parameters = 0
+
+    try:
+        _architecture_cache[project_id] = build_architecture_from_config(
+            hf_config=hf_config,
+            model_id=request.model_id,
+        )
+    except Exception:
+        # Non-fatal: architecture will be built lazily from the loaded model on first request
+        pass
 
     architecture_name = type(hf_config).__name__.replace("Config", "ForCausalLM")
     torch_dtype = getattr(hf_config, "torch_dtype", None)
@@ -104,6 +115,8 @@ def _resolve_model_sync(*, project_id: str, request: ModelResolveRequest) -> Mod
 
 
 async def resolve_model(*, project_id: str, request: ModelResolveRequest) -> ModelProfile:
+    # Clear stale architecture cache so re-resolving a different model updates the response
+    _architecture_cache.pop(project_id, None)
     loop = asyncio.get_event_loop()
     profile = await loop.run_in_executor(
         None,
@@ -145,9 +158,16 @@ def _get_loaded_adapter(*, project_id: str) -> CausalLMAdapter:
 
 
 def _get_architecture_sync(*, project_id: str) -> ModelArchitectureResponse:
+    cached = _architecture_cache.get(project_id)
+    if cached is not None:
+        return cached
+
+    # Fallback: load the full model and build from it (slower path for post-restart requests)
     adapter = _get_loaded_adapter(project_id=project_id)
     profile = _profiles[project_id]
-    return build_architecture_response(model=adapter._model, model_id=profile.model_id)
+    result = build_architecture_response(model=adapter._model, model_id=profile.model_id)
+    _architecture_cache[project_id] = result
+    return result
 
 
 async def get_model_architecture(*, project_id: str) -> ModelArchitectureResponse:
