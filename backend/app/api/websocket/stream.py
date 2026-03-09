@@ -128,7 +128,7 @@ class ConnectionManager:
         if not conn.is_subscribed(channel):
             return
 
-        event_run_id = payload.get("run_id")
+        event_run_id = payload.get("runId")
         if conn.run_id is not None and event_run_id != conn.run_id:
             return
 
@@ -171,7 +171,13 @@ class ConnectionManager:
         while True:
             await asyncio.sleep(_RESOURCE_POLL_INTERVAL)
             try:
-                resource_payload = _collect_system_resources()
+                raw = _collect_system_resources()
+                resource_payload = {
+                    "gpuMemoryUsedMb": raw["gpu_memory_used_mb"],
+                    "gpuUtilizationPct": raw["gpu_utilization_pct"],
+                    "cpuPct": raw["cpu_pct"],
+                    "ramUsedMb": raw["ram_used_mb"],
+                }
             except Exception:
                 logger.exception("failed to collect system resources")
                 continue
@@ -183,7 +189,7 @@ class ConnectionManager:
                     payload={
                         "channel": "system",
                         "event": "resource_update",
-                        "run_id": None,
+                        "runId": None,
                         "timestamp": datetime.now(UTC).isoformat(),
                         "payload": resource_payload,
                     },

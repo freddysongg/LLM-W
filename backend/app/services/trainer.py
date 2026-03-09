@@ -22,6 +22,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from transformers import TrainerCallback
+
 logger = logging.getLogger(__name__)
 
 # Stage definitions matching spec section 19.1
@@ -218,7 +220,7 @@ def _get_dir_size(path: Path) -> int:
     return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
 
 
-class WorkbenchCallback:
+class WorkbenchCallback(TrainerCallback):
     """HuggingFace TrainerCallback that emits structured events to stdout."""
 
     def __init__(

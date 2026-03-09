@@ -187,11 +187,11 @@ async def create_run(
         payload={
             "channel": "run_state",
             "event": "run_created",
-            "run_id": run_id,
+            "runId": run_id,
             "timestamp": now,
             "payload": {
-                "run_id": run_id,
-                "config_version_id": payload.config_version_id,
+                "runId": run_id,
+                "configVersionId": payload.config_version_id,
                 "status": "pending",
             },
         },
@@ -372,12 +372,12 @@ async def _process_trainer_event(
             payload={
                 "channel": "run_state",
                 "event": "stage_entered",
-                "run_id": run_id,
+                "runId": run_id,
                 "timestamp": timestamp,
                 "payload": {
-                    "run_id": run_id,
-                    "stage_name": stage_name,
-                    "stage_order": event.get("stage_order", _STAGE_ORDER.get(stage_name, 0)),
+                    "runId": run_id,
+                    "stageName": stage_name,
+                    "stageOrder": event.get("stage_order", _STAGE_ORDER.get(stage_name, 0)),
                 },
             },
         )
@@ -399,13 +399,13 @@ async def _process_trainer_event(
             payload={
                 "channel": "run_state",
                 "event": "stage_completed",
-                "run_id": run_id,
+                "runId": run_id,
                 "timestamp": timestamp,
                 "payload": {
-                    "run_id": run_id,
-                    "stage_name": stage_name,
-                    "duration_ms": duration_ms,
-                    "output_summary": output_summary,
+                    "runId": run_id,
+                    "stageName": stage_name,
+                    "durationMs": duration_ms,
+                    "outputSummary": output_summary,
                 },
             },
         )
@@ -425,12 +425,12 @@ async def _process_trainer_event(
             payload={
                 "channel": "run_state",
                 "event": "stage_failed",
-                "run_id": run_id,
+                "runId": run_id,
                 "timestamp": timestamp,
                 "payload": {
-                    "run_id": run_id,
-                    "stage_name": stage_name,
-                    "error_message": error,
+                    "runId": run_id,
+                    "stageName": stage_name,
+                    "errorMessage": error,
                 },
             },
         )
@@ -446,10 +446,10 @@ async def _process_trainer_event(
             payload={
                 "channel": "metrics",
                 "event": "metric_recorded",
-                "run_id": run_id,
+                "runId": run_id,
                 "timestamp": timestamp,
                 "payload": {
-                    "run_id": run_id,
+                    "runId": run_id,
                     "step": step,
                     "epoch": epoch,
                     "metrics": metrics,
@@ -474,13 +474,13 @@ async def _process_trainer_event(
             payload={
                 "channel": "run_state",
                 "event": "progress_update",
-                "run_id": run_id,
+                "runId": run_id,
                 "timestamp": timestamp,
                 "payload": {
-                    "run_id": run_id,
-                    "current_step": current_step,
-                    "total_steps": total_steps,
-                    "progress_pct": progress_pct,
+                    "runId": run_id,
+                    "currentStep": current_step,
+                    "totalSteps": total_steps,
+                    "progressPct": progress_pct,
                     "epoch": epoch,
                 },
             },
@@ -507,13 +507,13 @@ async def _process_trainer_event(
             payload={
                 "channel": "system",
                 "event": "checkpoint_saved",
-                "run_id": run_id,
+                "runId": run_id,
                 "timestamp": timestamp,
                 "payload": {
-                    "run_id": run_id,
+                    "runId": run_id,
                     "step": step,
                     "path": path,
-                    "size_bytes": size_bytes,
+                    "sizeBytes": size_bytes,
                 },
             },
         )
@@ -534,9 +534,9 @@ async def _process_trainer_event(
             payload={
                 "channel": "system",
                 "event": "artifact_created",
-                "run_id": run_id,
+                "runId": run_id,
                 "timestamp": timestamp,
-                "payload": {"run_id": run_id, "artifact_type": artifact_type, "path": path},
+                "payload": {"runId": run_id, "artifactType": artifact_type, "path": path},
             },
         )
 
@@ -563,9 +563,9 @@ async def _flush_log_batch(
         payload={
             "channel": "logs",
             "event": "log_batch",
-            "run_id": run_id,
+            "runId": run_id,
             "timestamp": datetime.now(UTC).isoformat(),
-            "payload": {"run_id": run_id, "lines": list(log_buffer)},
+            "payload": {"runId": run_id, "lines": list(log_buffer)},
         },
     )
     log_buffer.clear()
@@ -735,12 +735,12 @@ async def _run_trainer_subprocess(
                 payload={
                     "channel": "run_state",
                     "event": "run_completed",
-                    "run_id": run_id,
+                    "runId": run_id,
                     "timestamp": now,
                     "payload": {
-                        "run_id": run_id,
-                        "total_duration_ms": 0,
-                        "final_metrics": final_metrics,
+                        "runId": run_id,
+                        "totalDurationMs": 0,
+                        "finalMetrics": final_metrics,
                     },
                 },
             )
@@ -752,9 +752,9 @@ async def _run_trainer_subprocess(
                 payload={
                     "channel": "run_state",
                     "event": "run_cancelled",
-                    "run_id": run_id,
+                    "runId": run_id,
                     "timestamp": now,
-                    "payload": {"run_id": run_id},
+                    "payload": {"runId": run_id},
                 },
             )
         else:
@@ -769,13 +769,13 @@ async def _run_trainer_subprocess(
                 payload={
                     "channel": "run_state",
                     "event": "run_failed",
-                    "run_id": run_id,
+                    "runId": run_id,
                     "timestamp": now,
                     "payload": {
-                        "run_id": run_id,
-                        "failure_reason": captured_failure_reason,
-                        "failure_stage": captured_failure_stage or None,
-                        "last_step": 0,
+                        "runId": run_id,
+                        "failureReason": captured_failure_reason,
+                        "failureStage": captured_failure_stage or None,
+                        "lastStep": 0,
                     },
                 },
             )
@@ -829,9 +829,9 @@ async def pause_run(*, session: AsyncSession, run_id: str) -> Run:
         payload={
             "channel": "run_state",
             "event": "run_paused",
-            "run_id": run_id,
+            "runId": run_id,
             "timestamp": now,
-            "payload": {"run_id": run_id, "paused_at_step": run.current_step},
+            "payload": {"runId": run_id, "pausedAtStep": run.current_step},
         },
     )
     return run

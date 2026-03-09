@@ -25,6 +25,7 @@ from app.schemas.model import (
     FullTensorRequest,
     FullTensorResponse,
     LayerDetailResponse,
+    LayerNode,
     ModelArchitectureResponse,
     ModelProfile,
     ModelResolveRequest,
@@ -222,29 +223,52 @@ async def get_model_architecture(*, project_id: str) -> ModelArchitectureRespons
     )
 
 
+def _find_node_in_tree(*, node: LayerNode, target: str) -> LayerNode | None:
+    """Depth-first search for a node by name in a LayerNode tree."""
+    if node.name == target:
+        return node
+    if node.children:
+        for child in node.children:
+            found = _find_node_in_tree(node=child, target=target)
+            if found is not None:
+                return found
+    return None
+
+
 def get_layer_detail(*, project_id: str, layer_name: str) -> LayerDetailResponse:
     adapter = _adapters.get(project_id)
-    if adapter is None or adapter._model is None:
+    if adapter is not None and adapter._model is not None:
+        module_map = dict(adapter._model.named_modules())
+        if layer_name not in module_map:
+            raise LayerNotFoundError(layer_name)
+        module = module_map[layer_name]
+        params = sum(p.numel() for p in module.parameters(recurse=False))
+        is_trainable = any(p.requires_grad for p in module.parameters(recurse=False))
+        weight = getattr(module, "weight", None)
+        return LayerDetailResponse(
+            name=layer_name,
+            type=type(module).__name__,
+            params=params,
+            trainable=is_trainable,
+            dtype=str(weight.dtype) if weight is not None else None,
+            shape=list(weight.shape) if weight is not None else None,
+        )
+
+    cached = _architecture_cache.get(project_id)
+    if cached is None:
         raise ModelNotResolvedError(project_id)
 
-    module_map = dict(adapter._model.named_modules())
-    if layer_name not in module_map:
+    node = _find_node_in_tree(node=cached.tree, target=layer_name)
+    if node is None:
         raise LayerNotFoundError(layer_name)
 
-    module = module_map[layer_name]
-    params = sum(p.numel() for p in module.parameters(recurse=False))
-    is_trainable = any(p.requires_grad for p in module.parameters(recurse=False))
-    weight = getattr(module, "weight", None)
-    dtype = str(weight.dtype) if weight is not None else None
-    shape = list(weight.shape) if weight is not None else None
-
     return LayerDetailResponse(
-        name=layer_name,
-        type=type(module).__name__,
-        params=params,
-        trainable=is_trainable,
-        dtype=dtype,
-        shape=shape,
+        name=node.name,
+        type=node.type,
+        params=node.params or 0,
+        trainable=node.trainable or False,
+        dtype=node.dtype,
+        shape=node.shape,
     )
 
 

@@ -7,15 +7,15 @@ export type StageName =
   | "environment_validation"
   | "model_resolution"
   | "dataset_resolution"
-  | "preprocessing"
-  | "adapter_setup"
-  | "quantization_setup"
-  | "training_init"
-  | "training"
+  | "dataset_profiling"
+  | "tokenization_preprocessing"
+  | "training_preparation"
+  | "adapter_attachment"
+  | "training_start"
+  | "training_progress"
   | "evaluation"
   | "checkpoint_save"
-  | "artifact_collection"
-  | "cleanup"
+  | "artifact_finalization"
   | "completion";
 
 export type MetricName =

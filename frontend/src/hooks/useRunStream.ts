@@ -1,6 +1,7 @@
 import * as React from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { wsClient } from "@/ws/client";
+import { useRunStreamStore } from "@/stores/run-stream-store";
 import type {
   WebSocketEnvelope,
   MetricRecordedPayload,
@@ -10,48 +11,22 @@ import type {
   CheckpointSavedPayload,
   ProgressUpdatePayload,
 } from "@/types/websocket";
-import type { MetricPoint } from "@/types/run";
-import type { LogEntry, Checkpoint } from "@/types/run";
+import type { MetricPoint, LogEntry, Checkpoint } from "@/types/run";
 
-interface LiveMetrics {
-  readonly byStep: ReadonlyArray<MetricPoint>;
-}
-
-interface SystemResources {
-  readonly gpuMemoryUsedMb: number;
-  readonly gpuUtilizationPct: number;
-  readonly cpuPct: number;
-  readonly ramUsedMb: number;
-}
-
-interface RunStreamState {
+export interface RunStreamState {
   readonly isConnected: boolean;
   readonly liveLogs: ReadonlyArray<LogEntry>;
-  readonly liveMetrics: LiveMetrics;
-  readonly systemResources: SystemResources | null;
+  readonly liveMetrics: ReadonlyArray<MetricPoint>;
+  readonly systemResources: {
+    readonly gpuMemoryUsedMb: number;
+    readonly gpuUtilizationPct: number;
+    readonly cpuPct: number;
+    readonly ramUsedMb: number;
+  } | null;
   readonly liveCheckpoints: ReadonlyArray<Checkpoint>;
   readonly progressPct: number | null;
   readonly currentStep: number | null;
   readonly totalSteps: number | null;
-}
-
-const MAX_LIVE_LOGS = 2000;
-
-function processMetricPayload(
-  prev: ReadonlyArray<MetricPoint>,
-  payload: MetricRecordedPayload,
-): ReadonlyArray<MetricPoint> {
-  const newPoints: MetricPoint[] = Object.entries(payload.metrics).map(([name, value]) => ({
-    id: `${payload.runId}-${payload.step}-${name}`,
-    runId: payload.runId,
-    step: payload.step,
-    epoch: payload.epoch,
-    metricName: name as MetricPoint["metricName"],
-    metricValue: value,
-    stageName: null,
-    recordedAt: new Date().toISOString(),
-  }));
-  return [...prev, ...newPoints];
 }
 
 function processLogLine(entry: Omit<LogLinePayload, "runId">): LogEntry {
@@ -64,6 +39,19 @@ function processLogLine(entry: Omit<LogLinePayload, "runId">): LogEntry {
   };
 }
 
+function buildMetricPoints(payload: MetricRecordedPayload): ReadonlyArray<MetricPoint> {
+  return Object.entries(payload.metrics).map(([name, value]) => ({
+    id: `${payload.runId}-${payload.step}-${name}`,
+    runId: payload.runId,
+    step: payload.step,
+    epoch: payload.epoch,
+    metricName: name as MetricPoint["metricName"],
+    metricValue: value,
+    stageName: null,
+    recordedAt: new Date().toISOString(),
+  }));
+}
+
 export function useRunStream({
   projectId,
   runId,
@@ -72,14 +60,25 @@ export function useRunStream({
   runId: string | null;
 }): RunStreamState {
   const queryClient = useQueryClient();
-  const [isConnected, setIsConnected] = React.useState(false);
-  const [liveLogs, setLiveLogs] = React.useState<ReadonlyArray<LogEntry>>([]);
-  const [liveMetrics, setLiveMetrics] = React.useState<LiveMetrics>({ byStep: [] });
-  const [systemResources, setSystemResources] = React.useState<SystemResources | null>(null);
-  const [liveCheckpoints, setLiveCheckpoints] = React.useState<ReadonlyArray<Checkpoint>>([]);
-  const [progressPct, setProgressPct] = React.useState<number | null>(null);
-  const [currentStep, setCurrentStep] = React.useState<number | null>(null);
-  const [totalSteps, setTotalSteps] = React.useState<number | null>(null);
+  const [isConnected, setIsConnected] = React.useState(wsClient.isConnected);
+
+  const {
+    appendLogs,
+    appendMetricPoints,
+    appendCheckpoint,
+    setProgress,
+    setSystemResources,
+    runData,
+    systemResources,
+  } = useRunStreamStore((state) => ({
+    appendLogs: state.appendLogs,
+    appendMetricPoints: state.appendMetricPoints,
+    appendCheckpoint: state.appendCheckpoint,
+    setProgress: state.setProgress,
+    setSystemResources: state.setSystemResources,
+    runData: runId ? (state.runData[runId] ?? null) : null,
+    systemResources: state.systemResources,
+  }));
 
   React.useEffect(() => {
     if (!projectId || !runId) return;
@@ -98,26 +97,16 @@ export function useRunStream({
 
       if (envelope.channel === "metrics" && envelope.event === "metric_recorded") {
         const payload = envelope.payload as MetricRecordedPayload;
-        setLiveMetrics((prev) => ({
-          byStep: processMetricPayload(prev.byStep, payload),
-        }));
+        appendMetricPoints(runId, buildMetricPoints(payload));
       }
 
       if (envelope.channel === "logs") {
         if (envelope.event === "log_line") {
           const payload = envelope.payload as LogLinePayload;
-          const entry = processLogLine(payload);
-          setLiveLogs((prev) => {
-            const next = [...prev, entry];
-            return next.length > MAX_LIVE_LOGS ? next.slice(-MAX_LIVE_LOGS) : next;
-          });
+          appendLogs(runId, [processLogLine(payload)]);
         } else if (envelope.event === "log_batch") {
           const payload = envelope.payload as LogBatchPayload;
-          const entries = payload.lines.map(processLogLine);
-          setLiveLogs((prev) => {
-            const next = [...prev, ...entries];
-            return next.length > MAX_LIVE_LOGS ? next.slice(-MAX_LIVE_LOGS) : next;
-          });
+          appendLogs(runId, payload.lines.map(processLogLine));
         }
       }
 
@@ -142,16 +131,14 @@ export function useRunStream({
             isRetained: false,
             createdAt: new Date().toISOString(),
           };
-          setLiveCheckpoints((prev) => [...prev, checkpoint]);
+          appendCheckpoint(runId, checkpoint);
         }
       }
 
       if (envelope.channel === "run_state") {
         if (envelope.event === "progress_update") {
           const payload = envelope.payload as ProgressUpdatePayload;
-          setProgressPct(payload.progressPct);
-          setCurrentStep(payload.currentStep);
-          setTotalSteps(payload.totalSteps);
+          setProgress(runId, payload.progressPct, payload.currentStep, payload.totalSteps);
         }
 
         const invalidatingEvents = new Set([
@@ -188,18 +175,27 @@ export function useRunStream({
     return () => {
       removeConnectionListener();
       removeMessageListener();
-      wsClient.disconnect();
+      // Do not disconnect — the WS connection is shared and must survive navigation.
     };
-  }, [projectId, runId, queryClient]);
+  }, [
+    projectId,
+    runId,
+    queryClient,
+    appendLogs,
+    appendMetricPoints,
+    appendCheckpoint,
+    setProgress,
+    setSystemResources,
+  ]);
 
   return {
     isConnected,
-    liveLogs,
-    liveMetrics,
+    liveLogs: runData?.liveLogs ?? [],
+    liveMetrics: runData?.liveMetrics ?? [],
     systemResources,
-    liveCheckpoints,
-    progressPct,
-    currentStep,
-    totalSteps,
+    liveCheckpoints: runData?.liveCheckpoints ?? [],
+    progressPct: runData?.progressPct ?? null,
+    currentStep: runData?.currentStep ?? null,
+    totalSteps: runData?.totalSteps ?? null,
   };
 }

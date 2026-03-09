@@ -209,7 +209,7 @@ export default function RunsPage(): React.JSX.Element {
             </TabsContent>
 
             <TabsContent value="metrics" className="mt-4">
-              <LiveMetricsCharts metricPoints={streamState.liveMetrics.byStep} />
+              <LiveMetricsCharts metricPoints={streamState.liveMetrics} />
             </TabsContent>
 
             <TabsContent value="logs" className="mt-4 h-96">
