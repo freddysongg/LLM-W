@@ -42,6 +42,12 @@ export default function DatasetsPage(): React.JSX.Element {
 
   const previewTransform = usePreviewTransform({ projectId });
 
+  React.useEffect(() => {
+    if (profile && !datasetForm.datasetId) {
+      setDatasetForm({ source: profile.source, datasetId: profile.datasetId, format: profile.format });
+    }
+  }, [profile, datasetForm.datasetId, setDatasetForm]);
+
   const handleResolve = (): void => {
     const request: DatasetResolveRequest = {
       source: datasetForm.source,

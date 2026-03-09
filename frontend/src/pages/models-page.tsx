@@ -21,6 +21,12 @@ export default function ModelsPage(): React.JSX.Element {
   const { data: architecture } = useModelArchitecture({ projectId });
   const resolveModel = useResolveModel();
 
+  React.useEffect(() => {
+    if (profile && !modelForm.modelId) {
+      setModelForm({ source: profile.source, modelId: profile.model_id });
+    }
+  }, [profile, modelForm.modelId, setModelForm]);
+
   const handleResolve = (): void => {
     if (!projectId || !modelForm.modelId.trim()) return;
     resolveModel.mutate({
