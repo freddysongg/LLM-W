@@ -39,7 +39,10 @@ export default function AdaptersPage(): React.JSX.Element {
 
   React.useEffect(() => {
     if (parsedConfig && !localAdapters) {
-      setLocalAdapters(parsedConfig.adapters);
+      setLocalAdapters({
+        ...parsedConfig.adapters,
+        targetModules: parsedConfig.adapters.targetModules ?? [],
+      });
       setLocalOptimization(parsedConfig.optimization);
       setLocalQuantization(parsedConfig.quantization);
     }

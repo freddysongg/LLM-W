@@ -92,8 +92,8 @@ export function TrainableParamsPreview({
           <div className="flex justify-between">
             <span>Target modules</span>
             <span className="font-mono truncate ml-2 text-right">
-              {adapters.targetModules.length > 0
-                ? adapters.targetModules.join(", ")
+              {(adapters.targetModules ?? []).length > 0
+                ? (adapters.targetModules ?? []).join(", ")
                 : "none selected"}
             </span>
           </div>
