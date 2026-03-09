@@ -140,5 +140,18 @@
 		"status": "active",
 		"createdAt": "2026-03-09T00:49:11.730Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-b0e06e42",
+		"name": "ui-batch-2",
+		"memberIssueIds": [
+			"llm-interactive-8b0a",
+			"llm-interactive-a0ab",
+			"llm-interactive-e335",
+			"llm-interactive-2d5a"
+		],
+		"status": "active",
+		"createdAt": "2026-03-09T01:13:04.799Z",
+		"completedAt": null
 	}
 ]
