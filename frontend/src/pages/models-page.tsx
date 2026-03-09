@@ -10,6 +10,8 @@ import { CapabilityBadges } from "@/components/model/capability-badges";
 import { ResourceEstimateCard } from "@/components/model/resource-estimate-card";
 import { LayerSummaryTable } from "@/components/model/layer-summary-table";
 import { Card, CardContent } from "@/components/ui/card";
+import { CopyForAI } from "@/components/shared/copy-for-ai";
+import { buildModelPrompt } from "@/lib/ai-copy-prompts";
 import type { ModelSource } from "@/types/model";
 
 export default function ModelsPage(): React.JSX.Element {
@@ -32,8 +34,11 @@ export default function ModelsPage(): React.JSX.Element {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center h-14 px-6 border-b">
+      <div className="flex items-center justify-between h-14 px-6 border-b">
         <h1 className="text-xl font-semibold">Models</h1>
+        {profile && architecture && (
+          <CopyForAI buildPrompt={() => buildModelPrompt({ profile, architecture })} />
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto p-6 space-y-6">

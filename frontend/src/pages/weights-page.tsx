@@ -21,6 +21,8 @@ import { RevertButton } from "@/components/weights/revert-button";
 import { FlowVisualization } from "@/components/weights/flow-visualization";
 import { flattenToFlowColumns } from "@/lib/flatten-to-flow-columns";
 import { NoProjectSelected } from "@/components/shared/no-project-selected";
+import { CopyForAI } from "@/components/shared/copy-for-ai";
+import { buildArchitecturePrompt } from "@/lib/ai-copy-prompts";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { FlowMode } from "@/types/flow";
 import type {
@@ -239,6 +241,9 @@ export default function WeightsPage(): React.JSX.Element {
             </p>
           )}
         </div>
+        {architecture && (
+          <CopyForAI buildPrompt={() => buildArchitecturePrompt({ architecture })} />
+        )}
       </div>
 
       {isArchLoading && (

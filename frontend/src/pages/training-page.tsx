@@ -5,6 +5,8 @@ import { useActiveConfig, useSaveConfig } from "@/hooks/useConfigs";
 import { TrainingForm } from "@/components/training/training-form";
 import { TrainingPresetsPanel } from "@/components/training/training-presets-panel";
 import { NoProjectSelected } from "@/components/shared/no-project-selected";
+import { CopyForAI } from "@/components/shared/copy-for-ai";
+import { buildTrainingPrompt } from "@/lib/ai-copy-prompts";
 import type { TrainingConfig, WorkbenchConfig } from "@/types/config";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -85,11 +87,23 @@ export default function TrainingPage(): React.JSX.Element {
       <div className="flex-1 max-w-2xl space-y-4">
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-semibold">Training</h1>
-          {localTraining && (
-            <Button onClick={handleSave} disabled={saveConfig.isPending} size="sm">
-              {saveConfig.isPending ? "Saving…" : "Save Config"}
-            </Button>
-          )}
+          <div className="flex items-center gap-2">
+            {localTraining && parsedConfig && (
+              <CopyForAI
+                buildPrompt={() =>
+                  buildTrainingPrompt({
+                    training: localTraining,
+                    optimization: parsedConfig.optimization,
+                  })
+                }
+              />
+            )}
+            {localTraining && (
+              <Button onClick={handleSave} disabled={saveConfig.isPending} size="sm">
+                {saveConfig.isPending ? "Saving…" : "Save Config"}
+              </Button>
+            )}
+          </div>
         </div>
 
         {isLoading && <div className="text-sm text-muted-foreground">Loading config…</div>}
