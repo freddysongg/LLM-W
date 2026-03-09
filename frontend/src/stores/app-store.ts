@@ -66,7 +66,7 @@ export const useAppStore = create<AppStore>()(
       drawerRunId: null,
       drawerLayerName: null,
       drawerSuggestionId: null,
-      isBottomPanelVisible: true,
+      isBottomPanelVisible: false,
       bottomPanelHeight: 200,
       navGroupExpanded: DEFAULT_NAV_GROUP_EXPANDED,
 
