@@ -124,6 +124,30 @@ async def get_run(
     return RunResponse.model_validate(run)
 
 
+@router.delete("/{project_id}/runs/{run_id}", status_code=204)
+async def delete_run(
+    project_id: str,
+    run_id: str,
+    session: DbSession,
+) -> None:
+    try:
+        await run_service.delete_run(
+            session=session,
+            run_id=run_id,
+            project_id=project_id,
+        )
+    except RunNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "RUN_NOT_FOUND", "message": str(exc), "details": {}},
+        ) from exc
+    except RunStateError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "RUN_STATE_ERROR", "message": str(exc), "details": {}},
+        ) from exc
+
+
 @router.post("/{project_id}/runs/{run_id}/cancel", response_model=RunResponse)
 async def cancel_run(
     project_id: str,

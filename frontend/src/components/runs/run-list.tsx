@@ -1,4 +1,5 @@
 import * as React from "react";
+import { Trash2 } from "lucide-react";
 import type { Run } from "@/types/run";
 import {
   Table,
@@ -9,11 +10,14 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 
 interface RunListProps {
   readonly runs: ReadonlyArray<Run>;
   readonly selectedRunId: string | null;
   readonly onSelectRun: (runId: string) => void;
+  readonly onDeleteRun: (runId: string) => void;
+  readonly isDeletingRunId: string | null;
   readonly onStartRun?: () => void;
   readonly isStartingRun?: boolean;
   readonly canStartRun?: boolean;
@@ -52,7 +56,15 @@ function formatDuration(startedAt: string | null, completedAt: string | null): s
   return `${seconds}s`;
 }
 
-export function RunList({ runs, selectedRunId, onSelectRun }: RunListProps): React.JSX.Element {
+const DELETABLE_STATUSES = new Set(["completed", "failed", "cancelled"]);
+
+export function RunList({
+  runs,
+  selectedRunId,
+  onSelectRun,
+  onDeleteRun,
+  isDeletingRunId,
+}: RunListProps): React.JSX.Element {
   if (runs.length === 0) {
     return (
       <div className="py-12 flex flex-col items-center gap-3 text-sm text-muted-foreground">
@@ -70,6 +82,7 @@ export function RunList({ runs, selectedRunId, onSelectRun }: RunListProps): Rea
           <TableHead>Stage</TableHead>
           <TableHead>Duration</TableHead>
           <TableHead>Config Version</TableHead>
+          <TableHead className="w-10" />
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -77,7 +90,7 @@ export function RunList({ runs, selectedRunId, onSelectRun }: RunListProps): Rea
           <TableRow
             key={run.id}
             onClick={() => onSelectRun(run.id)}
-            className={`cursor-pointer ${selectedRunId === run.id ? "bg-accent" : "hover:bg-muted/50"}`}
+            className={`group cursor-pointer ${selectedRunId === run.id ? "bg-accent" : "hover:bg-muted/50"}`}
           >
             <TableCell className="font-mono text-xs">{run.id.slice(0, 8)}</TableCell>
             <TableCell>
@@ -91,6 +104,23 @@ export function RunList({ runs, selectedRunId, onSelectRun }: RunListProps): Rea
             </TableCell>
             <TableCell className="font-mono text-xs text-muted-foreground">
               {run.configVersionId.slice(0, 8)}
+            </TableCell>
+            <TableCell className="w-10 text-right">
+              {DELETABLE_STATUSES.has(run.status) && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
+                  disabled={isDeletingRunId === run.id}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDeleteRun(run.id);
+                  }}
+                  aria-label="Delete run"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              )}
             </TableCell>
           </TableRow>
         ))}

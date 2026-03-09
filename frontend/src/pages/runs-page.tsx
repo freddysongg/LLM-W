@@ -5,6 +5,7 @@ import {
   useRunStages,
   useCheckpoints,
   useCancelRun,
+  useDeleteRun,
   usePauseRun,
   useResumeRun,
   useCreateRun,
@@ -54,6 +55,7 @@ export default function RunsPage(): React.JSX.Element {
   });
 
   const cancelRun = useCancelRun();
+  const deleteRunMutation = useDeleteRun();
   const pauseRun = usePauseRun();
   const resumeRun = useResumeRun();
   const createRunMutation = useCreateRun();
@@ -74,6 +76,21 @@ export default function RunsPage(): React.JSX.Element {
     createRunMutation.mutate(
       { projectId: activeProjectId, configVersionId: activeConfig.id },
       { onSuccess: (newRun) => setSelectedRunId(newRun.id) },
+    );
+  };
+
+  const handleDeleteRun = (runId: string): void => {
+    if (!activeProjectId) return;
+    deleteRunMutation.mutate(
+      { projectId: activeProjectId, runId },
+      {
+        onSuccess: () => {
+          if (selectedRunId === runId) {
+            setSelectedRunId(null);
+            setSelectedStageId(null);
+          }
+        },
+      },
     );
   };
 
@@ -159,6 +176,8 @@ export default function RunsPage(): React.JSX.Element {
             setSelectedRunId(id);
             setSelectedStageId(null);
           }}
+          onDeleteRun={handleDeleteRun}
+          isDeletingRunId={deleteRunMutation.isPending ? (deleteRunMutation.variables?.runId ?? null) : null}
           onStartRun={handleStartRun}
           isStartingRun={createRunMutation.isPending}
           canStartRun={canStartRun}

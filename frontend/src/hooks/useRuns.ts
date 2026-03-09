@@ -3,6 +3,7 @@ import {
   fetchRuns,
   fetchRun,
   createRun,
+  deleteRun,
   cancelRun,
   pauseRun,
   resumeRun,
@@ -39,6 +40,17 @@ export function useCreateRun() {
   return useMutation({
     mutationFn: ({ projectId, configVersionId }: { projectId: string; configVersionId: string }) =>
       createRun({ projectId, configVersionId }),
+    onSuccess: (_data, { projectId }) => {
+      void queryClient.invalidateQueries({ queryKey: RUNS_KEY(projectId) });
+    },
+  });
+}
+
+export function useDeleteRun() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ projectId, runId }: { projectId: string; runId: string }) =>
+      deleteRun({ projectId, runId }),
     onSuccess: (_data, { projectId }) => {
       void queryClient.invalidateQueries({ queryKey: RUNS_KEY(projectId) });
     },

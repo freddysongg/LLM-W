@@ -39,6 +39,7 @@ from app.schemas.run import (
 _CANCELLABLE_STATUSES = frozenset({"pending", "running", "paused"})
 _PAUSABLE_STATUSES = frozenset({"running"})
 _RESUMABLE_STATUSES = frozenset({"failed", "cancelled", "paused", "completed"})
+_DELETABLE_STATUSES = frozenset({"completed", "failed", "cancelled"})
 
 
 async def list_runs(
@@ -132,6 +133,14 @@ async def cancel_run(*, session: AsyncSession, run_id: str, project_id: str) -> 
     await session.commit()
     await session.refresh(run)
     return run
+
+
+async def delete_run(*, session: AsyncSession, run_id: str, project_id: str) -> None:
+    run = await get_run(session=session, run_id=run_id, project_id=project_id)
+    if run.status not in _DELETABLE_STATUSES:
+        raise RunStateError(run_id=run_id, action="delete", current_status=run.status)
+    await session.delete(run)
+    await session.commit()
 
 
 async def pause_run(*, session: AsyncSession, run_id: str, project_id: str) -> Run:

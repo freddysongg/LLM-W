@@ -278,6 +278,16 @@ export async function createRun({
   return normalizeRun(raw);
 }
 
+export async function deleteRun({
+  projectId,
+  runId,
+}: {
+  projectId: string;
+  runId: string;
+}): Promise<void> {
+  return fetchApi<void>({ path: `/projects/${projectId}/runs/${runId}`, method: "DELETE" });
+}
+
 export async function cancelRun({
   projectId,
   runId,
