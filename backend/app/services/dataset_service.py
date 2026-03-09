@@ -179,26 +179,30 @@ def _load_huggingface(
     split_counts = SplitCounts()
 
     for split_name in splits_to_load:
-        try:
+        if split_name == train_split:
             ds = load_dataset(dataset_id, subset, split=split_name)
             split_rows = [dict(row) for row in ds]
             count = len(split_rows)
-            if split_name == train_split:
-                split_counts = SplitCounts(
-                    train=count,
-                    validation=split_counts.validation,
-                    test=split_counts.test,
-                )
-                all_rows = split_rows
-            elif split_name == eval_split:
-                split_counts = SplitCounts(
-                    train=split_counts.train,
-                    validation=count,
-                    test=split_counts.test,
-                )
-        except Exception:
-            # Split may not exist; skip it
-            pass
+            split_counts = SplitCounts(
+                train=count,
+                validation=split_counts.validation,
+                test=split_counts.test,
+            )
+            all_rows = split_rows
+        else:
+            try:
+                ds = load_dataset(dataset_id, subset, split=split_name)
+                split_rows = [dict(row) for row in ds]
+                count = len(split_rows)
+                if split_name == eval_split:
+                    split_counts = SplitCounts(
+                        train=split_counts.train,
+                        validation=count,
+                        test=split_counts.test,
+                    )
+            except Exception:
+                # Eval/test split may not exist in this dataset; skip it
+                pass
 
     return all_rows, split_counts
 
@@ -302,8 +306,9 @@ async def resolve_dataset(
         rows = _resolve_local(dataset_id=request.dataset_id, source=request.source)
         split_counts = SplitCounts(train=len(rows))
 
-    if request.max_samples is not None and len(rows) > request.max_samples:
-        rows = rows[: request.max_samples]
+    cap = request.max_samples
+    if cap is not None and cap > 0 and len(rows) > cap:
+        rows = rows[:cap]
 
     detected_format = request.format if request.format != "default" else _detect_format(rows)
     detected_fields = _collect_fields(rows)

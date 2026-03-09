@@ -89,11 +89,6 @@ export function DatasetSubsetSelector({
     onMaxSamplesChange(Number.isNaN(parsed) || parsed < 1 ? null : parsed);
   };
 
-  const sum =
-    (trainRatio ?? 0) + (valRatio ?? 0) + (testRatio ?? 0);
-  const hasValues = trainRatio !== null || valRatio !== null || testRatio !== null;
-  const isInvalid = hasValues && sum !== 100;
-
   const computedRows =
     sampleMode === "percentage" && totalRows !== null
       ? Math.floor((percentageValue / 100) * totalRows)
@@ -141,9 +136,6 @@ export function DatasetSubsetSelector({
             </div>
           ))}
         </div>
-        {isInvalid && (
-          <p className="text-xs text-destructive">Percentages must sum to 100 (currently {sum})</p>
-        )}
         <p className="text-xs text-muted-foreground">
           Set two values and the third auto-fills. Leave all blank to skip ratio tracking.
         </p>
