@@ -3,6 +3,8 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { useAppStore } from "@/stores/app-store";
 import { useActiveConfig, useSaveConfig } from "@/hooks/useConfigs";
 import { AdaptersForm } from "@/components/adapters/adapters-form";
+import { AdaptersPresetsPanel } from "@/components/adapters/adapters-presets-panel";
+import type { AdaptersPresetValues } from "@/components/adapters/adapters-presets-panel";
 import { TrainableParamsPreview } from "@/components/adapters/trainable-params-preview";
 import { NoProjectSelected } from "@/components/shared/no-project-selected";
 import type {
@@ -65,6 +67,22 @@ export default function AdaptersPage(): React.JSX.Element {
     });
   };
 
+  const handlePresetApply = ({
+    adapters,
+    optimization,
+    quantization,
+  }: AdaptersPresetValues): void => {
+    if (Object.keys(adapters).length > 0) {
+      setLocalAdapters((prev) => (prev ? { ...prev, ...adapters } : null));
+    }
+    if (Object.keys(optimization).length > 0) {
+      setLocalOptimization((prev) => (prev ? { ...prev, ...optimization } : null));
+    }
+    if (Object.keys(quantization).length > 0) {
+      setLocalQuantization((prev) => (prev ? { ...prev, ...quantization } : null));
+    }
+  };
+
   if (!activeProjectId) {
     return (
       <NoProjectSelected
@@ -75,39 +93,42 @@ export default function AdaptersPage(): React.JSX.Element {
   }
 
   return (
-    <div className="p-6 max-w-2xl space-y-4 pb-20">
-      <h1 className="text-xl font-semibold">Adapters &amp; Optimization</h1>
-
-      {isLoading && <div className="text-sm text-muted-foreground">Loading config…</div>}
-      {error && <div className="text-sm text-destructive">Failed to load config.</div>}
-
-      {localAdapters && localOptimization && localQuantization && (
-        <>
-          <TrainableParamsPreview adapters={localAdapters} projectId={activeProjectId} />
-          <AdaptersForm
-            adapters={localAdapters}
-            optimization={localOptimization}
-            quantization={localQuantization}
-            onAdaptersChange={(updates) =>
-              setLocalAdapters((prev) => (prev ? { ...prev, ...updates } : null))
-            }
-            onOptimizationChange={(updates) =>
-              setLocalOptimization((prev) => (prev ? { ...prev, ...updates } : null))
-            }
-            onQuantizationChange={(updates) =>
-              setLocalQuantization((prev) => (prev ? { ...prev, ...updates } : null))
-            }
-          />
-        </>
-      )}
-
-      {localAdapters && (
-        <div className="fixed bottom-0 right-0 z-10 flex justify-end border-t border-border bg-background px-6 py-4 shadow-md w-full">
-          <Button onClick={handleSave} disabled={saveConfig.isPending} size="sm">
-            {saveConfig.isPending ? "Saving…" : "Save Config"}
-          </Button>
+    <div className="p-6 flex gap-8 items-start">
+      <div className="flex-1 max-w-2xl space-y-4">
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-semibold">Adapters &amp; Optimization</h1>
+          {localAdapters && (
+            <Button onClick={handleSave} disabled={saveConfig.isPending} size="sm">
+              {saveConfig.isPending ? "Saving…" : "Save Config"}
+            </Button>
+          )}
         </div>
-      )}
+
+        {isLoading && <div className="text-sm text-muted-foreground">Loading config…</div>}
+        {error && <div className="text-sm text-destructive">Failed to load config.</div>}
+
+        {localAdapters && localOptimization && localQuantization && (
+          <>
+            <TrainableParamsPreview adapters={localAdapters} projectId={activeProjectId} />
+            <AdaptersForm
+              adapters={localAdapters}
+              optimization={localOptimization}
+              quantization={localQuantization}
+              onAdaptersChange={(updates) =>
+                setLocalAdapters((prev) => (prev ? { ...prev, ...updates } : null))
+              }
+              onOptimizationChange={(updates) =>
+                setLocalOptimization((prev) => (prev ? { ...prev, ...updates } : null))
+              }
+              onQuantizationChange={(updates) =>
+                setLocalQuantization((prev) => (prev ? { ...prev, ...updates } : null))
+              }
+            />
+          </>
+        )}
+      </div>
+
+      {localAdapters && <AdaptersPresetsPanel onApply={handlePresetApply} />}
     </div>
   );
 }
