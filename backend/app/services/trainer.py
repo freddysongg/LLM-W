@@ -631,11 +631,19 @@ def _stage_training_preparation(
     checkpoints_dir.mkdir(parents=True, exist_ok=True)
 
     mixed_precision: str = optimization_cfg.get("mixed_precision", "no")
-    if mixed_precision in ("bf16", "fp16") and device != "cuda":
+    if mixed_precision == "bf16" and device == "mps":
+        # bf16 has unreliable hardware support on MPS; fp16 is the correct fallback
+        _emit_log(
+            severity="info",
+            message="bf16 not supported on MPS, using fp16",
+            stage=stage_name,
+        )
+        mixed_precision = "fp16"
+    elif mixed_precision in ("bf16", "fp16") and device == "cpu":
         _emit_log(
             severity="warning",
             message=(
-                f"{mixed_precision} requested but no CUDA GPU available"
+                f"{mixed_precision} requested but no GPU available"
                 f" (device={device}), falling back to no mixed precision"
             ),
             stage=stage_name,
@@ -644,14 +652,26 @@ def _stage_training_preparation(
 
     is_cpu = device == "cpu"
 
+    epochs: int = training_cfg.get("epochs", 2)
+    batch_size: int = training_cfg.get("batch_size", 4)
+    grad_accum: int = training_cfg.get("gradient_accumulation_steps", 4)
+    configured_warmup_steps: int = optimization_cfg.get("warmup_steps", 0)
+    warmup_ratio: float = optimization_cfg.get("warmup_ratio", 0.03)
+    if configured_warmup_steps > 0:
+        warmup_steps = configured_warmup_steps
+    else:
+        # Compute warmup_steps from ratio since TRL ≥5.2 deprecated warmup_ratio
+        steps_per_epoch = max(1, len(train_dataset) // (batch_size * grad_accum))
+        warmup_steps = round(steps_per_epoch * epochs * warmup_ratio)
+
     try:
         from trl import SFTConfig, SFTTrainer  # noqa: PLC0415
 
         sft_config = SFTConfig(
             output_dir=str(checkpoints_dir),
-            num_train_epochs=training_cfg.get("epochs", 2),
-            per_device_train_batch_size=training_cfg.get("batch_size", 4),
-            gradient_accumulation_steps=training_cfg.get("gradient_accumulation_steps", 4),
+            num_train_epochs=epochs,
+            per_device_train_batch_size=batch_size,
+            gradient_accumulation_steps=grad_accum,
             learning_rate=training_cfg.get("learning_rate", 2e-4),
             weight_decay=training_cfg.get("weight_decay", 0.01),
             max_grad_norm=training_cfg.get("max_grad_norm", 1.0),
@@ -659,7 +679,7 @@ def _stage_training_preparation(
             save_steps=training_cfg.get("save_steps", 100),
             logging_steps=training_cfg.get("logging_steps", 10),
             seed=training_cfg.get("seed", 42),
-            warmup_ratio=optimization_cfg.get("warmup_ratio", 0.03),
+            warmup_steps=warmup_steps,
             lr_scheduler_type=optimization_cfg.get("scheduler", "cosine"),
             gradient_checkpointing=optimization_cfg.get("gradient_checkpointing", True),
             fp16=mixed_precision == "fp16",
