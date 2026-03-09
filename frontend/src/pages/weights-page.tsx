@@ -18,6 +18,8 @@ import { ExpertModeToggle } from "@/components/weights/expert-mode-toggle";
 import { TensorEditor } from "@/components/weights/tensor-editor";
 import { CheckpointBackupNotice } from "@/components/weights/checkpoint-backup-notice";
 import { RevertButton } from "@/components/weights/revert-button";
+import { FlowVisualization } from "@/components/weights/flow-visualization";
+import { flattenToFlowColumns } from "@/lib/flatten-to-flow-columns";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type {
   ActivationSnapshotResponse,
@@ -136,6 +138,11 @@ export default function WeightsPage(): React.JSX.Element {
     return collectLeafLayerNames({ node: architecture.tree, path: "" });
   }, [architecture]);
 
+  const flowColumns = React.useMemo(() => {
+    if (!architecture) return [];
+    return flattenToFlowColumns({ tree: architecture.tree });
+  }, [architecture]);
+
   const deltas: ReadonlyArray<WeightDelta> = React.useMemo(() => {
     const snapshotA = capturedSnapshots[compareIndexA];
     const snapshotB = capturedSnapshots[compareIndexB];
@@ -211,6 +218,7 @@ export default function WeightsPage(): React.JSX.Element {
               <TabsTrigger value="parameters">Parameters</TabsTrigger>
               <TabsTrigger value="activations">Activations</TabsTrigger>
               <TabsTrigger value="deltas">Deltas</TabsTrigger>
+              <TabsTrigger value="flow">Flow</TabsTrigger>
               <TabsTrigger value="expert">Expert Edit</TabsTrigger>
             </TabsList>
 
@@ -358,6 +366,15 @@ export default function WeightsPage(): React.JSX.Element {
                   </section>
                 </>
               )}
+            </TabsContent>
+
+            <TabsContent value="flow" className="mt-4">
+              <FlowVisualization columns={flowColumns} onSelectNode={setSelectedLayerName} />
+              <LayerDetailDrawer
+                layerDetail={layerDetail ?? null}
+                isLoading={isLayerLoading && selectedLayerName !== null}
+                onClose={() => setSelectedLayerName(null)}
+              />
             </TabsContent>
 
             <TabsContent value="expert" className="mt-4 space-y-4">
