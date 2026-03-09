@@ -23,7 +23,7 @@ from app.schemas.run import (
     RunResumeResponse,
     RunStageResponse,
 )
-from app.services import run_service
+from app.services import orchestrator, run_service
 from app.services.project_service import get_project
 
 router = APIRouter(prefix="/api/v1/projects", tags=["runs"])
@@ -55,7 +55,7 @@ async def create_run(
     session: DbSession,
 ) -> RunResponse:
     try:
-        run = await run_service.create_run(
+        run = await orchestrator.create_run(
             session=session,
             project_id=project_id,
             payload=payload,
