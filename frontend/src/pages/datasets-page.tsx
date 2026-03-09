@@ -48,18 +48,6 @@ export default function DatasetsPage(): React.JSX.Element {
     }
   }, [profile, datasetForm.datasetId, setDatasetForm]);
 
-  React.useEffect(() => {
-    if (!profile) return;
-    const { train, validation, test } = profile.splitCounts;
-    const total = profile.totalRows;
-    if (total === 0) return;
-    setDatasetForm({
-      trainRatio: train !== null ? Math.round((train / total) * 100) : null,
-      valRatio: validation !== null ? Math.round((validation / total) * 100) : null,
-      testRatio: test !== null ? Math.round((test / total) * 100) : null,
-    });
-  }, [profile, setDatasetForm]);
-
   const handleResolve = (): void => {
     const request: DatasetResolveRequest = {
       source: datasetForm.source,
@@ -75,7 +63,18 @@ export default function DatasetsPage(): React.JSX.Element {
       valRatio: datasetForm.valRatio,
       testRatio: datasetForm.testRatio,
     };
-    resolveDataset.mutate(request);
+    resolveDataset.mutate(request, {
+      onSuccess: (resolvedProfile) => {
+        const { train, validation, test } = resolvedProfile.splitCounts;
+        const total = resolvedProfile.totalRows;
+        if (total === 0) return;
+        setDatasetForm({
+          trainRatio: train !== null ? Math.round((train / total) * 100) : null,
+          valRatio: validation !== null ? Math.round((validation / total) * 100) : null,
+          testRatio: test !== null ? Math.round((test / total) * 100) : null,
+        });
+      },
+    });
   };
 
   const handlePreviewTransform = (): void => {

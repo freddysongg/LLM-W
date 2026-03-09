@@ -42,10 +42,8 @@ export function DatasetSubsetSelector({
   onMaxSamplesChange,
 }: DatasetSubsetSelectorProps): React.JSX.Element {
   const [percentageValue, setPercentageValue] = React.useState<number>(100);
-  const lastEdited = React.useRef<SplitField | null>(null);
 
   const handleRatioChange = (field: SplitField, raw: string): void => {
-    lastEdited.current = field;
     const parsed = parseInt(raw, 10);
     const entered = Number.isNaN(parsed) ? null : clamp(parsed, 0, 100);
 
@@ -94,7 +92,7 @@ export function DatasetSubsetSelector({
       ? Math.floor((percentageValue / 100) * totalRows)
       : null;
 
-  const estimateRow = (ratio: number | null): string | null => {
+  const rowEstimate = (ratio: number | null): string | null => {
     if (ratio === null || totalRows === null) return null;
     return `≈ ${Math.floor((ratio / 100) * totalRows).toLocaleString()} rows`;
   };
@@ -110,34 +108,37 @@ export function DatasetSubsetSelector({
               { field: "val" as SplitField, label: "Validation", ratio: valRatio, resolved: splitCounts?.validation ?? null },
               { field: "test" as SplitField, label: "Test", ratio: testRatio, resolved: splitCounts?.test ?? null },
             ] as const
-          ).map(({ field, label, ratio, resolved }) => (
-            <div key={field} className="space-y-1">
-              <Label className="text-xs text-muted-foreground">{label}</Label>
-              <div className="flex items-center gap-1">
-                <Input
-                  type="number"
-                  min={0}
-                  max={100}
-                  value={ratio ?? ""}
-                  onChange={(e) => handleRatioChange(field, e.target.value)}
-                  placeholder="—"
-                  className="w-full"
-                />
-                <span className="text-xs text-muted-foreground shrink-0">%</span>
+          ).map(({ field, label, ratio, resolved }) => {
+            const estimate = rowEstimate(ratio);
+            return (
+              <div key={field} className="space-y-1">
+                <Label className="text-xs text-muted-foreground">{label}</Label>
+                <div className="flex items-center gap-1">
+                  <Input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={ratio ?? ""}
+                    onChange={(e) => handleRatioChange(field, e.target.value)}
+                    placeholder="—"
+                    className="w-full"
+                  />
+                  <span className="text-xs text-muted-foreground shrink-0">%</span>
+                </div>
+                {estimate !== null && (
+                  <p className="text-xs text-muted-foreground">{estimate}</p>
+                )}
+                {resolved !== null && (
+                  <p className="text-xs text-muted-foreground">
+                    resolved: {resolved.toLocaleString()}
+                  </p>
+                )}
               </div>
-              {estimateRow(ratio) !== null && (
-                <p className="text-xs text-muted-foreground">{estimateRow(ratio)}</p>
-              )}
-              {resolved !== null && (
-                <p className="text-xs text-muted-foreground">
-                  resolved: {resolved.toLocaleString()}
-                </p>
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
         <p className="text-xs text-muted-foreground">
-          Set two values and the third auto-fills. Leave all blank to skip ratio tracking.
+          Set two values and the third auto-fills. Populated automatically after resolve.
         </p>
       </div>
 

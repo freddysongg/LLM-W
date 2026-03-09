@@ -194,14 +194,20 @@ def _load_huggingface(
                 ds = load_dataset(dataset_id, subset, split=split_name)
                 split_rows = [dict(row) for row in ds]
                 count = len(split_rows)
-                if split_name == eval_split:
+                if split_name == "validation":
                     split_counts = SplitCounts(
                         train=split_counts.train,
                         validation=count,
                         test=split_counts.test,
                     )
-            except Exception:
-                # Eval/test split may not exist in this dataset; skip it
+                elif split_name == "test":
+                    split_counts = SplitCounts(
+                        train=split_counts.train,
+                        validation=split_counts.validation,
+                        test=count,
+                    )
+            except ValueError:
+                # Split may not exist in this dataset; skip it
                 pass
 
     return all_rows, split_counts
