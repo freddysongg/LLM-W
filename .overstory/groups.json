@@ -176,5 +176,25 @@
 		"status": "active",
 		"createdAt": "2026-03-09T02:03:52.187Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-f4415804",
+		"name": "copy-ai-feature",
+		"memberIssueIds": [
+			"llm-interactive-b763"
+		],
+		"status": "active",
+		"createdAt": "2026-03-09T02:28:16.698Z",
+		"completedAt": null
+	},
+	{
+		"id": "group-2c1e84a0",
+		"name": "run-debug",
+		"memberIssueIds": [
+			"llm-interactive-c580"
+		],
+		"status": "active",
+		"createdAt": "2026-03-09T02:29:40.591Z",
+		"completedAt": null
 	}
 ]
