@@ -11,6 +11,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import shutil
 import signal
 import sys
@@ -58,9 +59,7 @@ def _emit_stage_enter(*, stage_name: str, stage_order: int) -> None:
     _emit({"type": "stage_enter", "stage_name": stage_name, "stage_order": stage_order})
 
 
-def _emit_stage_complete(
-    *, stage_name: str, duration_ms: int, output_summary: str
-) -> None:
+def _emit_stage_complete(*, stage_name: str, duration_ms: int, output_summary: str) -> None:
     _emit(
         {
             "type": "stage_complete",
@@ -89,9 +88,7 @@ def _emit_progress(
     )
 
 
-def _emit_metric(
-    *, step: int, epoch: float, metrics: dict[str, float]
-) -> None:
+def _emit_metric(*, step: int, epoch: float, metrics: dict[str, float]) -> None:
     _emit({"type": "metric", "step": step, "epoch": epoch, "metrics": metrics})
 
 
@@ -155,9 +152,7 @@ def _start_heartbeat_thread(
     return thread
 
 
-def _atomic_checkpoint_write(
-    *, trainer: Any, step: int, project_dir: Path
-) -> str:
+def _atomic_checkpoint_write(*, trainer: Any, step: int, project_dir: Path) -> str:
     """Write checkpoint atomically: tmp dir → rename."""
     checkpoints_dir = project_dir / "checkpoints"
     checkpoints_dir.mkdir(parents=True, exist_ok=True)
@@ -256,6 +251,25 @@ class WorkbenchCallback:
         self._heartbeat_state["stage"] = "artifact_finalization"
 
 
+def _camel_to_snake(name: str) -> str:
+    s1 = re.sub(r"(.)([A-Z][a-z]+)", r"\1_\2", name)
+    return re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", s1).lower()
+
+
+def _normalize_config_keys(obj: Any) -> Any:
+    """Recursively convert camelCase dict keys to snake_case.
+
+    The frontend TypeScript types use camelCase (modelId, batchSize) but the
+    backend WorkbenchConfig Pydantic models and the trainer both expect
+    snake_case. This normalizes any YAML saved with camelCase keys.
+    """
+    if isinstance(obj, dict):
+        return {_camel_to_snake(k): _normalize_config_keys(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_normalize_config_keys(item) for item in obj]
+    return obj
+
+
 def _stage_config_validation(*, config_path: Path) -> dict[str, Any]:
     import yaml
 
@@ -268,6 +282,8 @@ def _stage_config_validation(*, config_path: Path) -> dict[str, Any]:
     except Exception as exc:
         _emit_stage_fail(stage_name=stage_name, error=f"YAML parse error: {exc}")
         raise
+
+    raw = _normalize_config_keys(raw)
 
     try:
         # import inline to avoid mandatory top-level dep when running standalone
@@ -311,8 +327,7 @@ def _stage_environment_validation(*, raw_config: dict[str, Any]) -> str:
         _emit_log(
             severity="info",
             message=(
-                f"Device: {device}, Python: {platform.python_version()}, "
-                f"Torch: {torch.__version__}"
+                f"Device: {device}, Python: {platform.python_version()}, Torch: {torch.__version__}"
             ),
             stage=stage_name,
         )
@@ -352,9 +367,7 @@ def _stage_model_resolution(*, raw_config: dict[str, Any], device: str) -> Any:
         }
         torch_dtype = dtype_map.get(torch_dtype_str, "auto")
 
-        tokenizer = AutoTokenizer.from_pretrained(
-            model_id, trust_remote_code=trust_remote_code
-        )
+        tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=trust_remote_code)
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
 
@@ -600,7 +613,7 @@ def _stage_adapter_attachment(*, model: Any, raw_config: dict[str, Any]) -> Any:
             severity="info",
             message=(
                 f"LoRA attached: {trainable:,}/{total:,} trainable params "
-                f"({100*trainable/total:.2f}%)"
+                f"({100 * trainable / total:.2f}%)"
             ),
             stage=stage_name,
         )
