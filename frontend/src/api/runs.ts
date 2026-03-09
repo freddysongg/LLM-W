@@ -110,6 +110,18 @@ interface RawRunCompareResponse {
   readonly artifact_comparison: Record<string, RawRunArtifactSummary>;
 }
 
+interface RawCheckpoint {
+  readonly id: string;
+  readonly run_id: string;
+  readonly project_id: string;
+  readonly step: number | null;
+  readonly file_path: string;
+  readonly file_size_bytes: number | null;
+  readonly metadata_json: string | null;
+  readonly is_retained: boolean;
+  readonly created_at: string;
+}
+
 function normalizeRun(raw: RawRun): Run {
   return {
     id: raw.id,
@@ -199,6 +211,18 @@ function normalizeMetricSummary(raw: RawRunMetricSummary): RunMetricSummary {
 
 function normalizeArtifactSummary(raw: RawRunArtifactSummary): RunArtifactSummary {
   return { checkpoints: raw.checkpoints, totalSizeMb: raw.total_size_mb };
+}
+
+function normalizeCheckpoint(raw: RawCheckpoint): Checkpoint {
+  return {
+    id: raw.id,
+    runId: raw.run_id,
+    step: raw.step ?? 0,
+    path: raw.file_path,
+    sizeBytes: raw.file_size_bytes ?? 0,
+    isRetained: raw.is_retained,
+    createdAt: raw.created_at,
+  };
 }
 
 function normalizeRunCompare(raw: RawRunCompareResponse): RunCompareResponse {
@@ -353,9 +377,10 @@ export async function fetchCheckpoints({
   projectId: string;
   runId: string;
 }): Promise<ReadonlyArray<Checkpoint>> {
-  return fetchApi<ReadonlyArray<Checkpoint>>({
+  const raw = await fetchApi<ReadonlyArray<RawCheckpoint>>({
     path: `/projects/${projectId}/runs/${runId}/checkpoints`,
   });
+  return raw.map(normalizeCheckpoint);
 }
 
 export async function fetchRunComparison({
