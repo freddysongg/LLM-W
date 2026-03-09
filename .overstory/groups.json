@@ -28,9 +28,9 @@
 			"llm-interactive-f135",
 			"llm-interactive-1ae2"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-08T06:09:25.248Z",
-		"completedAt": null
+		"completedAt": "2026-03-09T16:29:15.900Z"
 	},
 	{
 		"id": "group-ccee083b",
@@ -40,9 +40,9 @@
 			"llm-interactive-b353",
 			"llm-interactive-716e"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-08T06:32:42.497Z",
-		"completedAt": null
+		"completedAt": "2026-03-09T16:29:16.480Z"
 	},
 	{
 		"id": "group-7d1bf187",
@@ -51,9 +51,9 @@
 			"llm-interactive-818a",
 			"llm-interactive-3a9c"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-08T07:07:51.715Z",
-		"completedAt": null
+		"completedAt": "2026-03-09T16:29:17.001Z"
 	},
 	{
 		"id": "group-4174c1d1",
@@ -61,9 +61,9 @@
 		"memberIssueIds": [
 			"llm-interactive-0366"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-08T07:31:16.052Z",
-		"completedAt": null
+		"completedAt": "2026-03-09T16:29:17.298Z"
 	},
 	{
 		"id": "group-93ca7e30",
@@ -76,9 +76,9 @@
 			"llm-interactive-37a3",
 			"llm-interactive-ab3c"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-08T08:56:38.826Z",
-		"completedAt": null
+		"completedAt": "2026-03-09T16:29:15.717Z"
 	},
 	{
 		"id": "group-a7bf8967",
@@ -91,9 +91,9 @@
 			"llm-interactive-70c0",
 			"llm-interactive-f0fe"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-08T09:34:34.900Z",
-		"completedAt": null
+		"completedAt": "2026-03-09T16:29:15.255Z"
 	},
 	{
 		"id": "group-c02fa401",
@@ -102,9 +102,9 @@
 			"llm-interactive-055b",
 			"llm-interactive-5297"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-08T20:25:27.919Z",
-		"completedAt": null
+		"completedAt": "2026-03-09T16:29:14.822Z"
 	},
 	{
 		"id": "group-78eebb43",
@@ -116,9 +116,9 @@
 			"llm-interactive-8698",
 			"llm-interactive-ffcf"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-08T20:40:26.080Z",
-		"completedAt": null
+		"completedAt": "2026-03-09T16:29:14.648Z"
 	},
 	{
 		"id": "group-bf1da973",
@@ -126,9 +126,9 @@
 		"memberIssueIds": [
 			"llm-interactive-133f"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-09T00:38:27.653Z",
-		"completedAt": null
+		"completedAt": "2026-03-09T16:29:14.326Z"
 	},
 	{
 		"id": "group-94ec9e63",
@@ -137,9 +137,9 @@
 			"llm-interactive-3aa8",
 			"llm-interactive-b021"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-09T00:49:11.730Z",
-		"completedAt": null
+		"completedAt": "2026-03-09T16:29:14.185Z"
 	},
 	{
 		"id": "group-b0e06e42",
@@ -150,9 +150,9 @@
 			"llm-interactive-e335",
 			"llm-interactive-2d5a"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-09T01:13:04.799Z",
-		"completedAt": null
+		"completedAt": "2026-03-09T16:29:13.989Z"
 	},
 	{
 		"id": "group-2841b7fa",
@@ -162,9 +162,9 @@
 			"llm-interactive-644f",
 			"llm-interactive-c58e"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-09T01:37:11.721Z",
-		"completedAt": null
+		"completedAt": "2026-03-09T16:29:07.751Z"
 	},
 	{
 		"id": "group-a796cebe",
@@ -173,9 +173,9 @@
 			"llm-interactive-f873",
 			"llm-interactive-1778"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-09T02:03:52.187Z",
-		"completedAt": null
+		"completedAt": "2026-03-09T16:29:07.254Z"
 	},
 	{
 		"id": "group-f4415804",
@@ -183,9 +183,9 @@
 		"memberIssueIds": [
 			"llm-interactive-b763"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-09T02:28:16.698Z",
-		"completedAt": null
+		"completedAt": "2026-03-09T16:29:06.808Z"
 	},
 	{
 		"id": "group-2c1e84a0",
@@ -193,9 +193,9 @@
 		"memberIssueIds": [
 			"llm-interactive-c580"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-09T02:29:40.591Z",
-		"completedAt": null
+		"completedAt": "2026-03-09T16:29:06.408Z"
 	},
 	{
 		"id": "group-6d0a47fe",
@@ -204,8 +204,18 @@
 			"llm-interactive-0656",
 			"llm-interactive-f733"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-09T02:46:36.978Z",
+		"completedAt": "2026-03-09T16:29:05.443Z"
+	},
+	{
+		"id": "group-54711300",
+		"name": "typefix-build",
+		"memberIssueIds": [
+			"llm-interactive-454f"
+		],
+		"status": "active",
+		"createdAt": "2026-03-09T23:56:53.919Z",
 		"completedAt": null
 	}
 ]
