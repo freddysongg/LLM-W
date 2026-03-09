@@ -458,7 +458,7 @@ function StructuralCanvas({
   return (
     <div
       ref={containerRef}
-      className="relative overflow-hidden w-full h-full cursor-grab active:cursor-grabbing select-none"
+      className="relative overflow-hidden w-full h-[600px] cursor-grab active:cursor-grabbing select-none"
       onMouseDown={handleMouseDown}
     >
       <div
@@ -687,7 +687,7 @@ function ActivationCanvas({
 
   return (
     <div
-      className="relative overflow-hidden w-full h-full cursor-grab active:cursor-grabbing select-none"
+      className="relative overflow-hidden w-full h-[600px] cursor-grab active:cursor-grabbing select-none"
       onMouseDown={handleMouseDown}
     >
       <div
