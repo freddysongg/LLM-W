@@ -3,6 +3,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { useAppStore } from "@/stores/app-store";
 import { useActiveConfig, useSaveConfig } from "@/hooks/useConfigs";
 import { TrainingForm } from "@/components/training/training-form";
+import { TrainingPresetsPanel } from "@/components/training/training-presets-panel";
 import { NoProjectSelected } from "@/components/shared/no-project-selected";
 import type { TrainingConfig, WorkbenchConfig } from "@/types/config";
 import { Button } from "@/components/ui/button";
@@ -80,22 +81,26 @@ export default function TrainingPage(): React.JSX.Element {
   }
 
   return (
-    <div className="p-6 max-w-2xl space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Training</h1>
+    <div className="p-6 flex gap-8 items-start">
+      <div className="flex-1 max-w-2xl space-y-4">
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-semibold">Training</h1>
+          {localTraining && (
+            <Button onClick={handleSave} disabled={saveConfig.isPending} size="sm">
+              {saveConfig.isPending ? "Saving…" : "Save Config"}
+            </Button>
+          )}
+        </div>
+
+        {isLoading && <div className="text-sm text-muted-foreground">Loading config…</div>}
+        {error && <div className="text-sm text-destructive">Failed to load config.</div>}
+
         {localTraining && (
-          <Button onClick={handleSave} disabled={saveConfig.isPending} size="sm">
-            {saveConfig.isPending ? "Saving…" : "Save Config"}
-          </Button>
+          <TrainingForm config={localTraining} datasetSize={null} onChange={handleChange} />
         )}
       </div>
 
-      {isLoading && <div className="text-sm text-muted-foreground">Loading config…</div>}
-      {error && <div className="text-sm text-destructive">Failed to load config.</div>}
-
-      {localTraining && (
-        <TrainingForm config={localTraining} datasetSize={null} onChange={handleChange} />
-      )}
+      {localTraining && <TrainingPresetsPanel onApply={handleChange} />}
     </div>
   );
 }
