@@ -55,6 +55,7 @@ export interface DatasetResolveRequest {
   readonly evalSplit: string | null;
   readonly format: DatasetFormat;
   readonly formatMapping: Record<string, string> | null;
+  readonly maxSamples: number | null;
 }
 
 export interface PreviewTransformRequest {

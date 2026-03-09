@@ -27,12 +27,17 @@ export interface ModelFormState {
   readonly modelId: string;
 }
 
+export type SampleMode = "all" | "percentage" | "rows";
+
 export interface DatasetFormState {
   readonly source: DatasetSource;
   readonly datasetId: string;
   readonly format: DatasetFormat;
   readonly formatMapping: Record<string, string>;
-  readonly filterExpression: string;
+  readonly trainSplit: string;
+  readonly evalSplit: string | null;
+  readonly sampleMode: SampleMode;
+  readonly maxSamples: number | null;
 }
 
 interface AppState {
@@ -84,7 +89,10 @@ const DEFAULT_DATASET_FORM: DatasetFormState = {
   datasetId: "",
   format: "default",
   formatMapping: {},
-  filterExpression: "",
+  trainSplit: "train",
+  evalSplit: "validation",
+  sampleMode: "all",
+  maxSamples: null,
 };
 
 export const useAppStore = create<AppStore>()(

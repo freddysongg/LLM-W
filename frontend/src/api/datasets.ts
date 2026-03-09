@@ -81,6 +81,7 @@ export async function resolveDataset({
       eval_split: request.evalSplit,
       format: request.format,
       format_mapping: request.formatMapping,
+      max_samples: request.maxSamples,
     },
   });
   return normalizeProfile(raw);
