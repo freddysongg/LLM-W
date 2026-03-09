@@ -148,8 +148,13 @@ export function Sidebar(): React.JSX.Element {
         )}
       >
         <div className="flex items-center h-14 px-3 border-b border-border shrink-0">
+          <img
+            src="/workbench-transparent.png"
+            alt="Workbench logo"
+            className="h-6 w-6 shrink-0 dark:invert"
+          />
           {!isSidebarCollapsed && (
-            <span className="text-sm font-semibold tracking-tight truncate flex-1 text-sidebar-foreground">
+            <span className="text-sm font-semibold tracking-tight truncate flex-1 text-sidebar-foreground ml-2">
               Workbench
             </span>
           )}
