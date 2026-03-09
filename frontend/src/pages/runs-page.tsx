@@ -3,6 +3,8 @@ import { useAppStore } from "@/stores/app-store";
 import {
   useRuns,
   useRunStages,
+  useRunMetrics,
+  useRunLogs,
   useCheckpoints,
   useCancelRun,
   useDeleteRun,
@@ -53,6 +55,38 @@ export default function RunsPage(): React.JSX.Element {
     projectId: activeProjectId,
     runId: selectedRunId,
   });
+
+  const { data: historicalMetrics = [] } = useRunMetrics({
+    projectId: activeProjectId ?? "",
+    runId: selectedRunId ?? "",
+  });
+
+  const { data: historicalLogsResponse } = useRunLogs({
+    projectId: activeProjectId ?? "",
+    runId: selectedRunId ?? "",
+  });
+
+  const historicalLogs = historicalLogsResponse?.logs ?? [];
+
+  const mergedMetrics = React.useMemo(() => {
+    const seen = new Set<string>();
+    return [...historicalMetrics, ...streamState.liveMetrics].filter((p) => {
+      const key = `${p.step}:${p.metricName}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [historicalMetrics, streamState.liveMetrics]);
+
+  const mergedLogs = React.useMemo(() => {
+    const seen = new Set<string>();
+    return [...historicalLogs, ...streamState.liveLogs].filter((l) => {
+      const key = `${l.timestamp}:${l.message}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [historicalLogs, streamState.liveLogs]);
 
   const cancelRun = useCancelRun();
   const deleteRunMutation = useDeleteRun();
@@ -177,7 +211,9 @@ export default function RunsPage(): React.JSX.Element {
             setSelectedStageId(null);
           }}
           onDeleteRun={handleDeleteRun}
-          isDeletingRunId={deleteRunMutation.isPending ? (deleteRunMutation.variables?.runId ?? null) : null}
+          isDeletingRunId={
+            deleteRunMutation.isPending ? (deleteRunMutation.variables?.runId ?? null) : null
+          }
           onStartRun={handleStartRun}
           isStartingRun={createRunMutation.isPending}
           canStartRun={canStartRun}
@@ -209,11 +245,11 @@ export default function RunsPage(): React.JSX.Element {
             </TabsContent>
 
             <TabsContent value="metrics" className="mt-4">
-              <LiveMetricsCharts metricPoints={streamState.liveMetrics} />
+              <LiveMetricsCharts metricPoints={mergedMetrics} />
             </TabsContent>
 
             <TabsContent value="logs" className="mt-4 h-96">
-              <LogStream logs={streamState.liveLogs} />
+              <LogStream logs={mergedLogs} />
             </TabsContent>
 
             <TabsContent value="system" className="mt-4">
