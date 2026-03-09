@@ -236,8 +236,28 @@ class WorkbenchCallback(TrainerCallback):
         self._last_metrics: dict[str, float] = {}
 
     def on_train_begin(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
+        _emit_stage_complete(
+            stage_name="training_start",
+            duration_ms=0,
+            output_summary="trainer initialized",
+        )
         _emit_stage_enter(stage_name="training_progress", stage_order=10)
         self._heartbeat_state["stage"] = "training_progress"
+        self._heartbeat_state["total_steps"] = state.max_steps if state.max_steps > 0 else 0
+
+    def on_step_end(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
+        step = state.global_step
+        total_steps = state.max_steps if state.max_steps > 0 else 1
+        epoch = float(state.epoch or 0.0)
+        progress_pct = min(100.0, step / total_steps * 100)
+        _emit_progress(
+            current_step=step,
+            total_steps=total_steps,
+            progress_pct=progress_pct,
+            epoch=epoch,
+        )
+        self._heartbeat_state["current_step"] = step
+        self._heartbeat_state["total_steps"] = total_steps
 
     def on_log(
         self, args: Any, state: Any, control: Any, logs: dict[str, Any] | None = None, **kwargs: Any
@@ -251,7 +271,7 @@ class WorkbenchCallback(TrainerCallback):
             if isinstance(value, (int, float)):
                 metrics[key] = float(value)
 
-        total_steps = state.max_steps or 1
+        total_steps = state.max_steps if state.max_steps > 0 else 1
 
         if metrics:
             _emit_metric(step=step, epoch=epoch, metrics=metrics)
