@@ -21,6 +21,7 @@ import { RevertButton } from "@/components/weights/revert-button";
 import { FlowVisualization } from "@/components/weights/flow-visualization";
 import { flattenToFlowColumns } from "@/lib/flatten-to-flow-columns";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import type { FlowMode } from "@/types/flow";
 import type {
   ActivationSnapshotResponse,
   LayerNode,
@@ -116,6 +117,8 @@ export default function WeightsPage(): React.JSX.Element {
   const [compareIndexB, setCompareIndexB] = React.useState(1);
   const [isExpertMode, setIsExpertMode] = React.useState(false);
   const [paramFilter, setParamFilter] = React.useState<ParameterFilter>("all");
+  const [flowMode, setFlowMode] = React.useState<FlowMode>("structural");
+  const [flowSnapshotIndex, setFlowSnapshotIndex] = React.useState(0);
 
   const projectId = activeProjectId ?? "";
 
@@ -143,6 +146,17 @@ export default function WeightsPage(): React.JSX.Element {
     return flattenToFlowColumns({ tree: architecture.tree });
   }, [architecture]);
 
+  const flowLayerNames = React.useMemo(
+    () => flowColumns.flatMap((col) => col.nodes.map((n) => n.fullPath)),
+    [flowColumns],
+  );
+
+  const flowActivationSnapshot = React.useMemo(() => {
+    if (capturedSnapshots.length === 0) return null;
+    const idx = Math.min(flowSnapshotIndex, capturedSnapshots.length - 1);
+    return capturedSnapshots[idx] ?? null;
+  }, [capturedSnapshots, flowSnapshotIndex]);
+
   const deltas: ReadonlyArray<WeightDelta> = React.useMemo(() => {
     const snapshotA = capturedSnapshots[compareIndexA];
     const snapshotB = capturedSnapshots[compareIndexB];
@@ -168,6 +182,20 @@ export default function WeightsPage(): React.JSX.Element {
       {
         onSuccess: (snapshot) => {
           setCapturedSnapshots((prev) => [...prev, snapshot]);
+        },
+      },
+    );
+  };
+
+  const handleFlowCapture = (): void => {
+    captureActivations.mutate(
+      { layerNames: flowLayerNames, sampleInput },
+      {
+        onSuccess: (snapshot) => {
+          setCapturedSnapshots((prev) => {
+            setFlowSnapshotIndex(prev.length);
+            return [...prev, snapshot];
+          });
         },
       },
     );
@@ -368,8 +396,69 @@ export default function WeightsPage(): React.JSX.Element {
               )}
             </TabsContent>
 
-            <TabsContent value="flow" className="mt-4">
-              <FlowVisualization columns={flowColumns} onSelectNode={setSelectedLayerName} />
+            <TabsContent value="flow" className="mt-4 space-y-4">
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setFlowMode("structural")}
+                  className={[
+                    "px-3 py-1.5 text-xs font-medium rounded transition-colors",
+                    flowMode === "structural"
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted text-muted-foreground hover:bg-muted/80",
+                  ].join(" ")}
+                >
+                  Structural
+                </button>
+                <button
+                  onClick={() => setFlowMode("activation")}
+                  className={[
+                    "px-3 py-1.5 text-xs font-medium rounded transition-colors",
+                    flowMode === "activation"
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted text-muted-foreground hover:bg-muted/80",
+                  ].join(" ")}
+                >
+                  Activation
+                </button>
+              </div>
+
+              {flowMode === "activation" && (
+                <div className="space-y-3">
+                  <ActivationSampleSelector
+                    sampleInput={sampleInput}
+                    onSampleInputChange={setSampleInput}
+                    onCapture={handleFlowCapture}
+                    isCapturing={captureActivations.isPending}
+                    hasLayersSelected={flowLayerNames.length > 0}
+                  />
+                  {capturedSnapshots.length > 1 && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground">Snapshot:</span>
+                      <select
+                        value={flowSnapshotIndex}
+                        onChange={(e) => setFlowSnapshotIndex(Number(e.target.value))}
+                        className="text-xs border rounded px-2 py-1 bg-background"
+                      >
+                        {capturedSnapshots.map((snap, idx) => (
+                          <option key={snap.id} value={idx}>
+                            {new Date(snap.created_at).toLocaleTimeString()}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <FlowVisualization
+                columns={flowColumns}
+                onSelectNode={setSelectedLayerName}
+                mode={flowMode}
+                activationSnapshot={flowActivationSnapshot}
+                onCaptureRequest={handleFlowCapture}
+                isCapturing={captureActivations.isPending}
+                sampleInput={sampleInput}
+              />
               <LayerDetailDrawer
                 layerDetail={layerDetail ?? null}
                 isLoading={isLayerLoading && selectedLayerName !== null}

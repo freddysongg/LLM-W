@@ -15,3 +15,19 @@ export interface FlowColumn {
   readonly isRepeated: boolean;
   readonly repeatCount: number;
 }
+
+export type FlowMode = "structural" | "activation";
+
+export interface FlowActivationCell {
+  readonly tokenString: string;
+  readonly layerName: string;
+  readonly mean: number;
+  readonly std: number;
+  readonly min: number;
+  readonly max: number;
+}
+
+export interface TokenRow {
+  readonly tokenString: string;
+  readonly position: number;
+}
