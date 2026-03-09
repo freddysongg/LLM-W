@@ -74,6 +74,14 @@ interface AppActions {
 
 type AppStore = AppState & AppActions;
 
+interface PersistedAppState {
+  readonly activeProjectId: string | null;
+  readonly navGroupExpanded: NavGroupExpandedState;
+  readonly isSidebarCollapsed: boolean;
+  readonly modelForm: ModelFormState;
+  readonly datasetForm: DatasetFormState;
+}
+
 const DEFAULT_NAV_GROUP_EXPANDED: NavGroupExpandedState = {
   overview: true,
   modelData: true,
@@ -163,14 +171,14 @@ export const useAppStore = create<AppStore>()(
     {
       name: "app-store",
       version: 2,
-      migrate: (persisted, version) => {
-        const state = persisted as Partial<AppState>;
+      migrate: (persisted, version): PersistedAppState => {
+        const state = persisted as PersistedAppState;
         // any store persisted before version 2 predates trainRatio/valRatio/testRatio;
         // reset datasetForm to avoid stale or missing fields being coerced by the backend
         if (version < 2) {
           return { ...state, datasetForm: DEFAULT_DATASET_FORM };
         }
-        return state as AppState;
+        return state;
       },
       partialize: (state) => ({
         activeProjectId: state.activeProjectId,
