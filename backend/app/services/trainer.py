@@ -45,6 +45,39 @@ RUN_STAGES: list[tuple[int, str]] = [
 _CANCEL_REQUESTED = threading.Event()
 _PAUSE_REQUESTED = threading.Event()
 
+# Candidate field names tried in order when the configured name is missing
+_INPUT_FIELD_CANDIDATES: list[str] = [
+    "text", "prompt", "instruction", "input", "query", "question", "content", "context"
+]
+_TARGET_FIELD_CANDIDATES: list[str] = [
+    "response", "output", "answer", "target", "completion", "label"
+]
+
+
+def _resolve_dataset_field(
+    *,
+    configured: str,
+    candidates: list[str],
+    available: list[str],
+    field_label: str,
+    stage_name: str,
+) -> str:
+    """Return configured field if present, otherwise auto-detect from candidates."""
+    if configured in available:
+        return configured
+    for candidate in candidates:
+        if candidate in available:
+            _emit_log(
+                severity="warning",
+                message=(
+                    f"{field_label} '{configured}' not found in columns {available}; "
+                    f"auto-detected '{candidate}'"
+                ),
+                stage=stage_name,
+            )
+            return candidate
+    return configured
+
 
 def _emit(event: dict[str, Any]) -> None:
     event.setdefault("timestamp", datetime.now(UTC).isoformat())
@@ -494,9 +527,24 @@ def _stage_tokenization_preprocessing(
     target_field = dataset_cfg.get("target_field", "response")
 
     available_columns: list[str] = list(train_dataset.column_names)
+    input_field = _resolve_dataset_field(
+        configured=input_field,
+        candidates=_INPUT_FIELD_CANDIDATES,
+        available=available_columns,
+        field_label="input_field",
+        stage_name=stage_name,
+    )
+    target_field = _resolve_dataset_field(
+        configured=target_field,
+        candidates=_TARGET_FIELD_CANDIDATES,
+        available=available_columns,
+        field_label="target_field",
+        stage_name=stage_name,
+    )
+
     if input_field not in available_columns:
         error_msg = (
-            f"input_field '{input_field}' not found in dataset columns {available_columns}. "
+            f"input_field not found in dataset columns {available_columns}. "
             f"Update the Datasets page to set the correct input field name."
         )
         _emit_stage_fail(stage_name=stage_name, error=error_msg)
