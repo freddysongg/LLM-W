@@ -227,5 +227,15 @@
 		"status": "active",
 		"createdAt": "2026-03-10T00:06:52.621Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-1f69dc47",
+		"name": "split-defaults",
+		"memberIssueIds": [
+			"llm-interactive-ebe5"
+		],
+		"status": "active",
+		"createdAt": "2026-03-10T00:14:21.472Z",
+		"completedAt": null
 	}
 ]
