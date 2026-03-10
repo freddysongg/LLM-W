@@ -393,5 +393,18 @@
 		"status": "active",
 		"createdAt": "2026-03-10T22:32:13.296Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-a378e483",
+		"name": "modal-integration",
+		"memberIssueIds": [
+			"llm-interactive-88ca",
+			"llm-interactive-fd35",
+			"llm-interactive-273e",
+			"llm-interactive-b41b"
+		],
+		"status": "active",
+		"createdAt": "2026-03-10T23:15:31.039Z",
+		"completedAt": null
 	}
 ]
