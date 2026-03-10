@@ -172,7 +172,13 @@ class CloudLLMEngine(RecommendationEngine):
         self._provider = provider
         self._api_key = api_key
         self._model_id = model_id
-        self._base_url = base_url
+        # Resolve base_url: 'openai' always uses the canonical endpoint regardless of
+        # what the caller passes (base_url is cleared when switching providers).
+        # 'openai_compatible' uses the caller-supplied URL.
+        # 'anthropic' ignores base_url entirely (_call_anthropic does not use it).
+        self._base_url: str | None = (
+            "https://api.openai.com/v1" if provider == "openai" else base_url
+        )
 
     async def generate_recommendations(
         self,
