@@ -247,5 +247,25 @@
 		"status": "active",
 		"createdAt": "2026-03-10T00:18:12.459Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-e83afee3",
+		"name": "progress-fix",
+		"memberIssueIds": [
+			"llm-interactive-e095"
+		],
+		"status": "active",
+		"createdAt": "2026-03-10T00:43:25.335Z",
+		"completedAt": null
+	},
+	{
+		"id": "group-e455b1dc",
+		"name": "training-logs",
+		"memberIssueIds": [
+			"llm-interactive-8716"
+		],
+		"status": "active",
+		"createdAt": "2026-03-10T00:44:52.882Z",
+		"completedAt": null
 	}
 ]
