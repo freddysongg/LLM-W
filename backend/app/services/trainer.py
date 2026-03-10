@@ -689,12 +689,23 @@ def _stage_training_preparation(
     grad_accum: int = training_cfg.get("gradient_accumulation_steps", 4)
     configured_warmup_steps: int = optimization_cfg.get("warmup_steps", 0)
     warmup_ratio: float = optimization_cfg.get("warmup_ratio", 0.03)
+    steps_per_epoch = max(1, len(train_dataset) // (batch_size * grad_accum))
+    total_steps = steps_per_epoch * epochs
+    dynamic_interval = max(1, total_steps // 10)
     if configured_warmup_steps > 0:
         warmup_steps = configured_warmup_steps
     else:
         # Compute warmup_steps from ratio since TRL ≥5.2 deprecated warmup_ratio
-        steps_per_epoch = max(1, len(train_dataset) // (batch_size * grad_accum))
-        warmup_steps = round(steps_per_epoch * epochs * warmup_ratio)
+        warmup_steps = round(total_steps * warmup_ratio)
+
+    configured_eval_steps: int | None = training_cfg.get("eval_steps")
+    configured_save_steps: int | None = training_cfg.get("save_steps")
+    configured_logging_steps: int | None = training_cfg.get("logging_steps")
+    eval_steps = configured_eval_steps if configured_eval_steps is not None else dynamic_interval
+    save_steps = configured_save_steps if configured_save_steps is not None else dynamic_interval
+    logging_steps = (
+        configured_logging_steps if configured_logging_steps is not None else dynamic_interval
+    )
 
     try:
         from trl import SFTConfig, SFTTrainer  # noqa: PLC0415
@@ -708,9 +719,9 @@ def _stage_training_preparation(
             learning_rate=training_cfg.get("learning_rate", 2e-4),
             weight_decay=training_cfg.get("weight_decay", 0.01),
             max_grad_norm=training_cfg.get("max_grad_norm", 1.0),
-            eval_steps=training_cfg.get("eval_steps", 50),
-            save_steps=training_cfg.get("save_steps", 100),
-            logging_steps=training_cfg.get("logging_steps", 10),
+            eval_steps=eval_steps,
+            save_steps=save_steps,
+            logging_steps=logging_steps,
             seed=training_cfg.get("seed", 42),
             warmup_steps=warmup_steps,
             lr_scheduler_type=optimization_cfg.get("scheduler", "cosine"),

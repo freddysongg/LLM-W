@@ -231,9 +231,9 @@ def _build_initial_config_yaml(project_name: str) -> str:
             "learning_rate": 0.0002,
             "weight_decay": 0.01,
             "max_grad_norm": 1.0,
-            "eval_steps": 50,
-            "save_steps": 100,
-            "logging_steps": 10,
+            "eval_steps": None,
+            "save_steps": None,
+            "logging_steps": None,
             "seed": 42,
         },
         "optimization": {
