@@ -113,6 +113,8 @@ class ExecutionConfig(BaseModel):
     device: Literal["auto", "cuda", "mps", "cpu"] = "auto"
     max_memory_gb: float | None = None
     num_workers: int = 2
+    environment: Literal["local", "modal"] = "local"
+    modal_gpu_type: Literal["t4", "a10", "a100-40gb", "a100-80gb", "h100"] | None = None
 
 
 class CheckpointRetentionConfig(BaseModel):

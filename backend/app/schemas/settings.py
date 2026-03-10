@@ -12,6 +12,7 @@ class SettingsResponse(BaseModel):
     storage_warning_threshold_gb: float
     watchdog_stale_timeout_seconds: int
     watchdog_heartbeat_interval_seconds: int
+    modal_token_set: bool
 
 
 class SettingsUpdate(BaseModel):
@@ -23,6 +24,7 @@ class SettingsUpdate(BaseModel):
     storage_warning_threshold_gb: float | None = None
     watchdog_stale_timeout_seconds: int | None = None
     watchdog_heartbeat_interval_seconds: int | None = None
+    modal_api_token: str | None = None
 
 
 class AITestResponse(BaseModel):
@@ -30,3 +32,8 @@ class AITestResponse(BaseModel):
     message: str
     provider: str
     model_id: str
+
+
+class ModalTestResponse(BaseModel):
+    success: bool
+    message: str

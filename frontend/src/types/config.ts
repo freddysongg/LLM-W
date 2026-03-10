@@ -24,6 +24,8 @@ export type ObservabilityLevel = "minimal" | "standard" | "deep" | "expert";
 export type AIProvider = "anthropic" | "openai" | "openai_compatible";
 export type AIMode = "suggest_only" | "suggest_and_draft";
 export type DeviceType = "auto" | "cuda" | "mps" | "cpu";
+export type TrainingEnvironment = "local" | "modal";
+export type ModalGpuType = "t4" | "a10" | "a100-40gb" | "a100-80gb" | "h100";
 export type ActivationStorageMode = "summary_only" | "on_demand_full";
 export type EditableWeightScope = "disabled" | "bounded_expert_mode";
 export type ProjectMode = "single_user_local";
@@ -128,6 +130,8 @@ export interface ExecutionConfig {
   readonly device: DeviceType;
   readonly maxMemoryGb: number | null;
   readonly numWorkers: number;
+  readonly environment: TrainingEnvironment;
+  readonly modalGpuType: ModalGpuType | null;
 }
 
 export interface CheckpointRetentionConfig {
