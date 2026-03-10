@@ -383,5 +383,15 @@
 		"status": "active",
 		"createdAt": "2026-03-10T22:12:22.802Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-a566f917",
+		"name": "windows-review",
+		"memberIssueIds": [
+			"llm-interactive-ca3c"
+		],
+		"status": "active",
+		"createdAt": "2026-03-10T22:32:13.296Z",
+		"completedAt": null
 	}
 ]
