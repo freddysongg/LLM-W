@@ -80,6 +80,9 @@ export function SettingsForm({
   const handleProviderChange = (val: string): void => {
     const provider = val as AIProvider;
     setAiProvider(provider);
+    if (provider !== "openai_compatible") {
+      setAiBaseUrl("");
+    }
     if (provider === "openai" && !(OPENAI_MODELS as readonly string[]).includes(aiModelId)) {
       setAiModelId("gpt-4o");
     }

@@ -1,5 +1,5 @@
 export type SuggestionStatus = "pending" | "accepted" | "rejected" | "applied" | "expired";
-export type SuggestionProvider = "anthropic" | "openai_compatible" | "rule_engine";
+export type SuggestionProvider = "anthropic" | "openai" | "openai_compatible" | "rule_engine";
 export type RiskLevel = "low" | "medium" | "high";
 
 export interface SuggestionEvidence {

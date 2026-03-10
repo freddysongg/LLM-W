@@ -75,7 +75,7 @@ async def generate_suggestions(
         ) from exc
     except ValueError as exc:
         raise HTTPException(
-            status_code=422,
+            status_code=500,
             detail={"code": "GENERATION_ERROR", "message": str(exc), "details": {}},
         ) from exc
 
