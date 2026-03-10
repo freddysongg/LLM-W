@@ -41,6 +41,7 @@ interface ProviderBadgeProps {
 
 const PROVIDER_LABELS: Record<SuggestionProvider, string> = {
   anthropic: "Claude",
+  openai: "OpenAI",
   openai_compatible: "OpenAI",
   rule_engine: "Rule-based",
 };
