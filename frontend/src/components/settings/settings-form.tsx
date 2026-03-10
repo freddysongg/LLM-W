@@ -15,7 +15,15 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 
-const OPENAI_MODELS = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"] as const;
+const OPENAI_MODELS = [
+  "gpt-4o",
+  "gpt-4o-mini",
+  "gpt-4-turbo",
+  "gpt-3.5-turbo",
+  "o1",
+  "o1-mini",
+  "o3-mini",
+] as const;
 const CLAUDE_MODELS = [
   "claude-opus-4-6",
   "claude-sonnet-4-6",
