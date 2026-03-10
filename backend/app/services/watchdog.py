@@ -95,8 +95,8 @@ def _find_latest_valid_checkpoint(project_dir: Path) -> str | None:
     return str(valid[-1])
 
 
-def _check_process_exit_signal(pid: int) -> str | None:
-    """Try to determine how a process died via os.waitpid. Returns descriptive string or None."""
+def _check_process_exit_unix(pid: int) -> str | None:
+    """Try to determine how a process died via os.waitpid (Unix/macOS only)."""
     try:
         waited_pid, status = os.waitpid(pid, os.WNOHANG)
         if waited_pid == pid:
@@ -113,6 +113,29 @@ def _check_process_exit_signal(pid: int) -> str | None:
     except OSError:
         pass
     return None
+
+
+def _check_process_exit_windows(pid: int) -> str | None:
+    """Try to determine how a process exited using psutil (Windows only)."""
+    try:
+        exit_code = psutil.Process(pid).wait(timeout=0)
+        return f"exited with code {exit_code}"
+    except psutil.TimeoutExpired:
+        # Process still alive — exit info not yet available
+        pass
+    except psutil.NoSuchProcess:
+        # Process already gone from process table — exit status unavailable
+        pass
+    except psutil.AccessDenied:
+        pass
+    return None
+
+
+def _check_process_exit_signal(pid: int) -> str | None:
+    """Try to determine how a process died. Returns descriptive string or None."""
+    if platform.system() == "Windows":
+        return _check_process_exit_windows(pid)
+    return _check_process_exit_unix(pid)
 
 
 def _check_macos_oom_kill(pid: int) -> bool:
