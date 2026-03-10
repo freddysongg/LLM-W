@@ -198,7 +198,7 @@ class CloudLLMEngine(RecommendationEngine):
     async def _call_api(self, *, prompt: str) -> str:
         if self._provider == "anthropic":
             return await self._call_anthropic(prompt=prompt)
-        if self._provider == "openai_compatible":
+        if self._provider in ("openai", "openai_compatible"):
             return await self._call_openai(prompt=prompt)
         raise ValueError(f"Unsupported provider: {self._provider}")
 
@@ -253,7 +253,7 @@ class CloudLLMEngine(RecommendationEngine):
                     max_tokens=1,
                     messages=[{"role": "user", "content": "ping"}],
                 )
-            elif self._provider == "openai_compatible":
+            elif self._provider in ("openai", "openai_compatible"):
                 import openai
 
                 client = openai.OpenAI(api_key=self._api_key, base_url=self._base_url)
@@ -277,7 +277,7 @@ def build_engine(
     base_url: str | None,
 ) -> RecommendationEngine:
     """Return the best available engine given the current settings."""
-    if api_key and provider in ("anthropic", "openai_compatible"):
+    if api_key and provider in ("anthropic", "openai", "openai_compatible"):
         return CloudLLMEngine(
             provider=provider,
             api_key=api_key,

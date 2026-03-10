@@ -16,8 +16,15 @@ import {
 import { Badge } from "@/components/ui/badge";
 
 const OPENAI_MODELS = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"] as const;
+const CLAUDE_MODELS = [
+  "claude-opus-4-6",
+  "claude-sonnet-4-6",
+  "claude-sonnet-4-5-20250514",
+  "claude-haiku-4-5-20251001",
+] as const;
 
 type OpenAIModel = (typeof OPENAI_MODELS)[number];
+type ClaudeModel = (typeof CLAUDE_MODELS)[number];
 
 interface SettingsFormProps {
   readonly settings: AppSettings;
@@ -54,6 +61,9 @@ export function SettingsForm({
     setAiProvider(provider);
     if (provider === "openai" && !(OPENAI_MODELS as readonly string[]).includes(aiModelId)) {
       setAiModelId("gpt-4o");
+    }
+    if (provider === "anthropic" && !(CLAUDE_MODELS as readonly string[]).includes(aiModelId)) {
+      setAiModelId("claude-sonnet-4-6");
     }
   };
 
@@ -136,10 +146,23 @@ export function SettingsForm({
                   ))}
                 </SelectContent>
               </Select>
+            ) : aiProvider === "anthropic" ? (
+              <Select value={aiModelId as ClaudeModel} onValueChange={setAiModelId}>
+                <SelectTrigger id="ai-model-id">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {CLAUDE_MODELS.map((m) => (
+                    <SelectItem key={m} value={m}>
+                      {m}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             ) : (
               <Input
                 id="ai-model-id"
-                placeholder="claude-sonnet-4-20250514"
+                placeholder="model-id"
                 value={aiModelId}
                 onChange={(e) => setAiModelId(e.target.value)}
               />
