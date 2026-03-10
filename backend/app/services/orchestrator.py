@@ -323,6 +323,19 @@ async def _record_metric_batch(
         await session.commit()
 
 
+async def _mark_pending_stages_skipped(*, run_id: str) -> None:
+    """Mark all pending stages as skipped after a run reaches a terminal state."""
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(RunStage).where(RunStage.run_id == run_id, RunStage.status == "pending")
+        )
+        pending_stages = list(result.scalars().all())
+        for stage_row in pending_stages:
+            stage_row.status = "skipped"
+        if pending_stages:
+            await session.commit()
+
+
 async def _record_artifact(
     *, run_id: str, project_id: str, artifact_type: str, file_path: str, size_bytes: int
 ) -> None:
@@ -733,6 +746,7 @@ async def _run_trainer_subprocess(
 
         now = datetime.now(UTC).isoformat()
         if terminal_status == "completed":
+            await _mark_pending_stages_skipped(run_id=run_id)
             await _update_run_status(run_id=run_id, status="completed")
             await event_bus.publish(
                 event_type=f"project.{project_id}.ws",
@@ -750,6 +764,7 @@ async def _run_trainer_subprocess(
             )
             asyncio.create_task(_auto_analyze_if_enabled(run_id=run_id, project_id=project_id))
         elif terminal_status == "cancelled":
+            await _mark_pending_stages_skipped(run_id=run_id)
             await _update_run_status(run_id=run_id, status="cancelled")
             await event_bus.publish(
                 event_type=f"project.{project_id}.ws",
@@ -762,6 +777,7 @@ async def _run_trainer_subprocess(
                 },
             )
         else:
+            await _mark_pending_stages_skipped(run_id=run_id)
             await _update_run_status(
                 run_id=run_id,
                 status="failed",
@@ -802,6 +818,8 @@ async def cancel_run(*, session: AsyncSession, run_id: str) -> Run:
     if proc is not None:
         with contextlib.suppress(ProcessLookupError):
             proc.terminate()
+
+    await _mark_pending_stages_skipped(run_id=run_id)
 
     now = datetime.now(UTC).isoformat()
     run.status = "cancelled"
