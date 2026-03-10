@@ -852,12 +852,25 @@ def _stage_artifact_finalization(*, trainer: Any, project_dir: Path) -> None:
     )
 
 
+_IS_UNIX = sys.platform != "win32"
+
+
 def _handle_sigterm(signum: int, frame: Any) -> None:
     _CANCEL_REQUESTED.set()
 
 
+def _poll_cancel_flag(cancel_flag_path: Path, stop_event: threading.Event) -> None:
+    """Poll a flag file and set _CANCEL_REQUESTED when it appears (Windows only)."""
+    while not stop_event.is_set():
+        if cancel_flag_path.exists():
+            _CANCEL_REQUESTED.set()
+            return
+        stop_event.wait(timeout=1.0)
+
+
 def main() -> int:
-    signal.signal(signal.SIGTERM, _handle_sigterm)
+    if _IS_UNIX:
+        signal.signal(signal.SIGTERM, _handle_sigterm)
     signal.signal(signal.SIGINT, _handle_sigterm)
 
     parser = argparse.ArgumentParser(description="Workbench trainer subprocess")
@@ -866,6 +879,7 @@ def main() -> int:
     parser.add_argument("--project-dir", required=True, type=Path)
     parser.add_argument("--resume-from-checkpoint", default=None)
     parser.add_argument("--heartbeat-interval", type=int, default=10)
+    parser.add_argument("--cancel-flag-path", type=Path, default=None)
     args = parser.parse_args()
 
     run_id: str = args.run_id
@@ -873,6 +887,16 @@ def main() -> int:
     project_dir: Path = args.project_dir
     resume_from_checkpoint: str | None = args.resume_from_checkpoint
     heartbeat_interval: int = args.heartbeat_interval
+    cancel_flag_path: Path | None = args.cancel_flag_path
+
+    cancel_poll_stop = threading.Event()
+    if not _IS_UNIX and cancel_flag_path is not None:
+        cancel_poll_thread = threading.Thread(
+            target=_poll_cancel_flag,
+            args=(cancel_flag_path, cancel_poll_stop),
+            daemon=True,
+        )
+        cancel_poll_thread.start()
 
     heartbeat_path = project_dir / ".heartbeat"
     heartbeat_state: dict[str, Any] = {
@@ -994,6 +1018,7 @@ def main() -> int:
 
     finally:
         heartbeat_state["done"] = True
+        cancel_poll_stop.set()
         heartbeat_thread.join(timeout=2.0)
 
 

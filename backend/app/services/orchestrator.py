@@ -68,8 +68,13 @@ _ALL_STAGE_NAMES: list[str] = [
     "completion",
 ]
 
+_IS_UNIX = sys.platform != "win32"
+
 # Maps run_id → asyncio.subprocess.Process
 _active_processes: dict[str, asyncio.subprocess.Process] = {}
+
+# Maps run_id → cancel flag path for cooperative cancellation on Windows
+_active_cancel_flag_paths: dict[str, Path] = {}
 
 
 async def list_runs(*, session: AsyncSession, project_id: str) -> list[Run]:
@@ -633,6 +638,11 @@ async def _run_trainer_subprocess(
     if resume_from_checkpoint:
         cmd += ["--resume-from-checkpoint", resume_from_checkpoint]
 
+    cancel_flag_path: Path | None = None
+    if not _IS_UNIX:
+        cancel_flag_path = project_dir / f".cancel_{run_id}"
+        cmd += ["--cancel-flag-path", str(cancel_flag_path)]
+
     await _update_run_status(run_id=run_id, status="running")
 
     try:
@@ -645,6 +655,8 @@ async def _run_trainer_subprocess(
             env=subprocess_env,
         )
         _active_processes[run_id] = proc
+        if cancel_flag_path is not None:
+            _active_cancel_flag_paths[run_id] = cancel_flag_path
 
         await _update_run_status(run_id=run_id, status="running", pid=proc.pid)
 
@@ -727,6 +739,10 @@ async def _run_trainer_subprocess(
 
         await proc.wait()
         _active_processes.pop(run_id, None)
+        removed_flag = _active_cancel_flag_paths.pop(run_id, None)
+        if removed_flag is not None:
+            with contextlib.suppress(OSError):
+                removed_flag.unlink(missing_ok=True)
 
         stderr_output = ""
         if proc.stderr is not None:
@@ -802,6 +818,10 @@ async def _run_trainer_subprocess(
 
     except Exception as exc:
         _active_processes.pop(run_id, None)
+        exc_flag = _active_cancel_flag_paths.pop(run_id, None)
+        if exc_flag is not None:
+            with contextlib.suppress(OSError):
+                exc_flag.unlink(missing_ok=True)
         await _update_run_status(
             run_id=run_id,
             status="failed",
@@ -816,6 +836,12 @@ async def cancel_run(*, session: AsyncSession, run_id: str) -> Run:
 
     proc = _active_processes.get(run_id)
     if proc is not None:
+        if not _IS_UNIX:
+            # Signal cooperative cancellation before forceful termination
+            flag_path = _active_cancel_flag_paths.get(run_id)
+            if flag_path is not None:
+                with contextlib.suppress(OSError):
+                    flag_path.touch()
         with contextlib.suppress(ProcessLookupError):
             proc.terminate()
 
@@ -837,8 +863,14 @@ async def pause_run(*, session: AsyncSession, run_id: str) -> Run:
 
     proc = _active_processes.get(run_id)
     if proc is not None:
-        with contextlib.suppress(ProcessLookupError, OSError):
-            proc.send_signal(_signal.SIGSTOP)
+        if _IS_UNIX:
+            with contextlib.suppress(ProcessLookupError, OSError):
+                proc.send_signal(_signal.SIGSTOP)
+        else:
+            import psutil
+
+            with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied, OSError):
+                psutil.Process(proc.pid).suspend()
 
     now = datetime.now(UTC).isoformat()
     run.status = "paused"
@@ -868,17 +900,32 @@ async def resume_run(*, session: AsyncSession, project_id: str, run_id: str) -> 
     # If paused and process still alive, just resume it
     proc = _active_processes.get(run_id)
     if parent_run.status == "paused" and proc is not None:
-        try:
-            proc.send_signal(_signal.SIGCONT)
-        except (ProcessLookupError, OSError):
-            pass
+        if _IS_UNIX:
+            try:
+                proc.send_signal(_signal.SIGCONT)
+            except (ProcessLookupError, OSError):
+                pass
+            else:
+                now = datetime.now(UTC).isoformat()
+                parent_run.status = "running"
+                parent_run.updated_at = now
+                await session.commit()
+                await session.refresh(parent_run)
+                return parent_run
         else:
-            now = datetime.now(UTC).isoformat()
-            parent_run.status = "running"
-            parent_run.updated_at = now
-            await session.commit()
-            await session.refresh(parent_run)
-            return parent_run
+            import psutil
+
+            try:
+                psutil.Process(proc.pid).resume()
+            except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
+                pass
+            else:
+                now = datetime.now(UTC).isoformat()
+                parent_run.status = "running"
+                parent_run.updated_at = now
+                await session.commit()
+                await session.refresh(parent_run)
+                return parent_run
 
     child_payload = RunCreate(
         config_version_id=parent_run.config_version_id,
