@@ -13,8 +13,10 @@ import {
   useCreateRun,
 } from "@/hooks/useRuns";
 import { useActiveConfig } from "@/hooks/useConfigs";
+import { useSettings } from "@/hooks/useSettings";
 import { useRunStream } from "@/hooks/useRunStream";
 import { RunList } from "@/components/runs/run-list";
+import { EnvironmentSelector } from "@/components/runs/environment-selector";
 import { Button } from "@/components/ui/button";
 import { ActiveRunBanner } from "@/components/runs/active-run-banner";
 import { RunTimeline } from "@/components/runs/run-timeline";
@@ -26,14 +28,23 @@ import { CheckpointList } from "@/components/runs/checkpoint-list";
 import { FailurePanel } from "@/components/runs/failure-panel";
 import { RunActions } from "@/components/runs/run-actions";
 import { ResumeFromCheckpointDialog } from "@/components/runs/resume-from-checkpoint-dialog";
-import type { Checkpoint } from "@/types/run";
+import type { AppSettings } from "@/types/settings";
+import type { Checkpoint, TrainingEnvironment, ModalGpuType } from "@/types/run";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
+type SettingsWithModal = AppSettings & { readonly isModalTokenSet?: boolean };
 
 export default function RunsPage(): React.JSX.Element {
   const { activeProjectId } = useAppStore();
   const [selectedRunId, setSelectedRunId] = React.useState<string | null>(null);
   const [selectedStageId, setSelectedStageId] = React.useState<string | null>(null);
   const [isResumeDialogOpen, setIsResumeDialogOpen] = React.useState(false);
+  const [environment, setEnvironment] = React.useState<TrainingEnvironment>("local");
+  const [modalGpuType, setModalGpuType] = React.useState<ModalGpuType | null>(null);
+
+  const { data: settings } = useSettings();
+  // isModalTokenSet is added by the settings-builder branch; optional until merged
+  const isModalTokenSet = (settings as SettingsWithModal | undefined)?.isModalTokenSet ?? false;
 
   const { data: runs = [], isLoading: isRunsLoading } = useRuns({
     projectId: activeProjectId ?? "",
@@ -172,27 +183,36 @@ export default function RunsPage(): React.JSX.Element {
 
   return (
     <div className="p-6 space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Runs</h1>
-        <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            onClick={handleStartRun}
-            disabled={!canStartRun || createRunMutation.isPending}
-          >
-            {createRunMutation.isPending ? "Starting…" : "Start Run"}
-          </Button>
-          {selectedRun && (
-            <RunActions
-              run={selectedRun}
-              onCancel={handleCancelRun}
-              onPause={handlePauseRun}
-              onResume={handleResumeRun}
-              isCancelling={cancelRun.isPending}
-              isPausing={pauseRun.isPending}
-              isResuming={resumeRun.isPending}
-            />
-          )}
+      <div className="flex items-center justify-between gap-4">
+        <h1 className="text-xl font-semibold shrink-0">Runs</h1>
+        <div className="flex items-center gap-3 flex-wrap">
+          <EnvironmentSelector
+            environment={environment}
+            onEnvironmentChange={setEnvironment}
+            modalGpuType={modalGpuType}
+            onModalGpuTypeChange={setModalGpuType}
+            isModalTokenSet={isModalTokenSet}
+          />
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              onClick={handleStartRun}
+              disabled={!canStartRun || createRunMutation.isPending}
+            >
+              {createRunMutation.isPending ? "Starting…" : "Start Run"}
+            </Button>
+            {selectedRun && (
+              <RunActions
+                run={selectedRun}
+                onCancel={handleCancelRun}
+                onPause={handlePauseRun}
+                onResume={handleResumeRun}
+                isCancelling={cancelRun.isPending}
+                isPausing={pauseRun.isPending}
+                isResuming={resumeRun.isPending}
+              />
+            )}
+          </div>
         </div>
       </div>
 
