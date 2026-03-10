@@ -273,13 +273,25 @@ class WorkbenchCallback(TrainerCallback):
 
         total_steps = state.max_steps if state.max_steps > 0 else 1
 
+        progress_pct = min(100.0, step / total_steps * 100)
         if metrics:
             _emit_metric(step=step, epoch=epoch, metrics=metrics)
             self._last_metrics = metrics
             self._heartbeat_state["current_step"] = step
             self._heartbeat_state["total_steps"] = total_steps
             self._heartbeat_state["metrics"] = metrics
-        progress_pct = min(100.0, step / total_steps * 100)
+            loss = metrics.get("loss", metrics.get("train_loss"))
+            lr = metrics.get("learning_rate")
+            stats_parts = []
+            if loss is not None:
+                stats_parts.append(f"loss: {loss:.4f}")
+            if lr is not None:
+                stats_parts.append(f"lr: {lr:.2e}")
+            stats = ", ".join(stats_parts) if stats_parts else ""
+            log_msg = f"Step {step}/{total_steps} ({progress_pct:.1f}%)"
+            if stats:
+                log_msg = f"{log_msg} — {stats}"
+            _emit_log(severity="info", message=log_msg, stage="training_progress")
         _emit_progress(
             current_step=step,
             total_steps=total_steps,
@@ -479,6 +491,7 @@ def _stage_dataset_resolution(*, raw_config: dict[str, Any], tokenizer: Any) -> 
     try:
         from datasets import load_dataset  # noqa: PLC0415
 
+        _emit_log(severity="info", message=f"Loading dataset: {dataset_id}", stage=stage_name)
         if source == "huggingface":
             subset = dataset_cfg.get("subset")
             raw_ds = load_dataset(dataset_id, subset, trust_remote_code=False)
@@ -500,6 +513,12 @@ def _stage_dataset_resolution(*, raw_config: dict[str, Any], tokenizer: Any) -> 
                 eval_dataset = eval_dataset.select(
                     range(min(max_samples // 10 or 1, len(eval_dataset)))
                 )
+
+        _emit_log(
+            severity="info",
+            message=f"Dataset loaded: {len(train_dataset)} train rows",
+            stage=stage_name,
+        )
     except Exception as exc:
         _emit_stage_fail(stage_name=stage_name, error=str(exc))
         raise
@@ -584,6 +603,12 @@ def _stage_tokenization_preprocessing(
         _emit_stage_fail(stage_name=stage_name, error=error_msg)
         raise ValueError(error_msg)
 
+    _emit_log(
+        severity="info",
+        message=f"Tokenizing dataset ({len(train_dataset)} rows, max_seq_length={max_seq_length})",
+        stage=stage_name,
+    )
+
     def _tokenize(batch: dict[str, list[Any]]) -> dict[str, list[Any]]:
         inputs = batch.get(input_field, [])
         targets = batch.get(target_field, inputs)
@@ -667,6 +692,7 @@ def _stage_training_preparation(
     try:
         from trl import SFTConfig, SFTTrainer  # noqa: PLC0415
 
+        _emit_log(severity="info", message="Preparing SFTConfig...", stage=stage_name)
         sft_config = SFTConfig(
             output_dir=str(checkpoints_dir),
             num_train_epochs=epochs,
@@ -696,6 +722,7 @@ def _stage_training_preparation(
             heartbeat_state=heartbeat_state,
         )
 
+        _emit_log(severity="info", message="Initializing SFTTrainer...", stage=stage_name)
         trainer = SFTTrainer(
             model=model,
             args=sft_config,
