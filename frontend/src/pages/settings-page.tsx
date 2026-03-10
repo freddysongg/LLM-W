@@ -6,7 +6,7 @@ import { DefaultRetentionPolicy } from "@/components/settings/default-retention-
 import { ExperimentRetentionDays } from "@/components/settings/experiment-retention-days";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import type { UpdateSettingsRequest } from "@/types/settings";
+import type { UpdateSettingsRequest, ApiKeySaveResult } from "@/types/settings";
 
 interface TestResult {
   readonly success: boolean;
@@ -16,9 +16,11 @@ interface TestResult {
 export default function SettingsPage(): React.JSX.Element {
   const { data: settings, isLoading, error } = useSettings();
   const updateSettings = useUpdateSettings();
+  const saveApiKey = useUpdateSettings();
   const testConnection = useTestAiConnection();
   const { toast } = useToast();
   const [testResult, setTestResult] = useState<TestResult | null>(null);
+  const [apiKeySaveResult, setApiKeySaveResult] = useState<ApiKeySaveResult | null>(null);
 
   const handleSave = (updates: UpdateSettingsRequest): void => {
     updateSettings.mutate(
@@ -34,6 +36,27 @@ export default function SettingsPage(): React.JSX.Element {
           toast({
             title: "Save failed",
             description: "Failed to save settings.",
+            variant: "destructive",
+          });
+        },
+      },
+    );
+  };
+
+  const handleSetApiKey = (apiKey: string): void => {
+    setApiKeySaveResult(null);
+    saveApiKey.mutate(
+      { request: { aiApiKey: apiKey } },
+      {
+        onSuccess: () => {
+          setApiKeySaveResult({ success: true });
+          toast({ title: "API key saved", description: "API key updated successfully." });
+        },
+        onError: () => {
+          setApiKeySaveResult({ success: false });
+          toast({
+            title: "Failed to save API key",
+            description: "Could not update the API key.",
             variant: "destructive",
           });
         },
@@ -62,6 +85,9 @@ export default function SettingsPage(): React.JSX.Element {
           <SettingsForm
             settings={settings}
             onSave={handleSave}
+            onSetApiKey={handleSetApiKey}
+            isSavingApiKey={saveApiKey.isPending}
+            apiKeySaveResult={apiKeySaveResult}
             onTestConnection={handleTestConnection}
             isTestingConnection={testConnection.isPending}
             testConnectionResult={testResult}
