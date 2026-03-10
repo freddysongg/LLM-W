@@ -38,6 +38,9 @@ training = [
 quantization = [
     "bitsandbytes>=0.43.0",
 ]
+cloud = [
+    "modal>=0.73.0",
+]
 dev = [
     "ruff>=0.4.0",
     "pytest>=8.0.0",
