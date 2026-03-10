@@ -430,6 +430,15 @@ def _stage_environment_validation(*, raw_config: dict[str, Any]) -> str:
     return device
 
 
+def _is_bitsandbytes_available() -> bool:
+    try:
+        import bitsandbytes  # noqa: PLC0415, F401
+
+        return True
+    except ImportError:
+        return False
+
+
 def _stage_model_resolution(*, raw_config: dict[str, Any], device: str) -> Any:
     stage_name = "model_resolution"
     _emit_stage_enter(stage_name=stage_name, stage_order=3)
@@ -439,6 +448,22 @@ def _stage_model_resolution(*, raw_config: dict[str, Any], device: str) -> Any:
     model_id = model_cfg.get("model_id", "")
     torch_dtype_str = model_cfg.get("torch_dtype", "auto")
     trust_remote_code = bool(model_cfg.get("trust_remote_code", False))
+
+    quant_cfg = raw_config.get("quantization", {})
+    is_quantization_enabled = bool(quant_cfg.get("enabled", False))
+
+    adapters_cfg = raw_config.get("adapters", {})
+    is_qlora = adapters_cfg.get("enabled", True) and adapters_cfg.get("type", "lora") == "qlora"
+
+    needs_bitsandbytes = is_quantization_enabled or is_qlora
+    if needs_bitsandbytes and not _is_bitsandbytes_available():
+        error_msg = (
+            "bitsandbytes is required for QLoRA/quantization but is not installed. "
+            "Install it with: pip install bitsandbytes>=0.43.0 "
+            "(note: bitsandbytes has limited Windows support — use LoRA instead on Windows)"
+        )
+        _emit_stage_fail(stage_name=stage_name, error=error_msg)
+        raise RuntimeError(error_msg)
 
     _emit_log(severity="info", message=f"Loading model: {model_id}", stage=stage_name)
 
@@ -457,12 +482,37 @@ def _stage_model_resolution(*, raw_config: dict[str, Any], device: str) -> Any:
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
 
-        model = AutoModelForCausalLM.from_pretrained(
-            model_id,
-            trust_remote_code=trust_remote_code,
-            torch_dtype=torch_dtype,
-        )
-        model.to(device)
+        load_kwargs: dict[str, Any] = {
+            "trust_remote_code": trust_remote_code,
+            "torch_dtype": torch_dtype,
+        }
+
+        if needs_bitsandbytes:
+            from transformers import BitsAndBytesConfig  # noqa: PLC0415
+
+            quant_mode = quant_cfg.get("mode", "4bit")
+            compute_dtype_str = quant_cfg.get("compute_dtype", "bfloat16")
+            compute_dtype = dtype_map.get(compute_dtype_str, torch.bfloat16)
+
+            if quant_mode == "4bit":
+                load_kwargs["quantization_config"] = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_compute_dtype=compute_dtype,
+                    bnb_4bit_quant_type=quant_cfg.get("quant_type", "nf4"),
+                    bnb_4bit_use_double_quant=bool(quant_cfg.get("double_quant", True)),
+                )
+            else:
+                load_kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
+
+            _emit_log(
+                severity="info",
+                message=f"Applying {quant_mode} quantization via bitsandbytes",
+                stage=stage_name,
+            )
+
+        model = AutoModelForCausalLM.from_pretrained(model_id, **load_kwargs)
+        if not needs_bitsandbytes:
+            model.to(device)
     except Exception as exc:
         _emit_stage_fail(stage_name=stage_name, error=str(exc))
         raise
@@ -777,8 +827,20 @@ def _stage_adapter_attachment(*, model: Any, raw_config: dict[str, Any]) -> Any:
         )
         return model
 
+    adapter_type = adapters_cfg.get("type", "lora")
+
     try:
         from peft import LoraConfig, TaskType, get_peft_model  # noqa: PLC0415
+
+        if adapter_type == "qlora":
+            from peft import prepare_model_for_kbit_training  # noqa: PLC0415
+
+            model = prepare_model_for_kbit_training(model)
+            _emit_log(
+                severity="info",
+                message="Model prepared for k-bit (QLoRA) training",
+                stage=stage_name,
+            )
 
         lora_config = LoraConfig(
             task_type=TaskType.CAUSAL_LM,
@@ -790,10 +852,11 @@ def _stage_adapter_attachment(*, model: Any, raw_config: dict[str, Any]) -> Any:
         model = get_peft_model(model, lora_config)
         trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
         total = sum(p.numel() for p in model.parameters())
+        adapter_label = "QLoRA" if adapter_type == "qlora" else "LoRA"
         _emit_log(
             severity="info",
             message=(
-                f"LoRA attached: {trainable:,}/{total:,} trainable params "
+                f"{adapter_label} attached: {trainable:,}/{total:,} trainable params "
                 f"({100 * trainable / total:.2f}%)"
             ),
             stage=stage_name,
@@ -809,10 +872,11 @@ def _stage_adapter_attachment(*, model: Any, raw_config: dict[str, Any]) -> Any:
         raise
 
     duration_ms = int((time.monotonic() - t0) * 1000)
+    adapter_label = "QLoRA" if adapter_type == "qlora" else "LoRA"
     _emit_stage_complete(
         stage_name=stage_name,
         duration_ms=duration_ms,
-        output_summary="LoRA adapters attached",
+        output_summary=f"{adapter_label} adapters attached",
     )
     return model
 
