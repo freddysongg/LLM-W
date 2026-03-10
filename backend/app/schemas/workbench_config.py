@@ -51,9 +51,9 @@ class TrainingConfig(BaseModel):
     learning_rate: float = 2e-4
     weight_decay: float = 0.01
     max_grad_norm: float = 1.0
-    eval_steps: int = 50
-    save_steps: int = 100
-    logging_steps: int = 10
+    eval_steps: int | None = None
+    save_steps: int | None = None
+    logging_steps: int | None = None
     seed: int = 42
     resume_from_checkpoint: str | None = None
 
