@@ -350,5 +350,15 @@
 		"status": "active",
 		"createdAt": "2026-03-10T20:51:24.311Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-efe971bf",
+		"name": "baseurl-fix",
+		"memberIssueIds": [
+			"llm-interactive-2e7b"
+		],
+		"status": "active",
+		"createdAt": "2026-03-10T21:23:07.023Z",
+		"completedAt": null
 	}
 ]
