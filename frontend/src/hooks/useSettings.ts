@@ -1,6 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { UpdateSettingsRequest } from "@/types/settings";
-import { fetchSettings, updateSettings, testAiConnection } from "@/api/settings";
+import {
+  fetchSettings,
+  updateSettings,
+  testAiConnection,
+  testModalConnection,
+} from "@/api/settings";
 
 const SETTINGS_QUERY_KEY = ["settings"] as const;
 
@@ -24,5 +29,11 @@ export function useUpdateSettings() {
 export function useTestAiConnection() {
   return useMutation({
     mutationFn: testAiConnection,
+  });
+}
+
+export function useTestModalConnection() {
+  return useMutation({
+    mutationFn: testModalConnection,
   });
 }

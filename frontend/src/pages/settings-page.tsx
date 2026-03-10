@@ -1,6 +1,11 @@
 import * as React from "react";
 import { useState } from "react";
-import { useSettings, useUpdateSettings, useTestAiConnection } from "@/hooks/useSettings";
+import {
+  useSettings,
+  useUpdateSettings,
+  useTestAiConnection,
+  useTestModalConnection,
+} from "@/hooks/useSettings";
 import { SettingsForm } from "@/components/settings/settings-form";
 import { DefaultRetentionPolicy } from "@/components/settings/default-retention-policy";
 import { ExperimentRetentionDays } from "@/components/settings/experiment-retention-days";
@@ -17,10 +22,14 @@ export default function SettingsPage(): React.JSX.Element {
   const { data: settings, isLoading, error } = useSettings();
   const updateSettings = useUpdateSettings();
   const saveApiKey = useUpdateSettings();
+  const saveModalToken = useUpdateSettings();
   const testConnection = useTestAiConnection();
+  const testModalConn = useTestModalConnection();
   const { toast } = useToast();
   const [testResult, setTestResult] = useState<TestResult | null>(null);
   const [apiKeySaveResult, setApiKeySaveResult] = useState<ApiKeySaveResult | null>(null);
+  const [modalTokenSaveResult, setModalTokenSaveResult] = useState<ApiKeySaveResult | null>(null);
+  const [modalTestResult, setModalTestResult] = useState<TestResult | null>(null);
 
   const handleSave = (updates: UpdateSettingsRequest): void => {
     updateSettings.mutate(
@@ -64,11 +73,43 @@ export default function SettingsPage(): React.JSX.Element {
     );
   };
 
+  const handleSetModalToken = (token: string): void => {
+    setModalTokenSaveResult(null);
+    saveModalToken.mutate(
+      { request: { modalApiToken: token } },
+      {
+        onSuccess: () => {
+          setModalTokenSaveResult({ success: true });
+          toast({
+            title: "Modal token saved",
+            description: "Modal API token updated successfully.",
+          });
+        },
+        onError: () => {
+          setModalTokenSaveResult({ success: false });
+          toast({
+            title: "Failed to save Modal token",
+            description: "Could not update the Modal API token.",
+            variant: "destructive",
+          });
+        },
+      },
+    );
+  };
+
   const handleTestConnection = (): void => {
     setTestResult(null);
     testConnection.mutate(undefined, {
       onSuccess: (result) => setTestResult(result),
       onError: () => setTestResult({ success: false, message: "Connection failed" }),
+    });
+  };
+
+  const handleTestModalConnection = (): void => {
+    setModalTestResult(null);
+    testModalConn.mutate(undefined, {
+      onSuccess: (result) => setModalTestResult(result),
+      onError: () => setModalTestResult({ success: false, message: "Connection failed" }),
     });
   };
 
@@ -91,6 +132,12 @@ export default function SettingsPage(): React.JSX.Element {
             onTestConnection={handleTestConnection}
             isTestingConnection={testConnection.isPending}
             testConnectionResult={testResult}
+            onSetModalToken={handleSetModalToken}
+            isSavingModalToken={saveModalToken.isPending}
+            modalTokenSaveResult={modalTokenSaveResult}
+            onTestModalConnection={handleTestModalConnection}
+            isTestingModalConnection={testModalConn.isPending}
+            modalTestResult={modalTestResult}
           />
         )}
 
