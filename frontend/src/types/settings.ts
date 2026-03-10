@@ -26,3 +26,7 @@ export interface TestConnectionResult {
   readonly success: boolean;
   readonly message: string;
 }
+
+export interface ApiKeySaveResult {
+  readonly success: boolean;
+}

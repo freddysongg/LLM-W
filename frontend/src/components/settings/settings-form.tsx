@@ -1,6 +1,6 @@
 import * as React from "react";
-import { useState } from "react";
-import type { AppSettings, UpdateSettingsRequest } from "@/types/settings";
+import { useState, useEffect } from "react";
+import type { AppSettings, UpdateSettingsRequest, ApiKeySaveResult } from "@/types/settings";
 import type { AIProvider } from "@/types/config";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { Check } from "lucide-react";
 
 const OPENAI_MODELS = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"] as const;
 const CLAUDE_MODELS = [
@@ -29,6 +30,9 @@ type ClaudeModel = (typeof CLAUDE_MODELS)[number];
 interface SettingsFormProps {
   readonly settings: AppSettings;
   readonly onSave: (updates: UpdateSettingsRequest) => void;
+  readonly onSetApiKey: (apiKey: string) => void;
+  readonly isSavingApiKey: boolean;
+  readonly apiKeySaveResult: ApiKeySaveResult | null;
   readonly onTestConnection: () => void;
   readonly isTestingConnection: boolean;
   readonly testConnectionResult: { readonly success: boolean; readonly message: string } | null;
@@ -37,6 +41,9 @@ interface SettingsFormProps {
 export function SettingsForm({
   settings,
   onSave,
+  onSetApiKey,
+  isSavingApiKey,
+  apiKeySaveResult,
   onTestConnection,
   isTestingConnection,
   testConnectionResult,
@@ -56,6 +63,12 @@ export function SettingsForm({
     String(settings.watchdogHeartbeatIntervalSeconds),
   );
 
+  useEffect(() => {
+    if (apiKeySaveResult?.success) {
+      setAiApiKey("");
+    }
+  }, [apiKeySaveResult]);
+
   const handleProviderChange = (val: string): void => {
     const provider = val as AIProvider;
     setAiProvider(provider);
@@ -69,7 +82,7 @@ export function SettingsForm({
 
   const handleSubmit = (e: React.FormEvent): void => {
     e.preventDefault();
-    const updates: UpdateSettingsRequest = {
+    onSave({
       aiProvider,
       aiModelId: aiModelId || undefined,
       aiBaseUrl: aiProvider === "openai_compatible" ? aiBaseUrl || undefined : undefined,
@@ -83,11 +96,12 @@ export function SettingsForm({
       watchdogHeartbeatIntervalSeconds: watchdogHeartbeatIntervalSeconds
         ? Number(watchdogHeartbeatIntervalSeconds)
         : undefined,
-    };
+    });
+  };
+
+  const handleSetApiKey = (): void => {
     if (aiApiKey) {
-      onSave({ ...updates, aiApiKey });
-    } else {
-      onSave(updates);
+      onSetApiKey(aiApiKey);
     }
   };
 
@@ -121,14 +135,36 @@ export function SettingsForm({
                 </Badge>
               )}
             </div>
-            <Input
-              id="ai-api-key"
-              type="password"
-              placeholder={settings.isAiApiKeySet ? "••••••••••••••••" : "Enter API key"}
-              value={aiApiKey}
-              onChange={(e) => setAiApiKey(e.target.value)}
-              autoComplete="off"
-            />
+            <div className="flex items-center gap-2">
+              <Input
+                id="ai-api-key"
+                type="password"
+                placeholder={settings.isAiApiKeySet ? "••••••••••••••••" : "Enter API key"}
+                value={aiApiKey}
+                onChange={(e) => setAiApiKey(e.target.value)}
+                autoComplete="off"
+                className="flex-1"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleSetApiKey}
+                disabled={!aiApiKey || isSavingApiKey}
+                className="shrink-0"
+              >
+                {isSavingApiKey ? (
+                  "Saving..."
+                ) : apiKeySaveResult?.success ? (
+                  <span className="flex items-center gap-1">
+                    <Check className="h-3.5 w-3.5" />
+                    Saved
+                  </span>
+                ) : (
+                  "Set Key"
+                )}
+              </Button>
+            </div>
           </div>
 
           <div className="space-y-2">
