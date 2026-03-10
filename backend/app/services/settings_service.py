@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from app.core.config import settings
-from app.schemas.settings import AITestResponse, SettingsResponse, SettingsUpdate
+from app.schemas.settings import AITestResponse, ModalTestResponse, SettingsResponse, SettingsUpdate
 
 _SETTINGS_FILE: Path = settings.data_dir / "settings.json"
 
@@ -70,12 +70,18 @@ def get_settings() -> SettingsResponse:
                 settings.watchdog_heartbeat_interval_seconds,
             )
         ),
+        modal_token_set=bool(_overrides.get("modal_api_token")),
     )
 
 
 def get_raw_api_key() -> str | None:
     """Return the plaintext API key from overrides or app defaults."""
     return _overrides.get("ai_api_key") or settings.ai_api_key
+
+
+def get_raw_modal_token() -> str | None:
+    """Return the plaintext Modal API token from overrides."""
+    return _overrides.get("modal_api_token") or None
 
 
 def update_settings(*, payload: SettingsUpdate) -> SettingsResponse:
@@ -101,6 +107,8 @@ def update_settings(*, payload: SettingsUpdate) -> SettingsResponse:
         _overrides["watchdog_heartbeat_interval_seconds"] = (
             payload.watchdog_heartbeat_interval_seconds
         )
+    if payload.modal_api_token is not None:
+        _overrides["modal_api_token"] = payload.modal_api_token
 
     _persist_overrides()
     return get_settings()
@@ -165,3 +173,20 @@ async def test_ai_connection() -> AITestResponse:
         provider=provider,
         model_id=model_id,
     )
+
+
+async def test_modal_connection() -> ModalTestResponse:
+    token = get_raw_modal_token()
+
+    if not token:
+        return ModalTestResponse(success=False, message="No Modal API token configured")
+
+    try:
+        import modal
+
+        client = await modal.Client.from_credentials(token_id="", token_secret=token)
+        await client.hello()
+    except Exception as exc:
+        return ModalTestResponse(success=False, message=str(exc))
+
+    return ModalTestResponse(success=True, message="Modal connection successful")
