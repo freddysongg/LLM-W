@@ -203,18 +203,26 @@ class CloudLLMEngine(RecommendationEngine):
         raise ValueError(f"Unsupported provider: {self._provider}")
 
     async def _call_anthropic(self, *, prompt: str) -> str:
+        import asyncio
+
         import anthropic
 
         client = anthropic.Anthropic(api_key=self._api_key)
         # Anthropic SDK is synchronous — run in threadpool for async compatibility
-        import asyncio
 
         def _sync_call() -> str:
-            response = client.messages.create(
-                model=self._model_id,
-                max_tokens=2048,
-                messages=[{"role": "user", "content": prompt}],
-            )
+            try:
+                response = client.messages.create(
+                    model=self._model_id,
+                    max_tokens=2048,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+            except anthropic.AuthenticationError as exc:
+                raise ValueError(f"Anthropic authentication failed: {exc}") from exc
+            except anthropic.APIConnectionError as exc:
+                raise ValueError(f"Anthropic connection error: {exc}") from exc
+            except anthropic.APIStatusError as exc:
+                raise ValueError(f"Anthropic API error {exc.status_code}: {exc.message}") from exc
             block = response.content[0]
             if hasattr(block, "text"):
                 return block.text  # type: ignore[no-any-return]
@@ -230,11 +238,18 @@ class CloudLLMEngine(RecommendationEngine):
         client = openai.OpenAI(api_key=self._api_key, base_url=self._base_url)
 
         def _sync_call() -> str:
-            response = client.chat.completions.create(
-                model=self._model_id,
-                max_tokens=2048,
-                messages=[{"role": "user", "content": prompt}],
-            )
+            try:
+                response = client.chat.completions.create(
+                    model=self._model_id,
+                    max_tokens=2048,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+            except openai.AuthenticationError as exc:
+                raise ValueError(f"OpenAI authentication failed: {exc}") from exc
+            except openai.APIConnectionError as exc:
+                raise ValueError(f"OpenAI connection error: {exc}") from exc
+            except openai.APIStatusError as exc:
+                raise ValueError(f"OpenAI API error {exc.status_code}: {exc.message}") from exc
             content = response.choices[0].message.content
             if content is None:
                 raise ValueError("OpenAI returned empty content")
