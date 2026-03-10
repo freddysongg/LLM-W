@@ -316,6 +316,29 @@ async def resolve_dataset(
     if cap is not None and cap > 0 and len(rows) > cap:
         rows = rows[:cap]
 
+    # Recalculate split_counts from the actual (post-cap) row count.
+    # The counts returned by _load_huggingface reflect the full remote split sizes
+    # and become stale once rows are capped. If the user supplied explicit ratios,
+    # use those; otherwise assign every row to train.
+    total_after_cap = len(rows)
+    if request.train_ratio is not None:
+        split_counts = SplitCounts(
+            train=round(total_after_cap * request.train_ratio),
+            validation=(
+                round(total_after_cap * request.val_ratio)
+                if request.val_ratio is not None
+                else None
+            ),
+            test=(
+                round(total_after_cap * request.test_ratio)
+                if request.test_ratio is not None
+                else None
+            ),
+        )
+    elif cap is not None and cap > 0:
+        # Cap applied but no explicit split ratios — all rows go to train.
+        split_counts = SplitCounts(train=total_after_cap)
+
     detected_format = request.format if request.format != "default" else _detect_format(rows)
     detected_fields = _collect_fields(rows)
     token_stats = _compute_token_stats(rows)
