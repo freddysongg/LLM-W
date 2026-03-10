@@ -308,5 +308,16 @@
 		"status": "active",
 		"createdAt": "2026-03-10T17:30:03.401Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-3e60d81e",
+		"name": "settings-fixes",
+		"memberIssueIds": [
+			"llm-interactive-393e",
+			"llm-interactive-cc91"
+		],
+		"status": "active",
+		"createdAt": "2026-03-10T18:04:18.713Z",
+		"completedAt": null
 	}
 ]
