@@ -104,9 +104,9 @@ const DEFAULT_DATASET_FORM: DatasetFormState = {
   evalSplit: "validation",
   sampleMode: "all",
   maxSamples: null,
-  trainRatio: null,
-  valRatio: null,
-  testRatio: null,
+  trainRatio: 80,
+  valRatio: 10,
+  testRatio: 10,
 };
 
 export const useAppStore = create<AppStore>()(
@@ -170,13 +170,25 @@ export const useAppStore = create<AppStore>()(
     }),
     {
       name: "app-store",
-      version: 2,
+      version: 3,
       migrate: (persisted, version): PersistedAppState => {
         const state = persisted as PersistedAppState;
         // any store persisted before version 2 predates trainRatio/valRatio/testRatio;
         // reset datasetForm to avoid stale or missing fields being coerced by the backend
         if (version < 2) {
           return { ...state, datasetForm: DEFAULT_DATASET_FORM };
+        }
+        // version 2 stores have trainRatio/valRatio/testRatio as null; apply standard 80/10/10 defaults
+        if (version < 3) {
+          return {
+            ...state,
+            datasetForm: {
+              ...state.datasetForm,
+              trainRatio: state.datasetForm.trainRatio ?? 80,
+              valRatio: state.datasetForm.valRatio ?? 10,
+              testRatio: state.datasetForm.testRatio ?? 10,
+            },
+          };
         }
         return state;
       },
