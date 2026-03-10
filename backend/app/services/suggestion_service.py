@@ -23,7 +23,7 @@ from app.schemas.config_version import ConfigVersionCreate
 from app.schemas.suggestion import SuggestionListResponse, SuggestionResponse
 from app.services import config_service
 from app.services.ai_recommender import AISuggestionCreate, build_engine
-from app.services.settings_service import get_settings
+from app.services.settings_service import get_raw_api_key, get_settings
 
 
 async def _get_project(*, session: AsyncSession, project_id: str) -> Project:
@@ -181,14 +181,9 @@ async def generate_suggestions(
         run_metrics = await _fetch_run_metrics(session=session, run_id=source_run_id)
 
     current_settings = get_settings()
-    # Retrieve raw key from overrides (settings_service stores the plaintext key in _overrides)
-    from app.core.config import settings as _app_settings
-    from app.services.settings_service import _overrides as _settings_overrides
-
-    raw_api_key: str | None = _settings_overrides.get("ai_api_key") or _app_settings.ai_api_key
     engine = build_engine(
         provider=current_settings.ai_provider,
-        api_key=raw_api_key,
+        api_key=get_raw_api_key(),
         model_id=current_settings.ai_model_id,
         base_url=current_settings.ai_base_url,
     )

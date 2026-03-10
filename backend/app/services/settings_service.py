@@ -12,12 +12,27 @@ _SETTINGS_FILE: Path = settings.data_dir / "settings.json"
 # Runtime overrides applied on top of pydantic-settings defaults
 _overrides: dict[str, Any] = {}
 
+# Migration map for settings.json files written before the camelCase→snake_case fix.
+_CAMEL_TO_SNAKE: dict[str, str] = {
+    "aiProvider": "ai_provider",
+    "aiApiKey": "ai_api_key",
+    "aiModelId": "ai_model_id",
+    "aiBaseUrl": "ai_base_url",
+    "defaultProjectsDir": "default_projects_dir",
+    "storageWarningThresholdGb": "storage_warning_threshold_gb",
+    "watchdogStaleTimeoutSeconds": "watchdog_stale_timeout_seconds",
+    "watchdogHeartbeatIntervalSeconds": "watchdog_heartbeat_interval_seconds",
+}
+
 
 def _load_persisted_overrides() -> None:
     if _SETTINGS_FILE.exists():
         try:
             with _SETTINGS_FILE.open() as f:
-                _overrides.update(json.load(f))
+                raw: dict[str, Any] = json.load(f)
+            # Migrate any camelCase keys written by the old frontend.
+            migrated = {_CAMEL_TO_SNAKE.get(k, k): v for k, v in raw.items()}
+            _overrides.update(migrated)
         except (json.JSONDecodeError, OSError):
             pass
 
@@ -58,9 +73,18 @@ def get_settings() -> SettingsResponse:
     )
 
 
+def get_raw_api_key() -> str | None:
+    """Return the plaintext API key from overrides or app defaults."""
+    return _overrides.get("ai_api_key") or settings.ai_api_key
+
+
 def update_settings(*, payload: SettingsUpdate) -> SettingsResponse:
     if payload.ai_provider is not None:
         _overrides["ai_provider"] = payload.ai_provider
+        # Clear stored base URL when switching away from openai_compatible so
+        # the "openai" provider never accidentally inherits a custom base URL.
+        if payload.ai_provider != "openai_compatible" and payload.ai_base_url is None:
+            _overrides.pop("ai_base_url", None)
     if payload.ai_api_key is not None:
         _overrides["ai_api_key"] = payload.ai_api_key
     if payload.ai_model_id is not None:
