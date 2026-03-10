@@ -113,12 +113,6 @@ export function SettingsForm({
     }
   };
 
-  const handleSetApiKey = (): void => {
-    if (aiApiKey) {
-      onSetApiKey(aiApiKey);
-    }
-  };
-
   return (
     <form id="settings-form" onSubmit={handleSubmit} className="space-y-6">
       <Card>
