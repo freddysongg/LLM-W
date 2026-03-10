@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+import sys
 
 import psutil
 from fastapi import APIRouter
@@ -19,7 +20,9 @@ async def get_health() -> HealthResponse:
 @router.get("/health/system", response_model=SystemHealthResponse)
 async def get_system_health() -> SystemHealthResponse:
     memory = psutil.virtual_memory()
-    disk = shutil.disk_usage("/")
+    # Windows does not have a root '/' filesystem; use cwd drive instead
+    disk_path = "." if sys.platform == "win32" else "/"
+    disk = shutil.disk_usage(disk_path)
 
     gpu_available = False
     gpu_name = None
