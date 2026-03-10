@@ -217,5 +217,15 @@
 		"status": "active",
 		"createdAt": "2026-03-09T23:56:53.919Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-ba05ef6c",
+		"name": "dataset-resolve-fix",
+		"memberIssueIds": [
+			"llm-interactive-3dc1"
+		],
+		"status": "active",
+		"createdAt": "2026-03-10T00:06:52.621Z",
+		"completedAt": null
 	}
 ]
