@@ -224,15 +224,25 @@ async def get_model_architecture(*, project_id: str) -> ModelArchitectureRespons
 
 
 def _find_node_in_tree(*, node: LayerNode, target: str) -> LayerNode | None:
-    """Depth-first search for a node by name in a LayerNode tree."""
-    if node.name == target:
-        return node
-    if node.children:
-        for child in node.children:
-            found = _find_node_in_tree(node=child, target=target)
-            if found is not None:
-                return found
-    return None
+    """Depth-first search by full dotted path matching PyTorch named_modules() convention.
+
+    The root node is treated as the module root (accumulated path ''), so its direct
+    children form the first path segment — 'lm_head' matches a direct child named 'lm_head'
+    and 'model.embed_tokens' matches a grandchild at that dotted path.
+    """
+
+    def search(current: LayerNode, accumulated: str) -> LayerNode | None:
+        if accumulated == target:
+            return current
+        if current.children:
+            for child in current.children:
+                child_path = f"{accumulated}.{child.name}" if accumulated else child.name
+                found = search(child, child_path)
+                if found is not None:
+                    return found
+        return None
+
+    return search(node, "")
 
 
 def get_layer_detail(*, project_id: str, layer_name: str) -> LayerDetailResponse:
