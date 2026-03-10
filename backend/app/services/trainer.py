@@ -201,6 +201,8 @@ def _start_heartbeat_thread(
 
 def _atomic_checkpoint_write(*, trainer: Any, step: int, project_dir: Path) -> str:
     """Write checkpoint atomically: tmp dir → rename."""
+    import sys
+
     checkpoints_dir = project_dir / "checkpoints"
     checkpoints_dir.mkdir(parents=True, exist_ok=True)
 
@@ -212,7 +214,13 @@ def _atomic_checkpoint_write(*, trainer: Any, step: int, project_dir: Path) -> s
 
     trainer.save_model(str(tmp_dir))
 
-    tmp_dir.rename(final_dir)
+    if sys.platform == "win32":
+        # Path.rename raises FileExistsError on Windows if target exists
+        if final_dir.exists():
+            shutil.rmtree(final_dir)
+        shutil.move(str(tmp_dir), str(final_dir))
+    else:
+        tmp_dir.rename(final_dir)
     return str(final_dir)
 
 
