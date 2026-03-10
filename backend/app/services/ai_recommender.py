@@ -220,7 +220,7 @@ class CloudLLMEngine(RecommendationEngine):
                 return block.text  # type: ignore[no-any-return]
             raise ValueError("Unexpected Anthropic response content type")
 
-        return await asyncio.get_event_loop().run_in_executor(None, _sync_call)
+        return await asyncio.get_running_loop().run_in_executor(None, _sync_call)
 
     async def _call_openai(self, *, prompt: str) -> str:
         import asyncio
@@ -240,7 +240,7 @@ class CloudLLMEngine(RecommendationEngine):
                 raise ValueError("OpenAI returned empty content")
             return content
 
-        return await asyncio.get_event_loop().run_in_executor(None, _sync_call)
+        return await asyncio.get_running_loop().run_in_executor(None, _sync_call)
 
     async def health_check(self) -> bool:
         try:
