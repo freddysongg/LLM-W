@@ -298,5 +298,15 @@
 		"status": "active",
 		"createdAt": "2026-03-10T17:20:08.173Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-eb7765ac",
+		"name": "openai-settings",
+		"memberIssueIds": [
+			"llm-interactive-9cf3"
+		],
+		"status": "active",
+		"createdAt": "2026-03-10T17:30:03.401Z",
+		"completedAt": null
 	}
 ]
