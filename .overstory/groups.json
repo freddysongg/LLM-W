@@ -288,5 +288,15 @@
 		"status": "active",
 		"createdAt": "2026-03-10T17:07:09.025Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-9134ad20",
+		"name": "timeline-skip-fix",
+		"memberIssueIds": [
+			"llm-interactive-e333"
+		],
+		"status": "active",
+		"createdAt": "2026-03-10T17:20:08.173Z",
+		"completedAt": null
 	}
 ]
