@@ -127,9 +127,23 @@ def _build_prompt(
     return "\n".join(sections)
 
 
+def _strip_code_fence(text: str) -> str:
+    """Remove markdown code fences that some models add despite instructions."""
+    stripped = text.strip()
+    if not stripped.startswith("```"):
+        return stripped
+    lines = stripped.splitlines()
+    # Drop opening fence line (e.g. ```json or ```)
+    lines = lines[1:]
+    # Drop closing fence line
+    if lines and lines[-1].strip() == "```":
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
+
+
 def _parse_llm_response(*, raw: str, provider: str) -> AISuggestionCreate:
     try:
-        data = json.loads(raw.strip())
+        data = json.loads(_strip_code_fence(raw))
     except json.JSONDecodeError as exc:
         raise ValueError(f"LLM returned invalid JSON: {exc}") from exc
 
