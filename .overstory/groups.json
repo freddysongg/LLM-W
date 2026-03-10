@@ -340,5 +340,15 @@
 		"status": "active",
 		"createdAt": "2026-03-10T19:22:22.250Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-1a65875c",
+		"name": "ai-gen-500-fix",
+		"memberIssueIds": [
+			"llm-interactive-0873"
+		],
+		"status": "active",
+		"createdAt": "2026-03-10T20:51:24.311Z",
+		"completedAt": null
 	}
 ]
