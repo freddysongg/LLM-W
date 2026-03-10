@@ -242,8 +242,15 @@ class WorkbenchCallback(TrainerCallback):
             output_summary="trainer initialized",
         )
         _emit_stage_enter(stage_name="training_progress", stage_order=10)
+        total_steps = state.max_steps if state.max_steps > 0 else 0
         self._heartbeat_state["stage"] = "training_progress"
-        self._heartbeat_state["total_steps"] = state.max_steps if state.max_steps > 0 else 0
+        self._heartbeat_state["total_steps"] = total_steps
+        _emit_progress(
+            current_step=0,
+            total_steps=total_steps,
+            progress_pct=0.0,
+            epoch=0.0,
+        )
 
     def on_step_end(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
         step = state.global_step
