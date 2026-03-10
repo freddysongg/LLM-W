@@ -3,9 +3,9 @@ from __future__ import annotations
 import json
 import logging
 import os
-import platform
 import shutil
 import subprocess
+import sys
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -20,6 +20,9 @@ from app.models.decision_log import DecisionLog
 from app.models.run import Run
 
 logger = logging.getLogger(__name__)
+
+_IS_UNIX = sys.platform != "win32"
+_IS_DARWIN = sys.platform == "darwin"
 
 _TEMP_CHECKPOINT_PREFIX = ".tmp-checkpoint-"
 
@@ -133,14 +136,14 @@ def _check_process_exit_windows(pid: int) -> str | None:
 
 def _check_process_exit_signal(pid: int) -> str | None:
     """Try to determine how a process died. Returns descriptive string or None."""
-    if platform.system() == "Windows":
+    if not _IS_UNIX:
         return _check_process_exit_windows(pid)
     return _check_process_exit_unix(pid)
 
 
 def _check_macos_oom_kill(pid: int) -> bool:
     """Check if a process was OOM-killed on macOS by scanning the system log for jetsam events."""
-    if platform.system() != "Darwin":
+    if not _IS_DARWIN:
         return False
     try:
         result = subprocess.run(
