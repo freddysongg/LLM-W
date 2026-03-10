@@ -330,5 +330,15 @@
 		"status": "active",
 		"createdAt": "2026-03-10T19:10:29.039Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-f931aad3",
+		"name": "ai-suggest-fix",
+		"memberIssueIds": [
+			"llm-interactive-85ec"
+		],
+		"status": "active",
+		"createdAt": "2026-03-10T19:22:22.250Z",
+		"completedAt": null
 	}
 ]
