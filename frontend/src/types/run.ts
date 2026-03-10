@@ -1,5 +1,9 @@
 export type RunStatus = "pending" | "running" | "completed" | "failed" | "cancelled" | "paused";
 
+export type TrainingEnvironment = "local" | "modal";
+
+export type ModalGpuType = "t4" | "a10" | "a100-40gb" | "a100-80gb" | "h100";
+
 export type StageStatus = "pending" | "running" | "completed" | "failed" | "skipped";
 
 export type StageName =
@@ -48,6 +52,8 @@ export interface Run {
   readonly pid: number | null;
   readonly createdAt: string;
   readonly updatedAt: string;
+  readonly environment?: TrainingEnvironment;
+  readonly modalGpuType?: ModalGpuType | null;
 }
 
 export interface RunStage {

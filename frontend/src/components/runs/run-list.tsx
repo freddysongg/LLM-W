@@ -1,6 +1,7 @@
 import * as React from "react";
 import { Trash2 } from "lucide-react";
 import type { Run } from "@/types/run";
+import { MODAL_GPU_OPTIONS } from "@/api/cloud";
 import {
   Table,
   TableBody,
@@ -58,6 +59,14 @@ function formatDuration(startedAt: string | null, completedAt: string | null): s
 
 const DELETABLE_STATUSES = new Set(["completed", "failed", "cancelled"]);
 
+function environmentLabel(run: Run): string {
+  if (!run.environment || run.environment === "local") return "Local";
+  const gpuOption = run.modalGpuType
+    ? MODAL_GPU_OPTIONS.find(({ value }) => value === run.modalGpuType)
+    : null;
+  return gpuOption ? `Modal · ${gpuOption.label}` : "Modal";
+}
+
 export function RunList({
   runs,
   selectedRunId,
@@ -79,6 +88,7 @@ export function RunList({
         <TableRow>
           <TableHead>Run ID</TableHead>
           <TableHead>Status</TableHead>
+          <TableHead>Environment</TableHead>
           <TableHead>Stage</TableHead>
           <TableHead>Duration</TableHead>
           <TableHead>Config Version</TableHead>
@@ -96,6 +106,7 @@ export function RunList({
             <TableCell>
               <Badge variant={statusVariant(run.status)}>{run.status}</Badge>
             </TableCell>
+            <TableCell className="text-xs text-muted-foreground">{environmentLabel(run)}</TableCell>
             <TableCell className="text-sm text-muted-foreground">
               {run.currentStage ?? "—"}
             </TableCell>
