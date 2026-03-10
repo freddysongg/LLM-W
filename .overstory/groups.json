@@ -237,5 +237,15 @@
 		"status": "active",
 		"createdAt": "2026-03-10T00:14:21.472Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-674d152c",
+		"name": "layer-lookup-fix",
+		"memberIssueIds": [
+			"llm-interactive-0433"
+		],
+		"status": "active",
+		"createdAt": "2026-03-10T00:18:12.459Z",
+		"completedAt": null
 	}
 ]
