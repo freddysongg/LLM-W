@@ -15,6 +15,10 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 
+const OPENAI_MODELS = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"] as const;
+
+type OpenAIModel = (typeof OPENAI_MODELS)[number];
+
 interface SettingsFormProps {
   readonly settings: AppSettings;
   readonly onSave: (updates: UpdateSettingsRequest) => void;
@@ -45,12 +49,20 @@ export function SettingsForm({
     String(settings.watchdogHeartbeatIntervalSeconds),
   );
 
+  const handleProviderChange = (val: string): void => {
+    const provider = val as AIProvider;
+    setAiProvider(provider);
+    if (provider === "openai" && !(OPENAI_MODELS as readonly string[]).includes(aiModelId)) {
+      setAiModelId("gpt-4o");
+    }
+  };
+
   const handleSubmit = (e: React.FormEvent): void => {
     e.preventDefault();
     const updates: UpdateSettingsRequest = {
       aiProvider,
       aiModelId: aiModelId || undefined,
-      aiBaseUrl: aiBaseUrl || undefined,
+      aiBaseUrl: aiProvider === "openai_compatible" ? aiBaseUrl || undefined : undefined,
       defaultProjectsDir: defaultProjectsDir || undefined,
       storageWarningThresholdGb: storageWarningThresholdGb
         ? Number(storageWarningThresholdGb)
@@ -78,12 +90,13 @@ export function SettingsForm({
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="ai-provider">Provider</Label>
-            <Select value={aiProvider} onValueChange={(val) => setAiProvider(val as AIProvider)}>
+            <Select value={aiProvider} onValueChange={handleProviderChange}>
               <SelectTrigger id="ai-provider">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="anthropic">Anthropic</SelectItem>
+                <SelectItem value="openai">OpenAI</SelectItem>
                 <SelectItem value="openai_compatible">OpenAI-Compatible</SelectItem>
               </SelectContent>
             </Select>
@@ -109,13 +122,28 @@ export function SettingsForm({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="ai-model-id">Model ID</Label>
-            <Input
-              id="ai-model-id"
-              placeholder="claude-sonnet-4-20250514"
-              value={aiModelId}
-              onChange={(e) => setAiModelId(e.target.value)}
-            />
+            <Label htmlFor="ai-model-id">Model</Label>
+            {aiProvider === "openai" ? (
+              <Select value={aiModelId as OpenAIModel} onValueChange={setAiModelId}>
+                <SelectTrigger id="ai-model-id">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {OPENAI_MODELS.map((m) => (
+                    <SelectItem key={m} value={m}>
+                      {m}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <Input
+                id="ai-model-id"
+                placeholder="claude-sonnet-4-20250514"
+                value={aiModelId}
+                onChange={(e) => setAiModelId(e.target.value)}
+              />
+            )}
           </div>
 
           {aiProvider === "openai_compatible" && (

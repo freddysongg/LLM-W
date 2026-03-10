@@ -106,10 +106,14 @@ async def test_ai_connection() -> AITestResponse:
                 max_tokens=1,
                 messages=[{"role": "user", "content": "ping"}],
             )
-        elif provider == "openai_compatible":
+        elif provider in ("openai", "openai_compatible"):
             import openai
 
-            base_url = current.ai_base_url
+            base_url = (
+                "https://api.openai.com/v1"
+                if provider == "openai"
+                else current.ai_base_url
+            )
             client = openai.OpenAI(api_key=api_key, base_url=base_url)
             client.chat.completions.create(
                 model=model_id,
