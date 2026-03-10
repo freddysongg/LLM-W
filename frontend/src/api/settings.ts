@@ -11,6 +11,7 @@ interface RawAppSettings {
   readonly storage_warning_threshold_gb: number;
   readonly watchdog_stale_timeout_seconds: number;
   readonly watchdog_heartbeat_interval_seconds: number;
+  readonly modal_token_set: boolean;
 }
 
 interface RawSettingsUpdate {
@@ -22,6 +23,7 @@ interface RawSettingsUpdate {
   readonly storage_warning_threshold_gb?: number;
   readonly watchdog_stale_timeout_seconds?: number;
   readonly watchdog_heartbeat_interval_seconds?: number;
+  readonly modal_api_token?: string;
 }
 
 function normalizeAppSettings(raw: RawAppSettings): AppSettings {
@@ -34,6 +36,7 @@ function normalizeAppSettings(raw: RawAppSettings): AppSettings {
     storageWarningThresholdGb: raw.storage_warning_threshold_gb,
     watchdogStaleTimeoutSeconds: raw.watchdog_stale_timeout_seconds,
     watchdogHeartbeatIntervalSeconds: raw.watchdog_heartbeat_interval_seconds,
+    isModalTokenSet: raw.modal_token_set,
   };
 }
 
@@ -51,6 +54,7 @@ function toRawSettingsUpdate(request: UpdateSettingsRequest): RawSettingsUpdate 
     raw.watchdog_stale_timeout_seconds = request.watchdogStaleTimeoutSeconds;
   if (request.watchdogHeartbeatIntervalSeconds !== undefined)
     raw.watchdog_heartbeat_interval_seconds = request.watchdogHeartbeatIntervalSeconds;
+  if (request.modalApiToken !== undefined) raw.modal_api_token = request.modalApiToken;
   return raw as RawSettingsUpdate;
 }
 
@@ -74,4 +78,8 @@ export async function updateSettings({
 
 export async function testAiConnection(): Promise<TestConnectionResult> {
   return fetchApi<TestConnectionResult>({ path: "/settings/ai/test", method: "POST" });
+}
+
+export async function testModalConnection(): Promise<TestConnectionResult> {
+  return fetchApi<TestConnectionResult>({ path: "/settings/modal/test", method: "POST" });
 }

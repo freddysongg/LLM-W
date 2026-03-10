@@ -44,6 +44,12 @@ interface SettingsFormProps {
   readonly onTestConnection: () => void;
   readonly isTestingConnection: boolean;
   readonly testConnectionResult: { readonly success: boolean; readonly message: string } | null;
+  readonly onSetModalToken: (token: string) => void;
+  readonly isSavingModalToken: boolean;
+  readonly modalTokenSaveResult: ApiKeySaveResult | null;
+  readonly onTestModalConnection: () => void;
+  readonly isTestingModalConnection: boolean;
+  readonly modalTestResult: { readonly success: boolean; readonly message: string } | null;
 }
 
 export function SettingsForm({
@@ -55,6 +61,12 @@ export function SettingsForm({
   onTestConnection,
   isTestingConnection,
   testConnectionResult,
+  onSetModalToken,
+  isSavingModalToken,
+  modalTokenSaveResult,
+  onTestModalConnection,
+  isTestingModalConnection,
+  modalTestResult,
 }: SettingsFormProps): React.JSX.Element {
   const [aiProvider, setAiProvider] = useState<AIProvider>(settings.aiProvider);
   const [aiApiKey, setAiApiKey] = useState("");
@@ -70,12 +82,19 @@ export function SettingsForm({
   const [watchdogHeartbeatIntervalSeconds, setWatchdogHeartbeatIntervalSeconds] = useState(
     String(settings.watchdogHeartbeatIntervalSeconds),
   );
+  const [modalToken, setModalToken] = useState("");
 
   useEffect(() => {
     if (apiKeySaveResult?.success) {
       setAiApiKey("");
     }
   }, [apiKeySaveResult]);
+
+  useEffect(() => {
+    if (modalTokenSaveResult?.success) {
+      setModalToken("");
+    }
+  }, [modalTokenSaveResult]);
 
   const handleProviderChange = (val: string): void => {
     const provider = val as AIProvider;
@@ -113,6 +132,12 @@ export function SettingsForm({
   const handleSetApiKey = (): void => {
     if (aiApiKey) {
       onSetApiKey(aiApiKey);
+    }
+  };
+
+  const handleSetModalToken = (): void => {
+    if (modalToken) {
+      onSetModalToken(modalToken);
     }
   };
 
@@ -243,6 +268,77 @@ export function SettingsForm({
                 {testConnectionResult.message}
               </Badge>
             )}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">Cloud Training</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-3">
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              Modal
+            </p>
+
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <Label htmlFor="modal-token">API Token</Label>
+                {settings.isModalTokenSet && (
+                  <Badge variant="secondary" className="text-xs">
+                    Set
+                  </Badge>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="modal-token"
+                  type="password"
+                  placeholder={settings.isModalTokenSet ? "••••••••••••••••" : "Enter Modal token"}
+                  value={modalToken}
+                  onChange={(e) => setModalToken(e.target.value)}
+                  autoComplete="off"
+                  className="flex-1"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleSetModalToken}
+                  disabled={!modalToken || isSavingModalToken}
+                  className="shrink-0"
+                >
+                  {isSavingModalToken ? (
+                    "Saving..."
+                  ) : modalTokenSaveResult?.success ? (
+                    <span className="flex items-center gap-1">
+                      <Check className="h-3.5 w-3.5" />
+                      Saved
+                    </span>
+                  ) : (
+                    "Set Key"
+                  )}
+                </Button>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={onTestModalConnection}
+                disabled={isTestingModalConnection || !settings.isModalTokenSet}
+              >
+                {isTestingModalConnection ? "Testing..." : "Test Connection"}
+              </Button>
+              {modalTestResult && (
+                <Badge variant={modalTestResult.success ? "secondary" : "destructive"}>
+                  {modalTestResult.message}
+                </Badge>
+              )}
+            </div>
           </div>
         </CardContent>
       </Card>
