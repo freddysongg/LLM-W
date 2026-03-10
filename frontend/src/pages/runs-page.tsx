@@ -98,6 +98,12 @@ export default function RunsPage(): React.JSX.Element {
 
   const activeRun = runs.find((r) => r.status === "running" || r.status === "pending") ?? null;
   const canStartRun = Boolean(activeConfig) && !activeRun;
+
+  React.useEffect(() => {
+    if (activeRun && !selectedRunId) {
+      setSelectedRunId(activeRun.id);
+    }
+  }, [activeRun, selectedRunId]);
   const selectedStage = stages.find((s) => s.id === selectedStageId) ?? null;
 
   const allCheckpoints: ReadonlyArray<Checkpoint> = [

@@ -149,6 +149,7 @@ export function useRunStream({
           "run_failed",
           "run_cancelled",
           "run_paused",
+          "progress_update",
         ]);
 
         if (invalidatingEvents.has(envelope.event)) {
