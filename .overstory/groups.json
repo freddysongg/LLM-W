@@ -360,5 +360,28 @@
 		"status": "active",
 		"createdAt": "2026-03-10T21:23:07.023Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-e1db62ce",
+		"name": "windows-compat-audit",
+		"memberIssueIds": [
+			"llm-interactive-5488"
+		],
+		"status": "active",
+		"createdAt": "2026-03-10T22:00:07.148Z",
+		"completedAt": null
+	},
+	{
+		"id": "group-c3f354f1",
+		"name": "windows-compat-fixes",
+		"memberIssueIds": [
+			"llm-interactive-3c0d",
+			"llm-interactive-60e3",
+			"llm-interactive-b1d4",
+			"llm-interactive-1613"
+		],
+		"status": "active",
+		"createdAt": "2026-03-10T22:12:22.802Z",
+		"completedAt": null
 	}
 ]
