@@ -1,5 +1,6 @@
 export type RunStatus = "pending" | "running" | "completed" | "failed" | "cancelled" | "paused";
 
+import type { TrainingEnvironment, ModalGpuType } from "./config";
 export type { TrainingEnvironment, ModalGpuType } from "./config";
 
 export type StageStatus = "pending" | "running" | "completed" | "failed" | "skipped";
