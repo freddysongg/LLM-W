@@ -1,6 +1,6 @@
 import * as React from "react";
 import { AlertCircle } from "lucide-react";
-import type { TrainingEnvironment, ModalGpuType } from "@/types/run";
+import type { TrainingEnvironment, ModalGpuType } from "@/types/config";
 import { MODAL_GPU_OPTIONS } from "@/api/cloud";
 import {
   Select,

@@ -28,11 +28,8 @@ import { CheckpointList } from "@/components/runs/checkpoint-list";
 import { FailurePanel } from "@/components/runs/failure-panel";
 import { RunActions } from "@/components/runs/run-actions";
 import { ResumeFromCheckpointDialog } from "@/components/runs/resume-from-checkpoint-dialog";
-import type { AppSettings } from "@/types/settings";
 import type { Checkpoint, TrainingEnvironment, ModalGpuType } from "@/types/run";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-
-type SettingsWithModal = AppSettings & { readonly isModalTokenSet?: boolean };
 
 export default function RunsPage(): React.JSX.Element {
   const { activeProjectId } = useAppStore();
@@ -43,8 +40,7 @@ export default function RunsPage(): React.JSX.Element {
   const [modalGpuType, setModalGpuType] = React.useState<ModalGpuType | null>(null);
 
   const { data: settings } = useSettings();
-  // isModalTokenSet is added by the settings-builder branch; optional until merged
-  const isModalTokenSet = (settings as SettingsWithModal | undefined)?.isModalTokenSet ?? false;
+  const isModalTokenSet = settings?.isModalTokenSet ?? false;
 
   const { data: runs = [], isLoading: isRunsLoading } = useRuns({
     projectId: activeProjectId ?? "",
