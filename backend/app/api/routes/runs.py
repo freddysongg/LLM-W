@@ -26,6 +26,7 @@ from app.schemas.run import (
 )
 from app.services import orchestrator, run_service
 from app.services.project_service import get_project
+from app.services.training_dispatcher import UnsupportedEnvironmentError
 
 router = APIRouter(prefix="/api/v1/projects", tags=["runs"])
 
@@ -70,6 +71,11 @@ async def create_run(
         raise HTTPException(
             status_code=404,
             detail={"code": "CONFIG_VERSION_NOT_FOUND", "message": str(exc), "details": {}},
+        ) from exc
+    except UnsupportedEnvironmentError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "UNSUPPORTED_ENVIRONMENT", "message": str(exc), "details": {}},
         ) from exc
     return RunResponse.model_validate(run)
 

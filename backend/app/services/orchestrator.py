@@ -4,7 +4,6 @@ import asyncio
 import contextlib
 import json
 import logging
-import os
 import signal as _signal
 import sys
 import uuid
@@ -30,7 +29,13 @@ from app.models.project import Project
 from app.models.run import Run
 from app.models.run_stage import RunStage
 from app.schemas.run import RunCreate, RunResponse
+from app.schemas.workbench_config import ExecutionConfig
 from app.services import suggestion_service
+from app.services.training_dispatcher import (
+    TrainingProcess,
+    UnsupportedEnvironmentError,
+    dispatch_training,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -70,11 +75,8 @@ _ALL_STAGE_NAMES: list[str] = [
 
 _IS_UNIX = sys.platform != "win32"
 
-# Maps run_id → asyncio.subprocess.Process
-_active_processes: dict[str, asyncio.subprocess.Process] = {}
-
-# Maps run_id → cancel flag path for cooperative cancellation on Windows
-_active_cancel_flag_paths: dict[str, Path] = {}
+# Maps run_id → TrainingProcess handle
+_active_processes: dict[str, TrainingProcess] = {}
 
 
 async def list_runs(*, session: AsyncSession, project_id: str) -> list[Run]:
@@ -155,6 +157,18 @@ async def create_run(
     config_version = await session.get(ConfigVersion, payload.config_version_id)
     if config_version is None:
         raise ConfigVersionNotFoundError(payload.config_version_id)
+
+    # Validate execution environment before creating the run — avoids orphaned failed runs.
+    raw_config: dict[str, object] = yaml.safe_load(config_version.yaml_blob) or {}
+    execution_raw = raw_config.get("execution", {})
+    execution_cfg = ExecutionConfig.model_validate(
+        execution_raw if isinstance(execution_raw, dict) else {}
+    )
+    if execution_cfg.environment != "local":
+        raise UnsupportedEnvironmentError(
+            f"Execution environment '{execution_cfg.environment}' is not yet supported. "
+            "Set execution.environment to 'local' or wait for the modal adapter to be enabled."
+        )
 
     run_id = str(uuid.uuid4())
     now = datetime.now(UTC).isoformat()
@@ -621,42 +635,16 @@ async def _run_trainer_subprocess(
     project_dir: Path,
     resume_from_checkpoint: str | None,
 ) -> None:
-    cmd = [
-        sys.executable,
-        "-u",
-        "-m",
-        "app.services.trainer",
-        "--run-id",
-        run_id,
-        "--config-path",
-        str(config_path),
-        "--project-dir",
-        str(project_dir),
-        "--heartbeat-interval",
-        str(settings.watchdog_heartbeat_interval_seconds),
-    ]
-    if resume_from_checkpoint:
-        cmd += ["--resume-from-checkpoint", resume_from_checkpoint]
-
-    cancel_flag_path: Path | None = None
-    if not _IS_UNIX:
-        cancel_flag_path = project_dir / f".cancel_{run_id}"
-        cmd += ["--cancel-flag-path", str(cancel_flag_path)]
-
     await _update_run_status(run_id=run_id, status="running")
 
     try:
-        subprocess_env = {**os.environ, "PYTHONUNBUFFERED": "1"}
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=str(Path(__file__).parent.parent.parent),
-            env=subprocess_env,
+        proc = await dispatch_training(
+            run_id=run_id,
+            config_path=config_path,
+            project_dir=project_dir,
+            resume_from_checkpoint=resume_from_checkpoint,
         )
         _active_processes[run_id] = proc
-        if cancel_flag_path is not None:
-            _active_cancel_flag_paths[run_id] = cancel_flag_path
 
         await _update_run_status(run_id=run_id, status="running", pid=proc.pid)
 
@@ -738,11 +726,9 @@ async def _run_trainer_subprocess(
         await _flush_log_batch(run_id=run_id, project_id=project_id, log_buffer=log_buffer)
 
         await proc.wait()
-        _active_processes.pop(run_id, None)
-        removed_flag = _active_cancel_flag_paths.pop(run_id, None)
-        if removed_flag is not None:
-            with contextlib.suppress(OSError):
-                removed_flag.unlink(missing_ok=True)
+        removed = _active_processes.pop(run_id, None)
+        if removed is not None:
+            removed.cleanup()
 
         stderr_output = ""
         if proc.stderr is not None:
@@ -817,11 +803,9 @@ async def _run_trainer_subprocess(
             )
 
     except Exception as exc:
-        _active_processes.pop(run_id, None)
-        exc_flag = _active_cancel_flag_paths.pop(run_id, None)
-        if exc_flag is not None:
-            with contextlib.suppress(OSError):
-                exc_flag.unlink(missing_ok=True)
+        removed = _active_processes.pop(run_id, None)
+        if removed is not None:
+            removed.cleanup()
         await _update_run_status(
             run_id=run_id,
             status="failed",
@@ -836,14 +820,7 @@ async def cancel_run(*, session: AsyncSession, run_id: str) -> Run:
 
     proc = _active_processes.get(run_id)
     if proc is not None:
-        if not _IS_UNIX:
-            # Signal cooperative cancellation before forceful termination
-            flag_path = _active_cancel_flag_paths.get(run_id)
-            if flag_path is not None:
-                with contextlib.suppress(OSError):
-                    flag_path.touch()
-        with contextlib.suppress(ProcessLookupError):
-            proc.terminate()
+        proc.terminate()
 
     await _mark_pending_stages_skipped(run_id=run_id)
 
@@ -864,8 +841,7 @@ async def pause_run(*, session: AsyncSession, run_id: str) -> Run:
     proc = _active_processes.get(run_id)
     if proc is not None:
         if _IS_UNIX:
-            with contextlib.suppress(ProcessLookupError, OSError):
-                proc.send_signal(_signal.SIGSTOP)
+            proc.send_signal(_signal.SIGSTOP)
         else:
             import psutil
 
@@ -916,7 +892,7 @@ async def resume_run(*, session: AsyncSession, project_id: str, run_id: str) -> 
             import psutil
 
             try:
-                psutil.Process(proc.pid).resume()
+                psutil.Process(proc.pid).resume()  # type: ignore[union-attr]
             except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
                 pass
             else:
