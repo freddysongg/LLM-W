@@ -406,5 +406,15 @@
 		"status": "active",
 		"createdAt": "2026-03-10T23:15:31.039Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-a6ed2fc1",
+		"name": "type-dedup",
+		"memberIssueIds": [
+			"llm-interactive-e6cf"
+		],
+		"status": "active",
+		"createdAt": "2026-03-11T01:24:41.892Z",
+		"completedAt": null
 	}
 ]
