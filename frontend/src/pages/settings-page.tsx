@@ -73,10 +73,16 @@ export default function SettingsPage(): React.JSX.Element {
     );
   };
 
-  const handleSetModalToken = (token: string): void => {
+  const handleSetModalToken = ({
+    tokenId,
+    tokenSecret,
+  }: {
+    tokenId: string;
+    tokenSecret: string;
+  }): void => {
     setModalTokenSaveResult(null);
     saveModalToken.mutate(
-      { request: { modalApiToken: token } },
+      { request: { modalTokenId: tokenId, modalTokenSecret: tokenSecret } },
       {
         onSuccess: () => {
           setModalTokenSaveResult({ success: true });

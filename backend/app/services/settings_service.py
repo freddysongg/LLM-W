@@ -70,7 +70,9 @@ def get_settings() -> SettingsResponse:
                 settings.watchdog_heartbeat_interval_seconds,
             )
         ),
-        modal_token_set=bool(_overrides.get("modal_api_token")),
+        is_modal_token_set=bool(
+            _overrides.get("modal_token_id") and _overrides.get("modal_token_secret")
+        ),
     )
 
 
@@ -79,9 +81,13 @@ def get_raw_api_key() -> str | None:
     return _overrides.get("ai_api_key") or settings.ai_api_key
 
 
-def get_raw_modal_token() -> str | None:
-    """Return the plaintext Modal API token from overrides."""
-    return _overrides.get("modal_api_token") or None
+def get_modal_credentials() -> tuple[str, str] | None:
+    """Return the Modal (token_id, token_secret) pair, or None if not configured."""
+    token_id = _overrides.get("modal_token_id")
+    token_secret = _overrides.get("modal_token_secret")
+    if token_id and token_secret:
+        return (str(token_id), str(token_secret))
+    return None
 
 
 def update_settings(*, payload: SettingsUpdate) -> SettingsResponse:
@@ -107,8 +113,10 @@ def update_settings(*, payload: SettingsUpdate) -> SettingsResponse:
         _overrides["watchdog_heartbeat_interval_seconds"] = (
             payload.watchdog_heartbeat_interval_seconds
         )
-    if payload.modal_api_token is not None:
-        _overrides["modal_api_token"] = payload.modal_api_token
+    if payload.modal_token_id is not None:
+        _overrides["modal_token_id"] = payload.modal_token_id
+    if payload.modal_token_secret is not None:
+        _overrides["modal_token_secret"] = payload.modal_token_secret
 
     _persist_overrides()
     return get_settings()
@@ -176,16 +184,17 @@ async def test_ai_connection() -> AITestResponse:
 
 
 async def test_modal_connection() -> ModalTestResponse:
-    token = get_raw_modal_token()
+    credentials = get_modal_credentials()
 
-    if not token:
-        return ModalTestResponse(success=False, message="No Modal API token configured")
+    if not credentials:
+        return ModalTestResponse(success=False, message="No Modal token configured")
 
     try:
         import modal
 
-        client = await modal.Client.from_credentials(token_id="", token_secret=token)
-        await client.hello()
+        token_id, token_secret = credentials
+        client = modal.Client.from_credentials(token_id, token_secret)
+        client.hello()
     except Exception as exc:
         return ModalTestResponse(success=False, message=str(exc))
 

@@ -1,7 +1,8 @@
 import type { ModalGpuType } from "./config";
 
 export interface ModalTokenUpdate {
-  readonly modalApiToken: string;
+  readonly modalTokenId: string;
+  readonly modalTokenSecret: string;
 }
 
 export interface ModalTestResponse {

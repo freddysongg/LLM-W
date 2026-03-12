@@ -21,7 +21,8 @@ export interface UpdateSettingsRequest {
   readonly storageWarningThresholdGb?: number;
   readonly watchdogStaleTimeoutSeconds?: number;
   readonly watchdogHeartbeatIntervalSeconds?: number;
-  readonly modalApiToken?: string;
+  readonly modalTokenId?: string;
+  readonly modalTokenSecret?: string;
 }
 
 export interface TestConnectionResult {

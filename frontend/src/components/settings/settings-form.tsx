@@ -44,7 +44,7 @@ interface SettingsFormProps {
   readonly onTestConnection: () => void;
   readonly isTestingConnection: boolean;
   readonly testConnectionResult: { readonly success: boolean; readonly message: string } | null;
-  readonly onSetModalToken: (token: string) => void;
+  readonly onSetModalToken: (credentials: { tokenId: string; tokenSecret: string }) => void;
   readonly isSavingModalToken: boolean;
   readonly modalTokenSaveResult: ApiKeySaveResult | null;
   readonly onTestModalConnection: () => void;
@@ -82,7 +82,8 @@ export function SettingsForm({
   const [watchdogHeartbeatIntervalSeconds, setWatchdogHeartbeatIntervalSeconds] = useState(
     String(settings.watchdogHeartbeatIntervalSeconds),
   );
-  const [modalToken, setModalToken] = useState("");
+  const [modalTokenId, setModalTokenId] = useState("");
+  const [modalTokenSecret, setModalTokenSecret] = useState("");
 
   useEffect(() => {
     if (apiKeySaveResult?.success) {
@@ -92,7 +93,8 @@ export function SettingsForm({
 
   useEffect(() => {
     if (modalTokenSaveResult?.success) {
-      setModalToken("");
+      setModalTokenId("");
+      setModalTokenSecret("");
     }
   }, [modalTokenSaveResult]);
 
@@ -136,8 +138,8 @@ export function SettingsForm({
   };
 
   const handleSetModalToken = (): void => {
-    if (modalToken) {
-      onSetModalToken(modalToken);
+    if (modalTokenId && modalTokenSecret) {
+      onSetModalToken({ tokenId: modalTokenId, tokenSecret: modalTokenSecret });
     }
   };
 
@@ -284,43 +286,50 @@ export function SettingsForm({
 
             <div className="space-y-2">
               <div className="flex items-center gap-2">
-                <Label htmlFor="modal-token">API Token</Label>
+                <Label>API Token</Label>
                 {settings.isModalTokenSet && (
                   <Badge variant="secondary" className="text-xs">
                     Set
                   </Badge>
                 )}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="space-y-2">
                 <Input
-                  id="modal-token"
+                  id="modal-token-id"
                   type="password"
-                  placeholder={settings.isModalTokenSet ? "••••••••••••••••" : "Enter Modal token"}
-                  value={modalToken}
-                  onChange={(e) => setModalToken(e.target.value)}
+                  placeholder={settings.isModalTokenSet ? "••••••••••••••••" : "Token ID (ak-...)"}
+                  value={modalTokenId}
+                  onChange={(e) => setModalTokenId(e.target.value)}
                   autoComplete="off"
-                  className="flex-1"
                 />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={handleSetModalToken}
-                  disabled={!modalToken || isSavingModalToken}
-                  className="shrink-0"
-                >
-                  {isSavingModalToken ? (
-                    "Saving..."
-                  ) : modalTokenSaveResult?.success ? (
-                    <span className="flex items-center gap-1">
-                      <Check className="h-3.5 w-3.5" />
-                      Saved
-                    </span>
-                  ) : (
-                    "Set Key"
-                  )}
-                </Button>
+                <Input
+                  id="modal-token-secret"
+                  type="password"
+                  placeholder={settings.isModalTokenSet ? "••••••••••••••••" : "Token Secret (as-...)"}
+                  value={modalTokenSecret}
+                  onChange={(e) => setModalTokenSecret(e.target.value)}
+                  autoComplete="off"
+                />
               </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleSetModalToken}
+                disabled={!modalTokenId || !modalTokenSecret || isSavingModalToken}
+                className="shrink-0"
+              >
+                {isSavingModalToken ? (
+                  "Saving..."
+                ) : modalTokenSaveResult?.success ? (
+                  <span className="flex items-center gap-1">
+                    <Check className="h-3.5 w-3.5" />
+                    Saved
+                  </span>
+                ) : (
+                  "Set Token"
+                )}
+              </Button>
             </div>
 
             <div className="flex items-center gap-3">
