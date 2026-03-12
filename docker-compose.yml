@@ -10,6 +10,7 @@ services:
     volumes:
       - ./data:/app/data
       - ./projects:/app/projects
+      - hf-cache:/root/.cache/huggingface
     environment:
       - DATABASE_URL=sqlite+aiosqlite:////app/data/workbench.db
       - PROJECTS_DIR=/app/projects
@@ -38,3 +39,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+
+volumes:
+  hf-cache:
