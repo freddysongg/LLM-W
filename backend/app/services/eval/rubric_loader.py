@@ -61,44 +61,45 @@ async def load_rubric_from_yaml(
 
     now_iso = datetime.now(UTC).isoformat()
 
-    rubric_row = await _get_or_create_rubric(
-        session=session,
-        rubric=rubric,
-        created_at=now_iso,
-    )
+    async with session.begin():
+        rubric_row = await _get_or_create_rubric(
+            session=session,
+            rubric=rubric,
+            created_at=now_iso,
+        )
 
-    existing = await _find_existing_version(
-        session=session,
-        rubric_id=rubric_row.id,
-        content_hash=content_hash,
-    )
-    if existing is not None:
-        return _snapshot(version=existing, is_new=False)
+        existing = await _find_existing_version(
+            session=session,
+            rubric_id=rubric_row.id,
+            content_hash=content_hash,
+        )
+        if existing is not None:
+            return _snapshot(version=existing, is_new=False)
 
-    prev_version = await _get_latest_version(session=session, rubric_id=rubric_row.id)
-    next_version_number = (prev_version.version_number + 1) if prev_version else 1
-    diff_from_prev = _compute_diff_from_prev(
-        prev_yaml_blob=prev_version.yaml_blob if prev_version else None,
-        new_yaml=parsed_yaml,
-    )
+        prev_version = await _get_latest_version(session=session, rubric_id=rubric_row.id)
+        next_version_number = (prev_version.version_number + 1) if prev_version else 1
+        diff_from_prev = _compute_diff_from_prev(
+            prev_yaml_blob=prev_version.yaml_blob if prev_version else None,
+            new_yaml=parsed_yaml,
+        )
 
-    new_version = RubricVersion(
-        id=str(uuid.uuid4()),
-        rubric_id=rubric_row.id,
-        version_number=next_version_number,
-        yaml_blob=raw_yaml_text,
-        content_hash=content_hash,
-        diff_from_prev=diff_from_prev,
-        calibration_metrics=None,
-        calibration_status=_CALIBRATION_STATUS_UNCALIBRATED,
-        judge_model_pin=rubric.judge_model_pin,
-        created_at=now_iso,
-    )
-    session.add(new_version)
-    await session.commit()
-    await session.refresh(new_version)
+        new_version = RubricVersion(
+            id=str(uuid.uuid4()),
+            rubric_id=rubric_row.id,
+            version_number=next_version_number,
+            yaml_blob=raw_yaml_text,
+            content_hash=content_hash,
+            diff_from_prev=diff_from_prev,
+            calibration_metrics=None,
+            calibration_status=_CALIBRATION_STATUS_UNCALIBRATED,
+            judge_model_pin=rubric.judge_model_pin,
+            created_at=now_iso,
+        )
+        session.add(new_version)
+        await session.flush()
+        snapshot = _snapshot(version=new_version, is_new=True)
 
-    return _snapshot(version=new_version, is_new=True)
+    return snapshot
 
 
 async def _get_or_create_rubric(
