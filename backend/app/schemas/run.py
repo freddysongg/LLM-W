@@ -24,6 +24,18 @@ class RunResponse(BaseModel):
     failure_stage: str | None
     last_checkpoint_path: str | None
     pid: int | None
+    run_type: str = "training"
+    device: str | None = None
+    tokens_per_sec: float | None = None
+    time_to_first_checkpoint_s: float | None = None
+    wall_clock_s: float | None = None
+    peak_memory_mb: float | None = None
+    heldout_perplexity: float | None = None
+    cost_usd: float | None = None
+    judge_pass_rate: float | None = None
+    eval_split_hash: str | None = None
+    config_hash: str | None = None
+    metric_unavailable_reasons: str | None = None
     created_at: str
     updated_at: str
 
