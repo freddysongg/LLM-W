@@ -6,11 +6,23 @@ from app.services.eval.rubric_loader import (
     RubricVersionRecord,
     load_rubric_from_yaml,
 )
+from app.services.eval.tier1 import (
+    Tier1Result,
+    Tier1ValidatorError,
+    list_validators,
+    register_validator,
+    run_tier1,
+)
 
 __all__ = [
     "JudgeError",
     "JudgeProvider",
     "OpenAIJudge",
     "RubricVersionRecord",
+    "Tier1Result",
+    "Tier1ValidatorError",
+    "list_validators",
     "load_rubric_from_yaml",
+    "register_validator",
+    "run_tier1",
 ]
