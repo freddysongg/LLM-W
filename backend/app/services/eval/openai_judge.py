@@ -90,10 +90,7 @@ def _build_system_message(*, rubric: Rubric, eval_steps: list[str] | None = None
     criteria_block = _format_criteria(criteria=rubric.criteria)
     eval_steps_block = ""
     if eval_steps:
-        eval_steps_block = (
-            "Evaluation Steps:\n"
-            f"{_format_eval_steps(eval_steps=eval_steps)}\n\n"
-        )
+        eval_steps_block = f"Evaluation Steps:\n{_format_eval_steps(eval_steps=eval_steps)}\n\n"
     return (
         "You are an expert LLM-as-Judge evaluator applying a binary rubric. "
         "For each criterion, decide whether the model output satisfies it.\n\n"
@@ -209,9 +206,14 @@ class OpenAIJudge(JudgeProvider):
         return await self.score_from_messages(messages=messages, rubric=rubric)
 
     async def score_from_messages(
-        self, *, messages: list[dict[str, str]], rubric: Rubric
+        self,
+        *,
+        messages: list[dict[str, str]],
+        rubric: Rubric,
+        temperature: float = 0.0,
+        judge_model: str | None = None,
     ) -> Score:
-        model = rubric.judge_model_pin
+        model = judge_model if judge_model is not None else rubric.judge_model_pin
         _resolve_rate_key(model=model)
 
         client = self._get_or_build_client()
@@ -222,7 +224,7 @@ class OpenAIJudge(JudgeProvider):
                 model=model,
                 response_model=_JudgeLLMOutput,
                 messages=messages,
-                temperature=0.0,
+                temperature=temperature,
             )
         except JudgeError:
             raise

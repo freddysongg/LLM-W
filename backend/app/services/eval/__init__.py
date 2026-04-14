@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.services.eval.chainpoll import ChainPollJudge
 from app.services.eval.geval import GEvalJudge, StepsGenerator
 from app.services.eval.judge import JudgeError, JudgeProvider
 from app.services.eval.openai_judge import OpenAIJudge
@@ -16,6 +17,7 @@ from app.services.eval.tier1 import (
 )
 
 __all__ = [
+    "ChainPollJudge",
     "GEvalJudge",
     "JudgeError",
     "JudgeProvider",
