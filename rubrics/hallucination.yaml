@@ -1,0 +1,61 @@
+id: hallucination
+version: "1"
+description: >-
+  Detects hallucinated facts in model output using ChainPoll-style N-call
+  majority voting. A response fails if it contains factual claims that
+  cannot be verified against general world knowledge or a provided
+  reference.
+scale: binary
+judge_model_pin: gpt-4o-mini-2024-07-18
+research_basis:
+  - R4
+chainpoll:
+  n: 3
+  model: gpt-4o-mini-2024-07-18
+  temperature: 0.3
+criteria:
+  - name: factually_grounded
+    description: >-
+      Output contains no hallucinated facts. Every verifiable claim is
+      either true against general world knowledge or supported by the
+      reference.
+    points: 3
+few_shot_examples:
+  - input:
+      prompt: Who wrote the novel "Pride and Prejudice"?
+      output: Jane Austen wrote "Pride and Prejudice", first published in 1813.
+    verdict: pass
+    reasoning: >-
+      Both the author and the publication year are correct and independently
+      verifiable.
+  - input:
+      prompt: Who wrote the novel "Pride and Prejudice"?
+      output: >-
+        Charles Dickens wrote "Pride and Prejudice", first published in
+        1850.
+    verdict: fail
+    reasoning: >-
+      The attributed author and publication year are both factually wrong;
+      this is a clear hallucination.
+  - input:
+      prompt: What is the boiling point of water at sea level?
+      output: The boiling point of water at sea level is 100 degrees Celsius.
+    verdict: pass
+    reasoning: The claim is a correct, well-known physical fact.
+  - input:
+      prompt: Cite a published paper supporting your claim.
+      output: >-
+        See Smith et al. (2019), "Neural Sharpening of Quantum Graphs",
+        published in the Journal of Applied Cognition, volume 42, pages
+        113-127.
+    verdict: fail
+    reasoning: >-
+      The citation is fabricated with a made-up title, journal, volume, and
+      page range; this is a common hallucination failure mode.
+  - input:
+      prompt: How many moons does Mars have?
+      output: Mars has 17 moons, the largest of which is Titan.
+    verdict: fail
+    reasoning: >-
+      The output confidently reports an incorrect moon count and attributes
+      Titan (a moon of Saturn) to Mars.

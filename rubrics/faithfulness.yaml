@@ -1,0 +1,86 @@
+id: faithfulness
+version: "1"
+description: >-
+  Measures whether the output is strictly faithful to a provided reference
+  text. Penalizes fabricated entities, unsupported claims, and any statement
+  that contradicts the reference.
+scale: binary
+judge_model_pin: gpt-4o-mini-2024-07-18
+research_basis:
+  - R1
+  - R3
+criteria:
+  - name: claims_supported
+    description: All factual claims in the output are supported by the reference text.
+    points: 2
+  - name: no_fabricated_entities
+    description: No entities are mentioned that do not appear in the reference.
+    points: 2
+  - name: no_contradictions
+    description: No statements contradict anything asserted in the reference.
+    points: 2
+few_shot_examples:
+  - input:
+      prompt: Summarize the reference in one sentence.
+      output: >-
+        Marie Curie won the Nobel Prize in Physics in 1903 for her work on
+        radioactivity.
+      reference: >-
+        Marie Curie was awarded the Nobel Prize in Physics in 1903, shared
+        with Pierre Curie and Henri Becquerel, for their joint research on
+        radiation phenomena.
+    verdict: pass
+    reasoning: >-
+      Every claim (recipient, field, year, topic) is directly supported by
+      the reference, with no added entities.
+  - input:
+      prompt: Summarize the reference in one sentence.
+      output: >-
+        Marie Curie won the Nobel Prize in Physics in 1903 and later founded
+        the Curie Institute in Warsaw in 1920.
+      reference: >-
+        Marie Curie was awarded the Nobel Prize in Physics in 1903, shared
+        with Pierre Curie and Henri Becquerel, for their joint research on
+        radiation phenomena.
+    verdict: fail
+    reasoning: >-
+      The claim about founding the Curie Institute in Warsaw in 1920 is not
+      supported by the reference and fabricates a specific fact.
+  - input:
+      prompt: Describe the mission outcome.
+      output: >-
+        Apollo 11 landed on the Moon in July 1969, and the mission returned
+        to Earth safely after six days.
+      reference: >-
+        Apollo 11 was the first crewed mission to land on the Moon, touching
+        down on July 20, 1969. The crew returned safely to Earth on July 24,
+        1969.
+    verdict: pass
+    reasoning: >-
+      The output paraphrases the reference accurately; the six-day span is
+      consistent with July 20 to July 24.
+  - input:
+      prompt: Describe the mission outcome.
+      output: >-
+        Apollo 11 landed on the Moon in August 1969 and its crew returned
+        safely to Earth.
+      reference: >-
+        Apollo 11 was the first crewed mission to land on the Moon, touching
+        down on July 20, 1969. The crew returned safely to Earth on July 24,
+        1969.
+    verdict: fail
+    reasoning: >-
+      The output contradicts the reference on the landing month (August vs
+      July).
+  - input:
+      prompt: What does the passage say about the company's founding?
+      output: >-
+        Acme Corp was founded in 1987 by Jane Doe in Seattle, and its first
+        product was an industrial coffee machine sold to Boeing.
+      reference: >-
+        Acme Corp was founded in 1987 by Jane Doe in Seattle. Its first
+        product was an industrial coffee machine.
+    verdict: fail
+    reasoning: >-
+      The output is broadly correct but adds an unsupported detail about
+      Boeing being the first customer, which is not in the reference.

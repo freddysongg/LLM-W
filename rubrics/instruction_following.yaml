@@ -1,0 +1,81 @@
+id: instruction_following
+version: "1"
+description: >-
+  Measures whether the output directly addresses the user's prompt, respects
+  any requested format, stays on-topic, and avoids fabricating entities
+  outside the prompt's context.
+scale: binary
+judge_model_pin: gpt-4o-mini-2024-07-18
+research_basis:
+  - R3
+  - R5
+  - R11
+criteria:
+  - name: addresses_question
+    description: Output directly answers the user's prompt.
+    points: 2
+  - name: follows_format
+    description: >-
+      Output respects any format instructions in the prompt (e.g., bullet
+      points, JSON, word count).
+    points: 1
+  - name: stays_in_scope
+    description: Output does not drift into unrelated topics.
+    points: 1
+  - name: no_hallucinated_entities
+    description: >-
+      No entities are fabricated outside the context supplied in the prompt.
+    points: 2
+few_shot_examples:
+  - input:
+      prompt: >-
+        List 3 benefits of regular exercise as bullet points. Each bullet
+        should be one sentence.
+      output: |-
+        - Regular exercise improves cardiovascular health.
+        - It strengthens muscles and bones.
+        - It improves mood by releasing endorphins.
+    verdict: pass
+    reasoning: >-
+      The output answers the prompt with exactly three single-sentence bullet
+      points and stays on topic.
+  - input:
+      prompt: >-
+        List 3 benefits of regular exercise as bullet points. Each bullet
+        should be one sentence.
+      output: >-
+        Regular exercise is great for you. It can help you feel better,
+        sleep better, and get stronger. Many famous athletes recommend it.
+    verdict: fail
+    reasoning: >-
+      The output ignores the bullet-point format instruction and does not
+      produce exactly three items.
+  - input:
+      prompt: Return the capital of France as a single word.
+      output: Paris
+    verdict: pass
+    reasoning: The output answers directly in the requested format.
+  - input:
+      prompt: Return the capital of France as a single word.
+      output: >-
+        The capital of France is Paris, which has been its capital since
+        987 AD and is also home to the Eiffel Tower.
+    verdict: fail
+    reasoning: >-
+      The output violates the single-word format and drifts into unrelated
+      historical and touristic details.
+  - input:
+      prompt: >-
+        Summarize the attached meeting notes in exactly two sentences.
+      output: >-
+        The team decided to ship the v2 release next Friday with only the
+        billing fixes. Marketing will coordinate a customer announcement
+        through the quarterly newsletter authored by CEO Jane Smith.
+      reference: >-
+        The team decided to ship the v2 release next Friday with only the
+        billing fixes. Marketing will coordinate a customer announcement
+        through the quarterly newsletter.
+    verdict: fail
+    reasoning: >-
+      The output obeys the two-sentence format but fabricates an entity
+      ("CEO Jane Smith") that is not present in the prompt context.
