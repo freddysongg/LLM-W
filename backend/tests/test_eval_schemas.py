@@ -184,7 +184,7 @@ def test_score_negative_latency_rejected() -> None:
 def test_instructor_tool_schema_reasoning_first() -> None:
     instructor = pytest.importorskip("instructor")
     _, tool_schema = instructor.handle_response_model(Score)
-    properties = tool_schema["function"]["parameters"]["properties"]
+    properties = tool_schema["tools"][0]["function"]["parameters"]["properties"]
     property_names = list(properties.keys())
     assert property_names[0] == "reasoning"
     assert property_names[1] == "verdict"
