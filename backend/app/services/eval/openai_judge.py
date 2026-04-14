@@ -79,8 +79,21 @@ def _format_case_user_message(*, case: EvaluationCase) -> str:
     return "\n".join(sections)
 
 
-def _build_system_message(*, rubric: Rubric) -> str:
+def _format_eval_steps(*, eval_steps: list[str]) -> str:
+    lines: list[str] = []
+    for index, step in enumerate(eval_steps, start=1):
+        lines.append(f"{index}. {step}")
+    return "\n".join(lines)
+
+
+def _build_system_message(*, rubric: Rubric, eval_steps: list[str] | None = None) -> str:
     criteria_block = _format_criteria(criteria=rubric.criteria)
+    eval_steps_block = ""
+    if eval_steps:
+        eval_steps_block = (
+            "Evaluation Steps:\n"
+            f"{_format_eval_steps(eval_steps=eval_steps)}\n\n"
+        )
     return (
         "You are an expert LLM-as-Judge evaluator applying a binary rubric. "
         "For each criterion, decide whether the model output satisfies it.\n\n"
@@ -88,6 +101,7 @@ def _build_system_message(*, rubric: Rubric) -> str:
         f"{rubric.description}\n\n"
         "Criteria (each is a binary pass/fail check):\n"
         f"{criteria_block}\n\n"
+        f"{eval_steps_block}"
         "Procedure:\n"
         "1. First, write out your step-by-step reasoning analysing the output "
         "against each criterion. Reasoning MUST come before the verdict.\n"
@@ -120,9 +134,17 @@ def _build_few_shot_turns(*, examples: list[FewShotExample]) -> list[dict[str, s
     return turns
 
 
-def _build_messages(*, rubric: Rubric, case: EvaluationCase) -> list[dict[str, str]]:
+def _build_messages(
+    *,
+    rubric: Rubric,
+    case: EvaluationCase,
+    eval_steps: list[str] | None = None,
+) -> list[dict[str, str]]:
     messages: list[dict[str, str]] = [
-        {"role": "system", "content": _build_system_message(rubric=rubric)}
+        {
+            "role": "system",
+            "content": _build_system_message(rubric=rubric, eval_steps=eval_steps),
+        }
     ]
     messages.extend(_build_few_shot_turns(examples=rubric.few_shot_examples))
     messages.append({"role": "user", "content": _format_case_user_message(case=case)})
@@ -183,11 +205,16 @@ class OpenAIJudge(JudgeProvider):
         return self._client
 
     async def evaluate(self, *, case: EvaluationCase, rubric: Rubric) -> Score:
+        messages = _build_messages(rubric=rubric, case=case)
+        return await self.score_from_messages(messages=messages, rubric=rubric)
+
+    async def score_from_messages(
+        self, *, messages: list[dict[str, str]], rubric: Rubric
+    ) -> Score:
         model = rubric.judge_model_pin
         _resolve_rate_key(model=model)
 
         client = self._get_or_build_client()
-        messages = _build_messages(rubric=rubric, case=case)
 
         started_at = time.monotonic()
         try:
