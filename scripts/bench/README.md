@@ -11,7 +11,11 @@ downstream tooling (ingestion, leaderboards, #8/#9/#10) can consume.
   bit set" AC is satisfied.
 - `run_local.py` — the real implementation: argparse, YAML patching,
   trainer subprocess launch, stdout JSON stream capture, summary emission.
+- `freeze_eval_split.py` — one-shot script that materializes the frozen
+  200-example held-out eval split (see "Frozen eval split" below).
 - `tests/test_run_local.py` — unit + integration tests (mock trainer).
+- `tests/test_freeze_eval_split.py` — determinism + disjointness tests for
+  the freeze script, using a stubbed `datasets.load_dataset`.
 
 ## Usage
 
@@ -56,6 +60,51 @@ self-documenting.
 
 The `summary.json.config_hash` field is always the SHA256 of the *original*
 config bytes — never the patched copy.
+
+## Frozen eval split
+
+`configs/bench/eval_split.jsonl` is a deterministic 200-example held-out eval
+slice of `HuggingFaceH4/ultrachat_200k` pinned to dataset revision
+`8049631c405ae6576f93f445c6b8166f76f5505a`. Both the JSONL file and its
+SHA256 hash (`configs/bench/eval_split.hash`) are committed to the repo.
+
+The slice is carved out of the same shuffled `train_sft` split used for
+training (`shuffle(seed=42)`), at indices `[2000, 2200)` — provably disjoint
+from the `[0, 2000)` training subset declared in
+`configs/bench/qwen15b-lora.yaml`.
+
+### Regenerating the split
+
+Only required if the pinned dataset revision in `freeze_eval_split.py`
+changes. The script is idempotent — running it again with the same revision
+produces byte-identical outputs.
+
+```bash
+pip install "datasets>=2.0.0"
+python3 scripts/bench/freeze_eval_split.py
+```
+
+The script writes to `configs/bench/eval_split.jsonl` and
+`configs/bench/eval_split.hash`. After regenerating, copy the new SHA into
+`configs/bench/qwen15b-lora.yaml` under `bench.eval_split_hash:`. The runner
+exits with code 11 at startup if the YAML hash and on-disk file disagree.
+
+Pass `--output-dir <path>` to write outside the repo (used by the
+determinism tests). Pass `--force` to overwrite drifted on-disk outputs;
+without `--force` the script exits non-zero.
+
+### Runner integrity check
+
+`run_local.py` reads `bench.eval_split_hash` from the YAML at startup:
+
+- **Hash matches on-disk file** → proceed normally.
+- **Hash mismatches on-disk file** → exit 11 with
+  `[bench] eval_split_hash mismatch: YAML=<a> disk=<b>`.
+- **Hash declared but file missing** → exit 11 with
+  `[bench] eval_split.jsonl missing but bench.eval_split_hash is set`.
+- **Hash is `null`** → log a `[bench] warning:` and proceed (escape hatch
+  used during the WS2.x bring-up; unreachable now that the hash is
+  populated).
 
 ## Environment variables
 
@@ -136,6 +185,7 @@ train_runtime`. If neither is available, `tokens_per_sec` is `null`.
 | 8    | Failed to write `summary.json`.                                  |
 | 9    | Trainer exited non-zero; partial summary written.                |
 | 10   | Trainer never emitted a terminal `complete` event.               |
+| 11   | `bench.eval_split_hash` mismatched on-disk `eval_split.jsonl`.   |
 
 Every non-zero exit also writes a stderr line prefixed `[bench]`.
 

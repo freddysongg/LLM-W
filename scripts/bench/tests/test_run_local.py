@@ -25,15 +25,18 @@ _CONFIG_PATH = _REPO_ROOT / "configs" / "bench" / "qwen15b-lora.yaml"
 sys.path.insert(0, str(_SCRIPTS_BENCH_DIR))
 
 from run_local import (  # noqa: E402
+    BenchSidecar,
+    TrainerEvents,
     _build_unavailable_reasons,
     _compute_config_hash,
+    _compute_eval_split_hash,
     _derive_cost_usd,
     _derive_summary_metrics,
     _derive_tokens_per_sec,
     _extract_bench_sidecar,
     _patch_config_for_device,
     _update_events_from_event,
-    TrainerEvents,
+    _validate_eval_split_hash,
 )
 
 
@@ -78,7 +81,79 @@ def test_compute_config_hash_is_stable() -> None:
 
 def test_extract_bench_sidecar_reads_eval_split_hash() -> None:
     sidecar = _extract_bench_sidecar(raw_config=_load_bench_config())
+    assert isinstance(sidecar.eval_split_hash, str)
+    assert len(sidecar.eval_split_hash) == 64
+
+
+def test_extract_bench_sidecar_returns_none_for_null_hash() -> None:
+    sidecar = _extract_bench_sidecar(raw_config={"bench": {"eval_split_hash": None}})
     assert sidecar.eval_split_hash is None
+
+
+def test_compute_eval_split_hash_matches_manual_sha256(tmp_path: Path) -> None:
+    import hashlib
+
+    payload = b'{"prompt_id":"a","prompt":"x"}\n{"prompt_id":"b","prompt":"y"}\n'
+    eval_split_path = tmp_path / "eval_split.jsonl"
+    eval_split_path.write_bytes(payload)
+    expected = hashlib.sha256(payload).hexdigest()
+    assert _compute_eval_split_hash(eval_split_path=eval_split_path) == expected
+
+
+def _make_repo_root_with_eval_split(*, tmp_path: Path, payload: bytes) -> Path:
+    bench_dir = tmp_path / "configs" / "bench"
+    bench_dir.mkdir(parents=True)
+    (bench_dir / "eval_split.jsonl").write_bytes(payload)
+    return tmp_path
+
+
+def test_validate_eval_split_hash_passes_on_match(tmp_path: Path) -> None:
+    import hashlib
+
+    payload = b'{"prompt_id":"a"}\n'
+    repo_root = _make_repo_root_with_eval_split(tmp_path=tmp_path, payload=payload)
+    sidecar = BenchSidecar(eval_split_hash=hashlib.sha256(payload).hexdigest())
+    assert _validate_eval_split_hash(bench_sidecar=sidecar, repo_root=repo_root) is None
+
+
+def test_validate_eval_split_hash_returns_message_on_mismatch(tmp_path: Path) -> None:
+    repo_root = _make_repo_root_with_eval_split(
+        tmp_path=tmp_path, payload=b'{"prompt_id":"a"}\n'
+    )
+    sidecar = BenchSidecar(eval_split_hash="0" * 64)
+    error = _validate_eval_split_hash(bench_sidecar=sidecar, repo_root=repo_root)
+    assert error is not None
+    assert "eval_split_hash mismatch" in error
+    assert "YAML=" + ("0" * 64) in error
+
+
+def test_validate_eval_split_hash_errors_when_file_missing(tmp_path: Path) -> None:
+    sidecar = BenchSidecar(eval_split_hash="0" * 64)
+    error = _validate_eval_split_hash(bench_sidecar=sidecar, repo_root=tmp_path)
+    assert error is not None
+    assert "eval_split.jsonl missing" in error
+
+
+def test_validate_eval_split_hash_warns_on_null_hash(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    sidecar = BenchSidecar(eval_split_hash=None)
+    result = _validate_eval_split_hash(bench_sidecar=sidecar, repo_root=tmp_path)
+    captured = capsys.readouterr()
+    assert result is None
+    assert "eval_split_hash is null" in captured.err
+
+
+def test_committed_eval_split_hash_matches_committed_jsonl() -> None:
+    eval_split_path = _REPO_ROOT / "configs" / "bench" / "eval_split.jsonl"
+    hash_path = _REPO_ROOT / "configs" / "bench" / "eval_split.hash"
+    if not eval_split_path.exists() or not hash_path.exists():
+        pytest.skip("frozen eval split not present in this checkout")
+    declared_hash = hash_path.read_text().strip()
+    actual_hash = _compute_eval_split_hash(eval_split_path=eval_split_path)
+    assert declared_hash == actual_hash
+    sidecar = _extract_bench_sidecar(raw_config=_load_bench_config())
+    assert sidecar.eval_split_hash == declared_hash
 
 
 def test_update_events_tracks_peak_memory_and_loss() -> None:

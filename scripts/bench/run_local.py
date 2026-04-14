@@ -60,6 +60,12 @@ _CUDA_RATE_DEFAULT_WARNING = (
 
 _MEMORY_KEYS: tuple[str, ...] = ("memory_mb", "peak_memory_mb", "memory_allocated_mb")
 
+_EVAL_SPLIT_RELATIVE_PATH = Path("configs") / "bench" / "eval_split.jsonl"
+_EVAL_SPLIT_HASH_NULL_WARNING = (
+    "bench.eval_split_hash is null; skipping eval-split integrity check. "
+    "Populate the hash via scripts/bench/freeze_eval_split.py to enforce."
+)
+
 
 @dataclass
 class RunnerArgs:
@@ -165,6 +171,42 @@ def _extract_bench_sidecar(*, raw_config: dict[str, object]) -> BenchSidecar:
     hash_value = bench_raw.get("eval_split_hash")
     eval_split_hash = hash_value if isinstance(hash_value, str) and hash_value else None
     return BenchSidecar(eval_split_hash=eval_split_hash)
+
+
+def _compute_eval_split_hash(*, eval_split_path: Path) -> str:
+    digest = hashlib.sha256()
+    digest.update(eval_split_path.read_bytes())
+    return digest.hexdigest()
+
+
+def _validate_eval_split_hash(
+    *,
+    bench_sidecar: BenchSidecar,
+    repo_root: Path,
+) -> str | None:
+    """Enforce that the YAML-declared eval-split hash matches the on-disk file.
+
+    Returns an error message suitable for ``_eprint`` on mismatch / missing
+    file. Returns ``None`` when the hash matches (or when the sidecar declared
+    no hash, which intentionally falls back to a soft warning).
+    """
+    declared_hash = bench_sidecar.eval_split_hash
+    eval_split_path = repo_root / _EVAL_SPLIT_RELATIVE_PATH
+
+    if declared_hash is None:
+        _eprint(f"warning: {_EVAL_SPLIT_HASH_NULL_WARNING}")
+        return None
+
+    if not eval_split_path.exists():
+        return (
+            f"eval_split.jsonl missing but bench.eval_split_hash is set "
+            f"(expected at {eval_split_path})"
+        )
+
+    actual_hash = _compute_eval_split_hash(eval_split_path=eval_split_path)
+    if actual_hash != declared_hash:
+        return f"eval_split_hash mismatch: YAML={declared_hash} disk={actual_hash}"
+    return None
 
 
 def _validate_device_available(*, device: DeviceLiteral) -> None:
@@ -586,6 +628,14 @@ def run(*, argv: list[str]) -> int:
         _eprint(str(exc))
         return 4
 
+    bench_sidecar = _extract_bench_sidecar(raw_config=raw_config)
+    eval_split_error = _validate_eval_split_hash(
+        bench_sidecar=bench_sidecar, repo_root=args.repo_root
+    )
+    if eval_split_error is not None:
+        _eprint(eval_split_error)
+        return 11
+
     args.output_dir.mkdir(parents=True, exist_ok=True)
     project_dir = args.output_dir / "project"
     project_dir.mkdir(parents=True, exist_ok=True)
@@ -601,7 +651,6 @@ def run(*, argv: list[str]) -> int:
         device=args.device,
     )
 
-    bench_sidecar = _extract_bench_sidecar(raw_config=raw_config)
     run_id = _synthesize_run_id(device=args.device)
     backend_cwd = args.repo_root / "backend"
     if not backend_cwd.exists():
