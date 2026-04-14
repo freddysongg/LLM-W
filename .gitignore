@@ -13,3 +13,9 @@ __pycache__/
 # Data directories
 data/
 projects/
+
+# macOS
+.DS_Store
+
+# JetBrains IDEs
+.idea/
