@@ -1,0 +1,117 @@
+# Locked benchmark config — same YAML used verbatim by all three backend runs.
+# SHA256 of this file is logged into `runs.config_hash` on every bench run;
+# any drift invalidates the cross-backend comparison.
+#
+# Top-level keys follow the `WorkbenchConfig` Pydantic schema
+# (backend/app/schemas/workbench_config.py). The trailing `bench:` section is
+# ignored by WorkbenchConfig (extra="ignore") and consumed only by
+# scripts/bench/run_local.sh.
+
+project:
+  name: bench-qwen15b-lora
+  description: "WS2 cross-hardware benchmark of Qwen2.5-1.5B LoRA fine-tuning (M1 Pro / M4 Pro / A10)"
+  mode: single_user_local
+
+model:
+  source: huggingface
+  model_id: Qwen/Qwen2.5-1.5B-Instruct
+  family: causal_lm
+  # TODO(ws2): pin revision to a specific git SHA before the first bench run is logged.
+  revision: main
+  trust_remote_code: false
+  torch_dtype: auto
+
+dataset:
+  source: huggingface
+  dataset_id: HuggingFaceH4/ultrachat_200k
+  train_split: train_sft
+  eval_split: test_sft
+  input_field: prompt
+  target_field: response
+  format: default
+  max_samples: 2000
+
+preprocessing:
+  max_seq_length: 512
+  truncation: true
+  packing: false
+  padding: longest
+
+training:
+  task_type: sft
+  epochs: 1
+  batch_size: 4
+  gradient_accumulation_steps: 4
+  learning_rate: 2.0e-4
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+  seed: 42
+
+optimization:
+  optimizer: adamw
+  scheduler: cosine
+  warmup_ratio: 0.03
+  warmup_steps: 0
+  gradient_checkpointing: true
+  mixed_precision: bf16
+
+adapters:
+  enabled: true
+  type: lora
+  rank: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules: [q_proj, k_proj, v_proj, o_proj]
+  bias: none
+  task_type: CAUSAL_LM
+
+quantization:
+  # Applied only when device=cuda. The bench runner (scripts/bench/run_local.sh)
+  # flips `enabled` to false on mps/cpu paths before constructing the trainer.
+  enabled: true
+  mode: 4bit
+  compute_dtype: bfloat16
+  quant_type: nf4
+  double_quant: true
+
+observability:
+  log_every_steps: 10
+  capture_grad_norm: true
+  capture_memory: true
+  capture_activation_samples: true
+  capture_weight_deltas: true
+  observability_level: standard
+
+ai_assistant:
+  enabled: false
+  provider: anthropic
+  mode: suggest_only
+  allow_config_diffs: false
+  auto_analyze_on_completion: false
+
+execution:
+  # Overridden by bench runner --device flag.
+  device: auto
+  num_workers: 2
+  environment: local
+
+checkpoint_retention:
+  keep_last_n: 3
+  always_keep_best_eval: true
+  always_keep_final: true
+  delete_intermediates_after_completion: false
+
+introspection:
+  architecture_view: true
+  editable_weight_scope: bounded_expert_mode
+  activation_probe_samples: 3
+  activation_storage: summary_only
+
+# ── Bench-only sidecar (ignored by WorkbenchConfig) ────────────────────────
+bench:
+  # SHA256 of configs/bench/eval_split.jsonl. Populated by #9 (freeze_eval_split.py).
+  # The runner fails at startup if this is empty or mismatches the on-disk file.
+  eval_split_hash: null
+  perplexity_samples: 200
+  # 50-prompt judge-harness sanity set; populated/verified by #10.
+  judge_sanity_prompts_path: configs/bench/judge_sanity_prompts.jsonl
