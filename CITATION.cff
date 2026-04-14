@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: LLM-W
+abstract: "A local-first LLM fine-tuning workbench with an observability-first training and evaluation harness, benchmarked across Apple Silicon (MPS) and cloud (CUDA) backends."
+authors:
+  - family-names: Song
+    given-names: Freddy
+type: software
+url: "https://github.com/freddysongg/LLM-W"
+repository-code: "https://github.com/freddysongg/LLM-W"
+license: MIT
+version: "0.4.0"
+keywords:
+  - llm
+  - fine-tuning
+  - lora
+  - qlora
+  - observability
+  - evaluation
+  - llm-as-judge
