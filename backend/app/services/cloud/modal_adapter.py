@@ -91,8 +91,10 @@ class ModalTrainingAdapter:
         )
 
         gpu_spec = _GPU_TYPE_MAP.get(self._config.gpu_type, "T4")
-        # modal.Sandbox.create.aio no longer accepts `mounts` in current stubs;
-        # runtime acceptance is validated by integration tests against a live Modal workspace.
+        # modal 1.3.5 removed `modal.Mount` and the `mounts=` kwarg on Sandbox.create.
+        # This path is runtime-broken on modern modal and is pending migration to
+        # `Image.add_local_dir(...)` -- tracked in #54. The type: ignore prevents the
+        # planned migration from being blocked by an otherwise-correct type checker signal.
         self._sandbox = await modal.Sandbox.create.aio(  # type: ignore[call-arg]
             image=image,
             gpu=gpu_spec,
