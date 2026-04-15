@@ -2,6 +2,12 @@
 
 Communicates via JSON lines on stdout. All events are flushed immediately.
 The orchestrator reads stdout and updates SQLite + event bus.
+
+Training is wrapped with `accelerate.Accelerator` so single-GPU, MPS, and
+multi-GPU / FSDP deployments share the same entry path. Only the main
+process (`accelerator.is_main_process`) writes JSON events to stdout —
+the orchestrator's event parser is single-reader and would choke on
+interleaved events from non-main ranks.
 """
 
 from __future__ import annotations
@@ -25,6 +31,24 @@ from typing import Any
 from transformers import TrainerCallback
 
 logger = logging.getLogger(__name__)
+
+# The Accelerator instance, created once in main() after env validation so
+# torch/accelerate are imported lazily (the trainer module is imported by
+# the test suite without the training extras installed).
+_ACCELERATOR: Any | None = None
+
+
+def _is_main_process() -> bool:
+    """Return True when no accelerator is configured or when running on the main rank."""
+    if _ACCELERATOR is None:
+        return True
+    return bool(_ACCELERATOR.is_main_process)
+
+
+# Callback-emitted eval stage name. Distinct from reserved stage 11
+# `"evaluation"` (fixes #53 — stage 11 is a v4-reserved no-op and must not
+# collide with the callback's mid-training val-loss emissions).
+_CALLBACK_EVAL_STAGE_NAME = "callback_evaluation"
 
 # Stage definitions matching spec section 19.1
 RUN_STAGES: list[tuple[int, str]] = [
@@ -94,6 +118,8 @@ def _resolve_dataset_field(
 
 
 def _emit(event: dict[str, Any]) -> None:
+    if not _is_main_process():
+        return
     event.setdefault("timestamp", datetime.now(UTC).isoformat())
     print(json.dumps(event), flush=True)
 
@@ -183,15 +209,18 @@ def _start_heartbeat_thread(
 ) -> threading.Thread:
     def _loop() -> None:
         while not state.get("done"):
-            with contextlib.suppress(OSError):
-                _write_heartbeat(
-                    heartbeat_path=heartbeat_path,
-                    run_id=run_id,
-                    current_step=state.get("current_step", 0),
-                    total_steps=state.get("total_steps", 0),
-                    stage=state.get("stage", ""),
-                    metrics=state.get("metrics", {}),
-                )
+            # Heartbeat writes are single-writer; non-main ranks must skip to
+            # avoid atomic-rename races on the shared project dir.
+            if _is_main_process():
+                with contextlib.suppress(OSError):
+                    _write_heartbeat(
+                        heartbeat_path=heartbeat_path,
+                        run_id=run_id,
+                        current_step=state.get("current_step", 0),
+                        total_steps=state.get("total_steps", 0),
+                        stage=state.get("stage", ""),
+                        metrics=state.get("metrics", {}),
+                    )
             time.sleep(interval_seconds)
 
     thread = threading.Thread(target=_loop, daemon=True)
@@ -368,16 +397,22 @@ class WorkbenchCallback(TrainerCallback):
         metrics: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
-        _emit_stage_enter(stage_name="evaluation", stage_order=11)
+        # Callback-driven inline eval is distinct from reserved stage 11
+        # `"evaluation"`. Emitting under the same name produced duplicate
+        # stage-11 timelines when users configured `training.eval_steps`
+        # (see issue #53). A separate stage name keeps the reserved-no-op
+        # contract honest while still surfacing HF mid-training val-loss
+        # to the UI timeline.
+        _emit_stage_enter(stage_name=_CALLBACK_EVAL_STAGE_NAME, stage_order=11)
         if metrics:
             step = state.global_step
             epoch = float(state.epoch or 0.0)
             eval_metrics = {k: float(v) for k, v in metrics.items() if isinstance(v, (int, float))}
             _emit_metric(step=step, epoch=epoch, metrics=eval_metrics)
         _emit_stage_complete(
-            stage_name="evaluation",
+            stage_name=_CALLBACK_EVAL_STAGE_NAME,
             duration_ms=0,
-            output_summary=f"eval at step {state.global_step}",
+            output_summary=f"inline val-loss at step {state.global_step}",
         )
 
     def on_save(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
@@ -446,8 +481,68 @@ def _stage_config_validation(*, config_path: Path) -> dict[str, Any]:
     return raw
 
 
+def _resolve_mixed_precision(*, raw_config: dict[str, Any], device: str, stage_name: str) -> str:
+    """Resolve mixed precision for the given device, logging downgrades."""
+    optimization_cfg = raw_config.get("optimization", {})
+    mixed_precision: str = optimization_cfg.get("mixed_precision", "no")
+    if mixed_precision == "bf16" and device == "mps":
+        _emit_log(
+            severity="info",
+            message="bf16 not supported on MPS, using fp16",
+            stage=stage_name,
+        )
+        return "fp16"
+    if mixed_precision in ("bf16", "fp16") and device == "cpu":
+        _emit_log(
+            severity="warning",
+            message=(
+                f"{mixed_precision} requested but no GPU available"
+                f" (device={device}), falling back to no mixed precision"
+            ),
+            stage=stage_name,
+        )
+        return "no"
+    return mixed_precision
+
+
+def _build_accelerator(*, raw_config: dict[str, Any], device: str, stage_name: str) -> Any:
+    """Instantiate `accelerate.Accelerator` with mixed precision + grad accum from config."""
+    from accelerate import Accelerator  # noqa: PLC0415
+
+    mixed_precision = _resolve_mixed_precision(
+        raw_config=raw_config, device=device, stage_name=stage_name
+    )
+    training_cfg = raw_config.get("training", {})
+    gradient_accumulation_steps = int(training_cfg.get("gradient_accumulation_steps", 1))
+    cpu_only = device == "cpu"
+    return Accelerator(
+        mixed_precision=mixed_precision if mixed_precision != "no" else None,
+        gradient_accumulation_steps=gradient_accumulation_steps,
+        cpu=cpu_only,
+    )
+
+
+def _accelerator_mixed_precision_or_fallback(
+    *, raw_config: dict[str, Any], device: str, stage_name: str
+) -> str:
+    """Read the active mixed-precision mode, preferring the Accelerator's view.
+
+    The Accelerator already resolved (and logged) the downgrade during env
+    validation; reading `mixed_precision` from it here avoids double-logging
+    the same downgrade warning in training_preparation.
+    """
+    if _ACCELERATOR is not None:
+        precision = getattr(_ACCELERATOR, "mixed_precision", None)
+        if precision in ("fp16", "bf16"):
+            return str(precision)
+        return "no"
+    return _resolve_mixed_precision(raw_config=raw_config, device=device, stage_name=stage_name)
+
+
 def _stage_environment_validation(*, raw_config: dict[str, Any]) -> str:
     import platform
+
+    global _ACCELERATOR  # noqa: PLW0603 — accelerator is a process-wide singleton by design
 
     stage_name = "environment_validation"
     _emit_stage_enter(stage_name=stage_name, stage_order=2)
@@ -477,6 +572,27 @@ def _stage_environment_validation(*, raw_config: dict[str, Any]) -> str:
     except ImportError:
         device = "cpu"
         _emit_log(severity="warning", message="torch not installed, using cpu", stage=stage_name)
+
+    try:
+        _ACCELERATOR = _build_accelerator(
+            raw_config=raw_config, device=device, stage_name=stage_name
+        )
+        _emit_log(
+            severity="info",
+            message=(
+                f"Accelerator: num_processes={_ACCELERATOR.num_processes}, "
+                f"mixed_precision={_ACCELERATOR.mixed_precision}, "
+                f"is_main_process={_ACCELERATOR.is_main_process}"
+            ),
+            stage=stage_name,
+        )
+    except ImportError:
+        _ACCELERATOR = None
+        _emit_log(
+            severity="warning",
+            message="accelerate not installed, falling back to unwrapped trainer path",
+            stage=stage_name,
+        )
 
     duration_ms = int((time.monotonic() - t0) * 1000)
     _emit_stage_complete(
@@ -569,7 +685,8 @@ def _stage_model_resolution(*, raw_config: dict[str, Any], device: str) -> Any:
 
         model = AutoModelForCausalLM.from_pretrained(model_id, **load_kwargs)
         if not needs_bitsandbytes:
-            model.to(device)
+            target_device = _ACCELERATOR.device if _ACCELERATOR is not None else device
+            model.to(target_device)
     except Exception as exc:
         _emit_stage_fail(stage_name=stage_name, error=str(exc))
         raise
@@ -769,26 +886,9 @@ def _stage_training_preparation(
     checkpoints_dir = _run_checkpoints_dir(project_dir=project_dir, run_id=run_id)
     checkpoints_dir.mkdir(parents=True, exist_ok=True)
 
-    mixed_precision: str = optimization_cfg.get("mixed_precision", "no")
-    if mixed_precision == "bf16" and device == "mps":
-        # bf16 has unreliable hardware support on MPS; fp16 is the correct fallback
-        _emit_log(
-            severity="info",
-            message="bf16 not supported on MPS, using fp16",
-            stage=stage_name,
-        )
-        mixed_precision = "fp16"
-    elif mixed_precision in ("bf16", "fp16") and device == "cpu":
-        _emit_log(
-            severity="warning",
-            message=(
-                f"{mixed_precision} requested but no GPU available"
-                f" (device={device}), falling back to no mixed precision"
-            ),
-            stage=stage_name,
-        )
-        mixed_precision = "no"
-
+    mixed_precision = _accelerator_mixed_precision_or_fallback(
+        raw_config=raw_config, device=device, stage_name=stage_name
+    )
     is_cpu = device == "cpu"
 
     epochs: int = training_cfg.get("epochs", 2)
