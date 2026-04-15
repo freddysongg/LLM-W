@@ -515,8 +515,12 @@ def _build_accelerator(*, raw_config: dict[str, Any], device: str, stage_name: s
     training_cfg = raw_config.get("training", {})
     gradient_accumulation_steps = int(training_cfg.get("gradient_accumulation_steps", 1))
     cpu_only = device == "cpu"
+    # Pass the literal "no" rather than None: accelerate's Accelerator reads
+    # ACCELERATE_MIXED_PRECISION from the environment (and pre-existing
+    # AcceleratorState) when mixed_precision is None, which can silently
+    # upgrade a user's YAML "no" setting on hosts that have run `accelerate config`.
     return Accelerator(
-        mixed_precision=mixed_precision if mixed_precision != "no" else None,
+        mixed_precision=mixed_precision,
         gradient_accumulation_steps=gradient_accumulation_steps,
         cpu=cpu_only,
     )
@@ -933,6 +937,11 @@ def _stage_training_preparation(
         from trl import SFTConfig, SFTTrainer  # noqa: PLC0415
 
         _emit_log(severity="info", message="Preparing SFTConfig...", stage=stage_name)
+        # Gate eval_strategy on eval_dataset presence: HF's default is "no", so
+        # setting "steps" unconditionally would either error on missing
+        # eval_dataset or silently skip and never surface the mid-training
+        # val-loss that callback_evaluation reports to the UI timeline.
+        eval_strategy = "steps" if eval_dataset is not None else "no"
         sft_config = SFTConfig(
             output_dir=str(checkpoints_dir),
             num_train_epochs=epochs,
@@ -941,6 +950,7 @@ def _stage_training_preparation(
             learning_rate=training_cfg.get("learning_rate", 2e-4),
             weight_decay=training_cfg.get("weight_decay", 0.01),
             max_grad_norm=training_cfg.get("max_grad_norm", 1.0),
+            eval_strategy=eval_strategy,
             eval_steps=eval_steps,
             save_steps=save_steps,
             logging_steps=logging_steps,
@@ -954,6 +964,9 @@ def _stage_training_preparation(
             report_to="none",
             resume_from_checkpoint=resume_from_checkpoint,
             max_length=raw_config.get("preprocessing", {}).get("max_seq_length", 512),
+            # Required for HF's on_log payload to include num_tokens, which
+            # the WorkbenchCallback differences into tokens_per_second.
+            include_num_input_tokens_seen=True,
         )
 
         callback = WorkbenchCallback(
