@@ -1,0 +1,11 @@
+compute_environment: LOCAL_MACHINE
+distributed_type: 'NO'
+num_processes: 1
+mixed_precision: bf16
+machine_rank: 0
+num_machines: 1
+rdzv_backend: static
+same_network: true
+main_training_function: main
+use_cpu: false
+gradient_checkpointing: true
