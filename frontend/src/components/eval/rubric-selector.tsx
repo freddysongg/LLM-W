@@ -8,8 +8,8 @@ interface RubricSelectorProps {
   readonly rubrics: ReadonlyArray<Rubric>;
   readonly selectedVersionIds: ReadonlyArray<string>;
   readonly onToggleVersion: (rubricVersionId: string) => void;
-  readonly showUncalibrated: boolean;
-  readonly onToggleShowUncalibrated: (showUncalibrated: boolean) => void;
+  readonly isUncalibratedVisible: boolean;
+  readonly onToggleIsUncalibratedVisible: (isUncalibratedVisible: boolean) => void;
 }
 
 interface SelectableVersion {
@@ -42,14 +42,14 @@ function buildLatestVersionsByRubric(
 
 function filterVersions({
   selectable,
-  showUncalibrated,
+  isUncalibratedVisible,
 }: {
   selectable: ReadonlyArray<SelectableVersion>;
-  showUncalibrated: boolean;
+  isUncalibratedVisible: boolean;
 }): ReadonlyArray<SelectableVersion> {
   return selectable.filter((candidate) => {
     if (!candidate.isLatest) return false;
-    if (showUncalibrated) return true;
+    if (isUncalibratedVisible) return true;
     return candidate.version.calibrationStatus === "calibrated";
   });
 }
@@ -58,13 +58,13 @@ export function RubricSelector({
   rubrics,
   selectedVersionIds,
   onToggleVersion,
-  showUncalibrated,
-  onToggleShowUncalibrated,
+  isUncalibratedVisible,
+  onToggleIsUncalibratedVisible,
 }: RubricSelectorProps): React.JSX.Element {
   const selectable = React.useMemo(() => buildLatestVersionsByRubric(rubrics), [rubrics]);
   const visible = React.useMemo(
-    () => filterVersions({ selectable, showUncalibrated }),
-    [selectable, showUncalibrated],
+    () => filterVersions({ selectable, isUncalibratedVisible }),
+    [selectable, isUncalibratedVisible],
   );
   const selectedSet = React.useMemo(() => new Set(selectedVersionIds), [selectedVersionIds]);
 
@@ -75,14 +75,14 @@ export function RubricSelector({
         <button
           type="button"
           className="text-xs text-muted-foreground hover:text-foreground"
-          onClick={() => onToggleShowUncalibrated(!showUncalibrated)}
+          onClick={() => onToggleIsUncalibratedVisible(!isUncalibratedVisible)}
         >
-          {showUncalibrated ? "Hide uncalibrated" : "Show uncalibrated"}
+          {isUncalibratedVisible ? "Hide uncalibrated" : "Show uncalibrated"}
         </button>
       </div>
       {visible.length === 0 ? (
         <div className="text-xs text-muted-foreground">
-          {showUncalibrated
+          {isUncalibratedVisible
             ? "No rubrics available."
             : "No calibrated rubrics. Toggle to show uncalibrated versions."}
         </div>

@@ -15,7 +15,47 @@ import type {
   RubricCalibrationStatus,
   RubricVersion,
 } from "@/types/eval";
+import { InvariantError } from "@/lib/errors";
 import { fetchApi } from "./client";
+
+const EVAL_RUN_STATUSES: ReadonlyArray<EvalRunStatus> = [
+  "pending",
+  "running",
+  "completed",
+  "failed",
+  "cancelled",
+];
+const JUDGE_TIERS: ReadonlyArray<JudgeTier> = ["tier1", "llm"];
+const JUDGE_VERDICTS: ReadonlyArray<JudgeVerdict> = ["pass", "fail"];
+const RUBRIC_CALIBRATION_STATUSES: ReadonlyArray<RubricCalibrationStatus> = [
+  "uncalibrated",
+  "calibrated",
+  "failed",
+];
+
+function parseEvalRunStatus(raw: unknown): EvalRunStatus {
+  const candidate = EVAL_RUN_STATUSES.find((status) => status === raw);
+  if (candidate !== undefined) return candidate;
+  throw new InvariantError(`invalid eval run status: ${String(raw)}`);
+}
+
+function parseJudgeTier(raw: unknown): JudgeTier {
+  const candidate = JUDGE_TIERS.find((tier) => tier === raw);
+  if (candidate !== undefined) return candidate;
+  throw new InvariantError(`invalid judge tier: ${String(raw)}`);
+}
+
+function parseJudgeVerdict(raw: unknown): JudgeVerdict {
+  const candidate = JUDGE_VERDICTS.find((verdict) => verdict === raw);
+  if (candidate !== undefined) return candidate;
+  throw new InvariantError(`invalid judge verdict: ${String(raw)}`);
+}
+
+function parseRubricCalibrationStatus(raw: unknown): RubricCalibrationStatus {
+  const candidate = RUBRIC_CALIBRATION_STATUSES.find((status) => status === raw);
+  if (candidate !== undefined) return candidate;
+  throw new InvariantError(`invalid rubric calibration status: ${String(raw)}`);
+}
 
 interface RawEvaluationCasePayload {
   readonly prompt: string;
@@ -115,7 +155,7 @@ function normalizeEvalRun(raw: RawEvalRun): EvalRun {
   return {
     id: raw.id,
     trainingRunId: raw.training_run_id,
-    status: raw.status as EvalRunStatus,
+    status: parseEvalRunStatus(raw.status),
     startedAt: raw.started_at,
     completedAt: raw.completed_at,
     passRate: raw.pass_rate,
@@ -140,8 +180,8 @@ function normalizeEvalCall(raw: RawEvalCall): EvalCall {
     caseId: raw.case_id,
     rubricVersionId: raw.rubric_version_id,
     judgeModel: raw.judge_model,
-    tier: raw.tier as JudgeTier,
-    verdict: raw.verdict as JudgeVerdict,
+    tier: parseJudgeTier(raw.tier),
+    verdict: parseJudgeVerdict(raw.verdict),
     reasoning: raw.reasoning,
     perCriterion: raw.per_criterion,
     responseHash: raw.response_hash,
@@ -158,7 +198,7 @@ function normalizeRubricVersion(raw: RawRubricVersion): RubricVersion {
     rubricId: raw.rubric_id,
     versionNumber: raw.version_number,
     contentHash: raw.content_hash,
-    calibrationStatus: raw.calibration_status as RubricCalibrationStatus,
+    calibrationStatus: parseRubricCalibrationStatus(raw.calibration_status),
     judgeModelPin: raw.judge_model_pin,
     createdAt: raw.created_at,
   };
@@ -250,4 +290,25 @@ export async function createEvalRun({
 export async function fetchRubrics(): Promise<ReadonlyArray<Rubric>> {
   const raw = await fetchApi<ReadonlyArray<RawRubric>>({ path: `/rubrics` });
   return raw.map(normalizeRubric);
+}
+
+const JSON_INDENT_SPACES = 2;
+const DOWNLOAD_MIME_TYPE = "application/json";
+
+interface DownloadEvalRunAsJsonParams {
+  readonly evalRunDetail: EvalRunDetail;
+}
+
+export function downloadEvalRunAsJson({ evalRunDetail }: DownloadEvalRunAsJsonParams): void {
+  const jsonPayload = JSON.stringify(evalRunDetail, null, JSON_INDENT_SPACES);
+  const filename = `eval-run-${evalRunDetail.run.id}.json`;
+  const blob = new Blob([jsonPayload], { type: DOWNLOAD_MIME_TYPE });
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  URL.revokeObjectURL(objectUrl);
 }

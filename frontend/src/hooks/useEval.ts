@@ -7,6 +7,7 @@ import {
   fetchEvalRuns,
   fetchRubrics,
 } from "@/api/eval";
+import { InvariantError } from "@/lib/errors";
 import type {
   EvalCallsPage,
   EvalListQuery,
@@ -47,7 +48,7 @@ export function useEvalRun({
     queryKey: EVAL_RUN_KEY(evalRunId ?? ""),
     queryFn: () => {
       if (!evalRunId) {
-        throw new Error("evalRunId is required");
+        throw new InvariantError("evalRunId is required");
       }
       return fetchEvalRun({ evalRunId });
     },
@@ -68,7 +69,7 @@ export function useEvalRunCalls({
     queryKey: EVAL_RUN_CALLS_KEY(evalRunId ?? "", limit, offset),
     queryFn: () => {
       if (!evalRunId) {
-        throw new Error("evalRunId is required");
+        throw new InvariantError("evalRunId is required");
       }
       return fetchEvalRunCalls({ evalRunId, limit, offset });
     },

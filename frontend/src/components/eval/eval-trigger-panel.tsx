@@ -14,8 +14,8 @@ interface EvalTriggerPanelProps {
   readonly onSelectTrainingRun: (trainingRunId: string | null) => void;
   readonly selectedVersionIds: ReadonlyArray<string>;
   readonly onToggleVersion: (rubricVersionId: string) => void;
-  readonly showUncalibrated: boolean;
-  readonly onToggleShowUncalibrated: (showUncalibrated: boolean) => void;
+  readonly isUncalibratedVisible: boolean;
+  readonly onToggleIsUncalibratedVisible: (isUncalibratedVisible: boolean) => void;
   readonly maxCostUsd: number | null;
   readonly onMaxCostChange: (maxCostUsd: number | null) => void;
   readonly onTriggerEval: () => void;
@@ -40,8 +40,8 @@ export function EvalTriggerPanel({
   onSelectTrainingRun,
   selectedVersionIds,
   onToggleVersion,
-  showUncalibrated,
-  onToggleShowUncalibrated,
+  isUncalibratedVisible,
+  onToggleIsUncalibratedVisible,
   maxCostUsd,
   onMaxCostChange,
   onTriggerEval,
@@ -87,8 +87,8 @@ export function EvalTriggerPanel({
         rubrics={rubrics}
         selectedVersionIds={selectedVersionIds}
         onToggleVersion={onToggleVersion}
-        showUncalibrated={showUncalibrated}
-        onToggleShowUncalibrated={onToggleShowUncalibrated}
+        isUncalibratedVisible={isUncalibratedVisible}
+        onToggleIsUncalibratedVisible={onToggleIsUncalibratedVisible}
       />
     </div>
   );

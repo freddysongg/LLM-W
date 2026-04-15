@@ -33,7 +33,7 @@ export default function EvalPage(): React.JSX.Element {
   const [selectedEvalRunId, setSelectedEvalRunId] = React.useState<string | null>(null);
   const [selectedTrainingRunId, setSelectedTrainingRunId] = React.useState<string | null>(null);
   const [selectedVersionIds, setSelectedVersionIds] = React.useState<ReadonlyArray<string>>([]);
-  const [showUncalibrated, setShowUncalibrated] = React.useState<boolean>(false);
+  const [isUncalibratedVisible, setIsUncalibratedVisible] = React.useState<boolean>(false);
   const [maxCostUsd, setMaxCostUsd] = React.useState<number | null>(null);
   const [selectedCaseId, setSelectedCaseId] = React.useState<string | null>(null);
 
@@ -123,8 +123,8 @@ export default function EvalPage(): React.JSX.Element {
         onSelectTrainingRun={setSelectedTrainingRunId}
         selectedVersionIds={selectedVersionIds}
         onToggleVersion={handleToggleVersion}
-        showUncalibrated={showUncalibrated}
-        onToggleShowUncalibrated={setShowUncalibrated}
+        isUncalibratedVisible={isUncalibratedVisible}
+        onToggleIsUncalibratedVisible={setIsUncalibratedVisible}
         maxCostUsd={maxCostUsd}
         onMaxCostChange={setMaxCostUsd}
         onTriggerEval={handleTriggerEval}
