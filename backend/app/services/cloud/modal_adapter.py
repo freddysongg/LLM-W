@@ -37,6 +37,20 @@ def _workspace_checkpoints_path(run_id: str) -> str:
 _BACKEND_ROOT = Path(__file__).resolve().parents[3]
 
 
+def _should_ignore_backend_path(path: Path) -> bool:
+    # Exclusion predicate for modal.Image.add_local_dir: keeps source code lean by
+    # dropping caches, compiled artifacts, virtualenvs, and test fixtures that would
+    # otherwise bloat the remote workspace image.
+    parts = path.parts
+    if "__pycache__" in parts:
+        return True
+    if path.suffix == ".pyc":
+        return True
+    if ".venv" in parts:
+        return True
+    return "tests" in parts
+
+
 class TrainingProcess(Protocol):
     async def read_event(self) -> dict[str, object] | None: ...
 
@@ -83,28 +97,17 @@ class ModalTrainingAdapter:
         )
         await self._upload_training_data(volume=self._volume)
 
-        image = self._build_training_image()
-        code_mount = modal.Mount.from_local_dir(
+        image = self._build_training_image().add_local_dir(
             _BACKEND_ROOT,
             remote_path="/root",
-            condition=lambda p: (
-                "__pycache__" not in p
-                and not p.endswith(".pyc")
-                and ".venv" not in p
-                and "/tests/" not in p
-            ),
+            ignore=_should_ignore_backend_path,
         )
 
         gpu_spec = _GPU_TYPE_MAP.get(self._config.gpu_type, "T4")
-        # modal 1.3.5 removed `modal.Mount` and the `mounts=` kwarg on Sandbox.create.
-        # This path is runtime-broken on modern modal and is pending migration to
-        # `Image.add_local_dir(...)` -- tracked in #54. The type: ignore prevents the
-        # planned migration from being blocked by an otherwise-correct type checker signal.
-        self._sandbox = await modal.Sandbox.create.aio(  # type: ignore[call-arg]
+        self._sandbox = await modal.Sandbox.create.aio(
             image=image,
             gpu=gpu_spec,
             volumes={_WORKSPACE_ROOT: self._volume},
-            mounts=[code_mount],
             timeout=6 * 3600,
         )
 
