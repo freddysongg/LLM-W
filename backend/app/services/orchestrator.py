@@ -586,6 +586,26 @@ async def _process_trainer_event(
 _LOG_BATCH_MAX = 50
 
 
+def _append_log_line_to_disk(*, log_file_path: Path, entry: dict[str, str]) -> None:
+    # JSON-lines file consumed by run_service.get_run_logs for historical/REST reads.
+    # Best-effort: a disk write failure must not stop the training stream.
+    try:
+        with log_file_path.open("a", encoding="utf-8") as log_fh:
+            log_fh.write(json.dumps(entry) + "\n")
+    except OSError:
+        logger.warning("failed to append log for run file %s", log_file_path, exc_info=True)
+
+
+def _build_log_entry(*, event: dict[str, Any], severity: str) -> dict[str, str]:
+    return {
+        "severity": severity,
+        "stage": event.get("stage", "") or "",
+        "message": event.get("message", "") or "",
+        "source": "trainer",
+        "timestamp": event.get("timestamp", datetime.now(UTC).isoformat()),
+    }
+
+
 async def _flush_log_batch(
     *, run_id: str, project_id: str, log_buffer: list[dict[str, str]]
 ) -> None:
@@ -637,6 +657,10 @@ async def _run_trainer_subprocess(
 ) -> None:
     await _update_run_status(run_id=run_id, status="running")
 
+    log_dir = project_dir / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file_path = log_dir / f"{run_id}.log"
+
     try:
         proc = await dispatch_training(
             run_id=run_id,
@@ -655,6 +679,10 @@ async def _run_trainer_subprocess(
         captured_failure_reason: str = ""
         captured_failure_stage: str = ""
 
+        def _buffer_log(entry: dict[str, str]) -> None:
+            log_buffer.append(entry)
+            _append_log_line_to_disk(log_file_path=log_file_path, entry=entry)
+
         # Read stdout line by line
         assert proc.stdout is not None
         async for raw_line in proc.stdout:
@@ -665,13 +693,8 @@ async def _run_trainer_subprocess(
                 event = json.loads(line)
                 event_type = event.get("type", "")
                 if event_type == "log":
-                    log_buffer.append(
-                        {
-                            "severity": event.get("severity", "info"),
-                            "stage": event.get("stage", ""),
-                            "message": event.get("message", ""),
-                            "source": "trainer",
-                        }
+                    _buffer_log(
+                        _build_log_entry(event=event, severity=event.get("severity", "info"))
                     )
                     if len(log_buffer) >= _LOG_BATCH_MAX:
                         await _flush_log_batch(
@@ -680,12 +703,13 @@ async def _run_trainer_subprocess(
                 elif event_type == "error":
                     captured_failure_reason = event.get("message", "unknown error")
                     captured_failure_stage = event.get("stage", captured_failure_stage)
-                    log_buffer.append(
+                    _buffer_log(
                         {
                             "severity": "error",
                             "stage": event.get("stage", "unknown"),
                             "message": event.get("message", "unknown error"),
                             "source": "trainer",
+                            "timestamp": event.get("timestamp", datetime.now(UTC).isoformat()),
                         }
                     )
                     if len(log_buffer) >= _LOG_BATCH_MAX:
@@ -708,13 +732,14 @@ async def _run_trainer_subprocess(
                         final_metrics=final_metrics,
                     )
             except json.JSONDecodeError:
-                # Non-JSON stdout (e.g., Python warnings) — buffer as debug log
-                log_buffer.append(
+                # Non-JSON stdout (e.g., Python warnings) — persist as debug log
+                _buffer_log(
                     {
                         "severity": "debug",
                         "stage": "",
                         "message": line,
                         "source": "trainer_stdout",
+                        "timestamp": datetime.now(UTC).isoformat(),
                     }
                 )
                 if len(log_buffer) >= _LOG_BATCH_MAX:

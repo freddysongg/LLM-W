@@ -37,9 +37,7 @@ async def get_project(*, session: AsyncSession, project_id: str) -> Project:
 
 
 async def create_project(*, session: AsyncSession, payload: ProjectCreate) -> Project:
-    existing_result = await session.execute(
-        select(Project).where(Project.name == payload.name)
-    )
+    existing_result = await session.execute(select(Project).where(Project.name == payload.name))
     if existing_result.scalar_one_or_none() is not None:
         raise ProjectNameConflictError(payload.name)
 
@@ -84,9 +82,7 @@ async def update_project(
     project = await get_project(session=session, project_id=project_id)
 
     if payload.name is not None and payload.name != project.name:
-        conflict_result = await session.execute(
-            select(Project).where(Project.name == payload.name)
-        )
+        conflict_result = await session.execute(select(Project).where(Project.name == payload.name))
         if conflict_result.scalar_one_or_none() is not None:
             raise ProjectNameConflictError(payload.name)
         project.name = payload.name
@@ -121,32 +117,48 @@ async def set_active_config_version(
     await session.commit()
 
 
-async def get_project_storage(
-    *, session: AsyncSession, project_id: str
-) -> ProjectStorageResponse:
+async def get_project_storage(*, session: AsyncSession, project_id: str) -> ProjectStorageResponse:
     project = await get_project(session=session, project_id=project_id)
     project_dir = Path(project.directory_path)
 
     categories = ["checkpoints", "logs", "activations", "exports", "configs"]
     breakdown: dict[str, StorageCategoryDetail] = {}
 
+    def _collect_checkpoint_roots() -> list[Path]:
+        # Checkpoints live under runs/{run_id}/checkpoints per the per-run layout;
+        # also include the legacy flat path so historical artifacts still count.
+        roots: list[Path] = []
+        runs_root = project_dir / "runs"
+        if runs_root.exists():
+            for run_entry in runs_root.iterdir():
+                if not run_entry.is_dir():
+                    continue
+                candidate = run_entry / "checkpoints"
+                if candidate.exists():
+                    roots.append(candidate)
+        legacy = project_dir / "checkpoints"
+        if legacy.exists():
+            roots.append(legacy)
+        return roots
+
     for category in categories:
-        category_dir = project_dir / category
-        if category_dir.exists():
-            total_bytes = sum(
-                f.stat().st_size for f in category_dir.rglob("*") if f.is_file()
-            )
-            file_count = sum(1 for f in category_dir.rglob("*") if f.is_file())
+        if category == "checkpoints":
+            scan_roots = _collect_checkpoint_roots()
         else:
-            total_bytes = 0
-            file_count = 0
-        breakdown[category] = StorageCategoryDetail(bytes=total_bytes, file_count=file_count)
+            category_dir = project_dir / category
+            scan_roots = [category_dir] if category_dir.exists() else []
+        category_bytes = 0
+        category_files = 0
+        for root in scan_roots:
+            for file_path in root.rglob("*"):
+                if file_path.is_file():
+                    category_bytes += file_path.stat().st_size
+                    category_files += 1
+        breakdown[category] = StorageCategoryDetail(bytes=category_bytes, file_count=category_files)
 
     total_bytes = sum(detail.bytes for detail in breakdown.values())
 
-    runs_result = await session.execute(
-        select(Run).where(Run.project_id == project_id)
-    )
+    runs_result = await session.execute(select(Run).where(Run.project_id == project_id))
     runs = list(runs_result.scalars().all())
     per_run = [
         RunStorageSummary(
@@ -158,24 +170,19 @@ async def get_project_storage(
         for run in runs
     ]
 
-    checkpoints_dir = project_dir / "checkpoints"
     reclaimable_bytes = 0
     reclaimable_checkpoints = 0
-    if checkpoints_dir.exists():
-        checkpoint_dirs = sorted(
-            [d for d in checkpoints_dir.iterdir() if d.is_dir()],
-            key=lambda d: d.stat().st_mtime,
-        )
-        keep_last_n = settings.watchdog_stale_timeout_seconds  # using config default
-        keep_last_n = 3  # default retention
-        if len(checkpoint_dirs) > keep_last_n:
-            excess = checkpoint_dirs[: len(checkpoint_dirs) - keep_last_n]
+    keep_last_n = 3  # default retention
+    all_checkpoint_dirs: list[Path] = []
+    for root in _collect_checkpoint_roots():
+        all_checkpoint_dirs.extend(d for d in root.iterdir() if d.is_dir())
+    if all_checkpoint_dirs:
+        all_checkpoint_dirs.sort(key=lambda d: d.stat().st_mtime)
+        if len(all_checkpoint_dirs) > keep_last_n:
+            excess = all_checkpoint_dirs[: len(all_checkpoint_dirs) - keep_last_n]
             reclaimable_checkpoints = len(excess)
             reclaimable_bytes = sum(
-                f.stat().st_size
-                for d in excess
-                for f in d.rglob("*")
-                if f.is_file()
+                f.stat().st_size for d in excess for f in d.rglob("*") if f.is_file()
             )
 
     return ProjectStorageResponse(

@@ -68,34 +68,46 @@ def _is_heartbeat_stale(heartbeat: dict[str, object]) -> bool:
         return True
 
 
-def _clean_temp_checkpoints(project_dir: Path) -> None:
-    checkpoints_dir = project_dir / "checkpoints"
-    if not checkpoints_dir.exists():
-        return
-    for entry in checkpoints_dir.iterdir():
-        if entry.is_dir() and entry.name.startswith(_TEMP_CHECKPOINT_PREFIX):
-            try:
-                shutil.rmtree(entry)
-                logger.info("cleaned temp checkpoint: %s", entry)
-            except OSError:
-                logger.warning("failed to clean temp checkpoint: %s", entry)
-
-
-def _find_latest_valid_checkpoint(project_dir: Path) -> str | None:
-    checkpoints_dir = project_dir / "checkpoints"
-    if not checkpoints_dir.exists():
-        return None
-    valid = [
-        e
-        for e in checkpoints_dir.iterdir()
-        if e.is_dir()
-        and not e.name.startswith(_TEMP_CHECKPOINT_PREFIX)
-        and e.name.startswith("checkpoint-")
+def _candidate_checkpoint_dirs(*, project_dir: Path, run_id: str) -> list[Path]:
+    # Prefer the per-run directory; fall back to the legacy shared directory
+    # so recovery still works for runs that pre-date the per-run layout.
+    return [
+        project_dir / "runs" / run_id / "checkpoints",
+        project_dir / "checkpoints",
     ]
-    if not valid:
-        return None
-    valid.sort(key=lambda p: int(p.name.split("-")[-1]) if p.name.split("-")[-1].isdigit() else 0)
-    return str(valid[-1])
+
+
+def _clean_temp_checkpoints(*, project_dir: Path, run_id: str) -> None:
+    for checkpoints_dir in _candidate_checkpoint_dirs(project_dir=project_dir, run_id=run_id):
+        if not checkpoints_dir.exists():
+            continue
+        for entry in checkpoints_dir.iterdir():
+            if entry.is_dir() and entry.name.startswith(_TEMP_CHECKPOINT_PREFIX):
+                try:
+                    shutil.rmtree(entry)
+                    logger.info("cleaned temp checkpoint: %s", entry)
+                except OSError:
+                    logger.warning("failed to clean temp checkpoint: %s", entry)
+
+
+def _find_latest_valid_checkpoint(*, project_dir: Path, run_id: str) -> str | None:
+    for checkpoints_dir in _candidate_checkpoint_dirs(project_dir=project_dir, run_id=run_id):
+        if not checkpoints_dir.exists():
+            continue
+        valid = [
+            e
+            for e in checkpoints_dir.iterdir()
+            if e.is_dir()
+            and not e.name.startswith(_TEMP_CHECKPOINT_PREFIX)
+            and e.name.startswith("checkpoint-")
+        ]
+        if not valid:
+            continue
+        valid.sort(
+            key=lambda p: int(p.name.split("-")[-1]) if p.name.split("-")[-1].isdigit() else 0
+        )
+        return str(valid[-1])
+    return None
 
 
 def _check_process_exit_unix(pid: int) -> str | None:
@@ -265,8 +277,10 @@ async def recover_stale_runs() -> None:
                 failure_stage = stage_raw if isinstance(stage_raw, str) else None
 
             project_dir = _resolve_project_dir(target_run, heartbeat)
-            last_checkpoint = _find_latest_valid_checkpoint(project_dir)
-            _clean_temp_checkpoints(project_dir)
+            last_checkpoint = _find_latest_valid_checkpoint(
+                project_dir=project_dir, run_id=target_run.id
+            )
+            _clean_temp_checkpoints(project_dir=project_dir, run_id=target_run.id)
 
             failure_reason = _build_failure_reason(heartbeat=heartbeat, pid=pid)
 
@@ -320,8 +334,8 @@ async def check_run_health(*, run_id: str) -> bool:
                 stage_raw = heartbeat.get("stage")
                 failure_stage = stage_raw if isinstance(stage_raw, str) else None
             project_dir = _resolve_project_dir(run, heartbeat)
-            last_checkpoint = _find_latest_valid_checkpoint(project_dir)
-            _clean_temp_checkpoints(project_dir)
+            last_checkpoint = _find_latest_valid_checkpoint(project_dir=project_dir, run_id=run.id)
+            _clean_temp_checkpoints(project_dir=project_dir, run_id=run.id)
             await _mark_run_failed(
                 session=session,
                 run=run,
@@ -337,8 +351,8 @@ async def check_run_health(*, run_id: str) -> bool:
                 stage_raw = heartbeat.get("stage")
                 stale_stage = stage_raw if isinstance(stage_raw, str) else None
             project_dir = _resolve_project_dir(run, heartbeat)
-            last_checkpoint = _find_latest_valid_checkpoint(project_dir)
-            _clean_temp_checkpoints(project_dir)
+            last_checkpoint = _find_latest_valid_checkpoint(project_dir=project_dir, run_id=run.id)
+            _clean_temp_checkpoints(project_dir=project_dir, run_id=run.id)
             await _mark_run_failed(
                 session=session,
                 run=run,

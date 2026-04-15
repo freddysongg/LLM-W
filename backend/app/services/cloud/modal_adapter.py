@@ -26,7 +26,12 @@ _GPU_TYPE_MAP: dict[str, str] = {
 _WORKSPACE_ROOT = "/workspace"
 _WORKSPACE_CONFIGS = f"{_WORKSPACE_ROOT}/configs"
 _WORKSPACE_DATASETS = f"{_WORKSPACE_ROOT}/datasets"
-_WORKSPACE_CHECKPOINTS = f"{_WORKSPACE_ROOT}/checkpoints"
+
+
+def _workspace_checkpoints_path(run_id: str) -> str:
+    # Matches the per-run layout used by the local trainer (trainer._run_checkpoints_dir)
+    return f"{_WORKSPACE_ROOT}/runs/{run_id}/checkpoints"
+
 
 # backend/ is 4 levels up from this file (cloud/ -> services/ -> app/ -> backend/)
 _BACKEND_ROOT = Path(__file__).resolve().parents[3]
@@ -245,18 +250,20 @@ class ModalTrainingAdapter:
         """Download checkpoint artifacts from Modal Volume to local project storage."""
         if self._volume is None:
             return
-        local_checkpoints = self._config.project_dir / "checkpoints"
+        run_id = self._config.run_id
+        remote_checkpoints = _workspace_checkpoints_path(run_id)
+        local_checkpoints = self._config.project_dir / "runs" / run_id / "checkpoints"
         local_checkpoints.mkdir(parents=True, exist_ok=True)
         volume = self._volume
         loop = asyncio.get_running_loop()
 
         def _sync_download() -> None:
             try:
-                entries = list(volume.listdir(_WORKSPACE_CHECKPOINTS, recursive=True))
+                entries = list(volume.listdir(remote_checkpoints, recursive=True))
             except Exception:
                 logger.warning(
                     "No checkpoints found in Modal Volume for run %s",
-                    self._config.run_id,
+                    run_id,
                 )
                 return
             for entry in entries:
@@ -265,7 +272,7 @@ class ModalTrainingAdapter:
                     # Directory entries end with / — skip, only process files
                     if entry_path.endswith("/"):
                         continue
-                    rel = entry_path[len(_WORKSPACE_CHECKPOINTS) :].lstrip("/")
+                    rel = entry_path[len(remote_checkpoints) :].lstrip("/")
                     local_dest = local_checkpoints / rel
                     local_dest.parent.mkdir(parents=True, exist_ok=True)
                     with local_dest.open("wb") as f:

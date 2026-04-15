@@ -228,6 +228,26 @@ def _get_dir_size(path: Path) -> int:
     return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
 
 
+def _run_checkpoints_dir(*, project_dir: Path, run_id: str) -> Path:
+    # Per-run isolation so concurrent/prior runs never clobber each other's artifacts
+    return project_dir / "runs" / run_id / "checkpoints"
+
+
+def _sample_gpu_memory_mb() -> float | None:
+    try:
+        import torch  # noqa: PLC0415
+    except ImportError:
+        return None
+    try:
+        if torch.cuda.is_available():
+            return torch.cuda.memory_allocated() / (1024 * 1024)
+        if torch.backends.mps.is_available():
+            return torch.mps.current_allocated_memory() / (1024 * 1024)
+    except Exception:
+        return None
+    return None
+
+
 class WorkbenchCallback(TrainerCallback):
     """HuggingFace TrainerCallback that emits structured events to stdout."""
 
@@ -242,6 +262,8 @@ class WorkbenchCallback(TrainerCallback):
         self._project_dir = project_dir
         self._heartbeat_state = heartbeat_state
         self._last_metrics: dict[str, float] = {}
+        self._last_log_time: float | None = None
+        self._last_num_tokens: float | None = None
 
     def on_train_begin(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
         _emit_stage_complete(
@@ -286,6 +308,30 @@ class WorkbenchCallback(TrainerCallback):
             if isinstance(value, (int, float)):
                 metrics[key] = float(value)
 
+        # Normalize HF's "loss" to the domain name "train_loss" so downstream
+        # consumers (rule engine, charts) have a single canonical key.
+        if "loss" in metrics:
+            metrics["train_loss"] = metrics.pop("loss")
+
+        now = time.monotonic()
+        num_tokens = metrics.get("num_tokens")
+        if (
+            num_tokens is not None
+            and self._last_log_time is not None
+            and self._last_num_tokens is not None
+        ):
+            elapsed = now - self._last_log_time
+            delta_tokens = num_tokens - self._last_num_tokens
+            if elapsed > 0 and delta_tokens >= 0:
+                metrics["tokens_per_second"] = delta_tokens / elapsed
+        if num_tokens is not None:
+            self._last_num_tokens = num_tokens
+        self._last_log_time = now
+
+        gpu_memory_mb = _sample_gpu_memory_mb()
+        if gpu_memory_mb is not None:
+            metrics["gpu_memory_used_mb"] = gpu_memory_mb
+
         total_steps = state.max_steps if state.max_steps > 0 else 1
 
         progress_pct = min(100.0, step / total_steps * 100)
@@ -295,7 +341,7 @@ class WorkbenchCallback(TrainerCallback):
             self._heartbeat_state["current_step"] = step
             self._heartbeat_state["total_steps"] = total_steps
             self._heartbeat_state["metrics"] = metrics
-            loss = metrics.get("loss", metrics.get("train_loss"))
+            loss = metrics.get("train_loss")
             lr = metrics.get("learning_rate")
             stats_parts = []
             if loss is not None:
@@ -336,7 +382,10 @@ class WorkbenchCallback(TrainerCallback):
 
     def on_save(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
         step = state.global_step
-        checkpoint_dir = self._project_dir / "checkpoints" / f"checkpoint-{step}"
+        checkpoint_dir = (
+            _run_checkpoints_dir(project_dir=self._project_dir, run_id=self._run_id)
+            / f"checkpoint-{step}"
+        )
         if checkpoint_dir.exists():
             size = _get_dir_size(checkpoint_dir)
             _emit_checkpoint(step=step, path=str(checkpoint_dir), size_bytes=size)
@@ -717,7 +766,7 @@ def _stage_training_preparation(
     training_cfg = raw_config.get("training", {})
     optimization_cfg = raw_config.get("optimization", {})
 
-    checkpoints_dir = project_dir / "checkpoints"
+    checkpoints_dir = _run_checkpoints_dir(project_dir=project_dir, run_id=run_id)
     checkpoints_dir.mkdir(parents=True, exist_ok=True)
 
     mixed_precision: str = optimization_cfg.get("mixed_precision", "no")
@@ -760,10 +809,25 @@ def _stage_training_preparation(
     configured_save_steps: int | None = training_cfg.get("save_steps")
     configured_logging_steps: int | None = training_cfg.get("logging_steps")
     eval_steps = configured_eval_steps if configured_eval_steps is not None else dynamic_interval
-    save_steps = configured_save_steps if configured_save_steps is not None else dynamic_interval
     logging_steps = (
         configured_logging_steps if configured_logging_steps is not None else dynamic_interval
     )
+    if configured_save_steps is None:
+        save_steps = dynamic_interval
+    elif total_steps > 0 and configured_save_steps > total_steps:
+        # Prevent silently disabling mid-training saves when the configured
+        # cadence is larger than the run's entire length (common on small runs)
+        save_steps = dynamic_interval
+        _emit_log(
+            severity="warning",
+            message=(
+                f"save_steps={configured_save_steps} exceeds total_steps={total_steps}; "
+                f"clamped to {save_steps} so intermediate checkpoints are saved"
+            ),
+            stage=stage_name,
+        )
+    else:
+        save_steps = configured_save_steps
 
     try:
         from trl import SFTConfig, SFTTrainer  # noqa: PLC0415

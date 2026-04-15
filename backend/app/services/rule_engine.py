@@ -35,7 +35,7 @@ def _check_loss_plateau(
     grouped: dict[str, list[tuple[int, float]]],
     current_lr: float,
 ) -> AISuggestionCreate | None:
-    series = grouped.get("eval_loss") or grouped.get("loss")
+    series = grouped.get("eval_loss") or grouped.get("train_loss") or grouped.get("loss")
     if not series or len(series) < 5:
         return None
 
