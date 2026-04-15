@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TypedDict
 
 import yaml
 from fastapi.responses import FileResponse
@@ -24,6 +25,13 @@ from app.schemas.storage import (
     StorageCategoryDetail,
     StorageTotalResponse,
 )
+
+
+class RetentionConfig(TypedDict):
+    keep_last_n: int
+    always_keep_best_eval: bool
+    always_keep_final: bool
+    delete_intermediates_after_completion: bool
 
 
 async def get_project_storage(*, session: AsyncSession, project_id: str) -> ProjectStorageResponse:
@@ -346,8 +354,8 @@ async def _compute_retention_summary(
     )
 
 
-async def _load_retention_config(*, session: AsyncSession, project_id: str) -> dict[str, object]:
-    defaults = {
+async def _load_retention_config(*, session: AsyncSession, project_id: str) -> RetentionConfig:
+    defaults: RetentionConfig = {
         "keep_last_n": 3,
         "always_keep_best_eval": True,
         "always_keep_final": True,

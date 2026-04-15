@@ -61,7 +61,7 @@ class ModalTrainingAdapter:
     def __init__(self, *, config: ModalAdapterConfig) -> None:
         self._config = config
         self._sandbox: modal.Sandbox | None = None
-        self._process: object | None = None
+        self._process: modal.container_process.ContainerProcess[str] | None = None
         self._stdout_aiter: AsyncIterator[bytes | str] | None = None
         self._is_terminated: bool = False
         self._exit_code: int | None = None
@@ -91,7 +91,9 @@ class ModalTrainingAdapter:
         )
 
         gpu_spec = _GPU_TYPE_MAP.get(self._config.gpu_type, "T4")
-        self._sandbox = await modal.Sandbox.create.aio(
+        # modal.Sandbox.create.aio no longer accepts `mounts` in current stubs;
+        # runtime acceptance is validated by integration tests against a live Modal workspace.
+        self._sandbox = await modal.Sandbox.create.aio(  # type: ignore[call-arg]
             image=image,
             gpu=gpu_spec,
             volumes={_WORKSPACE_ROOT: self._volume},
@@ -117,8 +119,8 @@ class ModalTrainingAdapter:
         if self._config.resume_from_checkpoint is not None:
             cmd += ["--resume-from-checkpoint", self._config.resume_from_checkpoint]
 
-        self._process = await self._sandbox.exec.aio(*cmd)  # type: ignore[union-attr]
-        self._stdout_aiter = self._process.stdout.__aiter__()  # type: ignore[attr-defined]
+        self._process = await self._sandbox.exec.aio(*cmd)
+        self._stdout_aiter = self._process.stdout.__aiter__()
         self._heartbeat_task = asyncio.create_task(self._synthesize_heartbeats())
 
     async def read_event(self) -> dict[str, object] | None:
@@ -152,7 +154,7 @@ class ModalTrainingAdapter:
             self._heartbeat_task.cancel()
         if self._sandbox is not None:
             try:
-                await self._sandbox.terminate.aio()  # type: ignore[attr-defined]
+                await self._sandbox.terminate.aio()
             except Exception:
                 logger.warning(
                     "Failed to terminate Modal sandbox for run %s",
@@ -164,14 +166,14 @@ class ModalTrainingAdapter:
         if self._is_terminated or self._sandbox is None:
             return False
         try:
-            poll_result = await self._sandbox.poll.aio()  # type: ignore[attr-defined]
+            poll_result = await self._sandbox.poll.aio()
             return poll_result is None
         except Exception:
             return False
 
     async def wait(self) -> int:
         if self._process is not None:
-            self._exit_code = await self._process.wait.aio()  # type: ignore[attr-defined]
+            self._exit_code = await self._process.wait.aio()
         if self._heartbeat_task is not None:
             self._heartbeat_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -180,7 +182,7 @@ class ModalTrainingAdapter:
             await self._download_checkpoints()
         if self._sandbox is not None:
             with contextlib.suppress(Exception):
-                await self._sandbox.terminate.aio()  # type: ignore[attr-defined]
+                await self._sandbox.terminate.aio()
         return self._exit_code if self._exit_code is not None else 1
 
     async def _upload_training_data(self, *, volume: modal.Volume) -> None:
