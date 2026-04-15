@@ -21,6 +21,12 @@ from typing import cast
 
 import pytest
 
+# The sourcing script imports `datasets` at module load time. Skip the whole
+# test module when the optional `[training]` extra isn't installed in the
+# current env — the real Dolly run was verified by the implementer with the
+# extra installed; CI can replicate by installing `backend[training]`.
+pytest.importorskip("datasets")
+
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 _SCRIPT_PATH = _REPO_ROOT / "scripts" / "eval" / "source_calibration_set.py"
 
