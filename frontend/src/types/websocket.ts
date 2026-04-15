@@ -1,7 +1,7 @@
 import type { MetricName, RunStatus, StageName } from "./run";
 import type { ArtifactType } from "./artifact";
 
-export type WebSocketChannel = "run_state" | "metrics" | "logs" | "system";
+export type WebSocketChannel = "run_state" | "metrics" | "logs" | "system" | "eval";
 export type LogSeverity = "debug" | "info" | "warning" | "error" | "critical";
 
 export interface WebSocketEnvelope<T = unknown> {
