@@ -16,7 +16,7 @@ from app.core.events import event_bus
 
 logger = logging.getLogger(__name__)
 
-_VALID_CHANNELS = frozenset({"run_state", "metrics", "logs", "system"})
+_VALID_CHANNELS = frozenset({"run_state", "metrics", "logs", "system", "eval"})
 _QUEUE_MAX_SIZE = 256
 _RESOURCE_POLL_INTERVAL = 5.0
 
