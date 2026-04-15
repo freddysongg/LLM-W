@@ -54,6 +54,10 @@ def _build_tiny_config(*, dataset_path: Path, project_dir: Path) -> dict[str, ob
             "source": "local_jsonl",
             "dataset_id": str(dataset_path),
             "train_split": "train",
+            # Reuse the train split as eval so SFTTrainer invokes on_evaluate
+            # mid-run, exercising WorkbenchCallback's callback_evaluation
+            # stage emission and validating the #53 collision fix.
+            "eval_split": "train",
             "input_field": "prompt",
             "target_field": "response",
             "max_samples": TINY_TRAIN_ROWS,
@@ -67,9 +71,9 @@ def _build_tiny_config(*, dataset_path: Path, project_dir: Path) -> dict[str, ob
             "weight_decay": 0.0,
             "max_grad_norm": 1.0,
             "seed": 7,
-            "save_steps": 4,
+            "save_steps": 2,
             "logging_steps": 1,
-            "eval_steps": 4,
+            "eval_steps": 2,
         },
         "optimization": {
             "mixed_precision": "no",
@@ -192,6 +196,31 @@ def test_trainer_subprocess_emits_expected_metric_fields(
         "metric event must include renamed 'train_loss' key (not 'loss') — see b2fc54f"
     )
 
+    tokens_per_second_values: list[float] = [
+        float(event["metrics"]["tokens_per_second"])  # type: ignore[index]
+        for event in metric_events
+        if "tokens_per_second" in event.get("metrics", {})  # type: ignore[operator]
+    ]
+    assert tokens_per_second_values, (
+        "expected at least one metric event with tokens_per_second — "
+        "requires include_num_input_tokens_seen=True in SFTConfig"
+    )
+    assert any(value > 0 for value in tokens_per_second_values), (
+        "expected a positive tokens_per_second after the first logging step"
+    )
+
+    # gpu_memory_used_mb relies on _sample_gpu_memory_mb() which returns None
+    # on CPU-only hosts; only assert presence when an accelerator is available
+    import torch  # noqa: PLC0415
+
+    has_accelerator = torch.cuda.is_available() or torch.backends.mps.is_available()
+    if has_accelerator:
+        has_gpu_memory = any(
+            "gpu_memory_used_mb" in event.get("metrics", {})  # type: ignore[operator]
+            for event in metric_events
+        )
+        assert has_gpu_memory, "expected gpu_memory_used_mb on accelerator-equipped host"
+
 
 def test_trainer_subprocess_writes_checkpoint_under_per_run_dir(
     tiny_training_env: tuple[str, Path, Path],
@@ -227,6 +256,11 @@ def test_callback_evaluation_does_not_collide_with_reserved_stage_11(
     assert completed.returncode == 0, completed.stderr
 
     events = _parse_stdout_events(completed.stdout)
+    callback_stage_enters = [
+        event
+        for event in events
+        if event["type"] == "stage_enter" and event.get("stage_name") == "callback_evaluation"
+    ]
     reserved_stage_enters = [
         event
         for event in events
@@ -237,6 +271,10 @@ def test_callback_evaluation_does_not_collide_with_reserved_stage_11(
         for event in events
         if event["type"] == "stage_complete" and event.get("stage_name") == "evaluation"
     ]
+    assert callback_stage_enters, (
+        "expected at least one 'callback_evaluation' stage_enter event — "
+        "without eval_split wired the buggy version would pass this test vacuously"
+    )
     assert len(reserved_stage_enters) == 1, (
         "expected exactly one reserved stage-11 'evaluation' enter event — "
         "callback must emit under a distinct stage name"
