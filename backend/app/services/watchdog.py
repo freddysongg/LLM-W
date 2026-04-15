@@ -25,6 +25,7 @@ _IS_UNIX = sys.platform != "win32"
 _IS_DARWIN = sys.platform == "darwin"
 
 _TEMP_CHECKPOINT_PREFIX = ".tmp-checkpoint-"
+_CHECKPOINT_COMPLETE_MARKER = "COMPLETE"
 
 _SIGNAL_NAMES: dict[int, str] = {
     1: "SIGHUP",
@@ -90,6 +91,19 @@ def _clean_temp_checkpoints(*, project_dir: Path, run_id: str) -> None:
                     logger.warning("failed to clean temp checkpoint: %s", entry)
 
 
+def _is_finalized_checkpoint(checkpoint_dir: Path) -> bool:
+    """Accept only checkpoints stamped by the trainer's post-barrier commit.
+
+    Historical checkpoints written before the marker contract shipped are
+    also accepted — presence of HF's `config.json` is a strong signal the
+    directory is a real, complete HF save rather than a half-written shard
+    staging area. Keeps resume working for runs that pre-date the marker.
+    """
+    if (checkpoint_dir / _CHECKPOINT_COMPLETE_MARKER).is_file():
+        return True
+    return (checkpoint_dir / "config.json").is_file()
+
+
 def _find_latest_valid_checkpoint(*, project_dir: Path, run_id: str) -> str | None:
     for checkpoints_dir in _candidate_checkpoint_dirs(project_dir=project_dir, run_id=run_id):
         if not checkpoints_dir.exists():
@@ -100,6 +114,7 @@ def _find_latest_valid_checkpoint(*, project_dir: Path, run_id: str) -> str | No
             if e.is_dir()
             and not e.name.startswith(_TEMP_CHECKPOINT_PREFIX)
             and e.name.startswith("checkpoint-")
+            and _is_finalized_checkpoint(e)
         ]
         if not valid:
             continue

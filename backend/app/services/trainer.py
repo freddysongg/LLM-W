@@ -39,10 +39,16 @@ _ACCELERATOR: Any | None = None
 
 
 def _is_main_process() -> bool:
-    """Return True when no accelerator is configured or when running on the main rank."""
-    if _ACCELERATOR is None:
-        return True
-    return bool(_ACCELERATOR.is_main_process)
+    """Return True when running on the coordinating rank (rank 0)."""
+    if _ACCELERATOR is not None:
+        return bool(_ACCELERATOR.is_main_process)
+    # Pre-accelerator init the singleton is not yet built but `accelerate
+    # launch` has already populated RANK / LOCAL_RANK before the trainer's
+    # Python entry point runs. Honour those so stages 1-2 don't emit
+    # duplicate JSON lines from non-zero ranks into the orchestrator's
+    # single-reader stdout pipe.
+    rank = os.environ.get("RANK") or os.environ.get("LOCAL_RANK")
+    return rank is None or rank == "0"
 
 
 # Callback-emitted eval stage name. Distinct from reserved stage 11
@@ -257,9 +263,31 @@ def _get_dir_size(path: Path) -> int:
     return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
 
 
+# Sentinel file written atomically at the top of a finalized checkpoint
+# directory. Readers (watchdog, resume logic) treat a checkpoint dir without
+# this marker as partial — e.g. the trainer was killed mid-save.
+_CHECKPOINT_COMPLETE_MARKER = "COMPLETE"
+
+
 def _run_checkpoints_dir(*, project_dir: Path, run_id: str) -> Path:
     # Per-run isolation so concurrent/prior runs never clobber each other's artifacts
     return project_dir / "runs" / run_id / "checkpoints"
+
+
+def _write_checkpoint_complete_marker(*, checkpoint_dir: Path, step: int) -> None:
+    """Atomically stamp `checkpoint_dir` as fully written via tmp-write + rename."""
+    marker_path = checkpoint_dir / _CHECKPOINT_COMPLETE_MARKER
+    tmp_path = checkpoint_dir / f".{_CHECKPOINT_COMPLETE_MARKER}.tmp"
+    payload = {
+        "step": step,
+        "completed_at": datetime.now(UTC).isoformat(),
+    }
+    tmp_path.write_text(json.dumps(payload))
+    tmp_path.rename(marker_path)
+
+
+def _is_checkpoint_complete(checkpoint_dir: Path) -> bool:
+    return (checkpoint_dir / _CHECKPOINT_COMPLETE_MARKER).is_file()
 
 
 def _sample_gpu_memory_mb() -> float | None:
@@ -295,6 +323,8 @@ class WorkbenchCallback(TrainerCallback):
         self._last_num_tokens: float | None = None
 
     def on_train_begin(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
+        if not _is_main_process():
+            return
         _emit_stage_complete(
             stage_name="training_start",
             duration_ms=0,
@@ -312,6 +342,8 @@ class WorkbenchCallback(TrainerCallback):
         )
 
     def on_step_end(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
+        if not _is_main_process():
+            return
         step = state.global_step
         total_steps = state.max_steps if state.max_steps > 0 else 1
         epoch = float(state.epoch or 0.0)
@@ -328,6 +360,8 @@ class WorkbenchCallback(TrainerCallback):
     def on_log(
         self, args: Any, state: Any, control: Any, logs: dict[str, Any] | None = None, **kwargs: Any
     ) -> None:
+        if not _is_main_process():
+            return
         if not logs:
             return
         step = state.global_step
@@ -397,6 +431,8 @@ class WorkbenchCallback(TrainerCallback):
         metrics: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
+        if not _is_main_process():
+            return
         # Callback-driven inline eval is distinct from reserved stage 11
         # `"evaluation"`. Emitting under the same name produced duplicate
         # stage-11 timelines when users configured `training.eval_steps`
@@ -421,11 +457,32 @@ class WorkbenchCallback(TrainerCallback):
             _run_checkpoints_dir(project_dir=self._project_dir, run_id=self._run_id)
             / f"checkpoint-{step}"
         )
-        if checkpoint_dir.exists():
-            size = _get_dir_size(checkpoint_dir)
-            _emit_checkpoint(step=step, path=str(checkpoint_dir), size_bytes=size)
+        # FSDP sharded saves: each rank writes its own shard into
+        # `checkpoint_dir` as part of HF's save_model. Block until every
+        # rank has flushed before rank 0 stamps the COMPLETE marker so a
+        # crash mid-shard-write never leaves a "finalized" checkpoint that
+        # resume would happily load into garbage weights.
+        if _ACCELERATOR is not None:
+            _ACCELERATOR.wait_for_everyone()
+        if not _is_main_process():
+            return
+        if not checkpoint_dir.exists():
+            return
+        try:
+            _write_checkpoint_complete_marker(checkpoint_dir=checkpoint_dir, step=step)
+        except OSError as exc:
+            _emit_log(
+                severity="warning",
+                message=f"failed to write checkpoint complete marker at {checkpoint_dir}: {exc}",
+                stage="training_progress",
+            )
+            return
+        size = _get_dir_size(checkpoint_dir)
+        _emit_checkpoint(step=step, path=str(checkpoint_dir), size_bytes=size)
 
     def on_train_end(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
+        if not _is_main_process():
+            return
         self._heartbeat_state["stage"] = "artifact_finalization"
 
 
