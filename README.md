@@ -125,7 +125,7 @@ Numbers are populated by the benchmarking workstream — same codepath, three de
 
 ## Research citations
 
-Every design choice traces back to a named source. Short list here; full bibliography forthcoming in [`docs/references/`](docs/references/).
+Every design choice traces back to a named source. Short list here; full bibliography: [`docs/references.md`](docs/references.md).
 
 - **R1** — Liu et al. 2023, *G-Eval*. Chain-of-thought scoring for Tier-2 judge. [arXiv:2303.16634](https://arxiv.org/abs/2303.16634)
 - **R3** — Hamel Husain, *Critique Shadowing*. Binary pass/fail labeling + TPR/TNR calibration methodology. [hamel.dev](https://hamel.dev/blog/posts/llm-judge/)

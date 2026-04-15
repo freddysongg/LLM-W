@@ -68,6 +68,8 @@ Every design choice in this harness traces back to a named paper, framework, or 
 | R11 | Amazon Nova | Additive-binary rubrics outperform holistic Likert by ~49% |
 | R12 | OpenAI Moderation (`omni-moderation-latest`) | Tier-1 safety prescreen |
 
+Full citations with URLs and per-R-ID usage notes: [`docs/references.md`](docs/references.md).
+
 ## Replay Mechanism
 
 Narrow scope: **eval-judgment replay only**. Every row in `eval_calls` stores `response_hash = SHA256(raw_judge_response_text)`. The `llmw eval replay <eval_call_id>` command re-runs the exact same `(case_input, rubric_version, judge_model)` triple — rubric versions are immutable by content hash, so a replay of an old judgment never picks up newer rubric edits. The replay writes a new linked row via `replayed_from_id`; the original is never overwritten. Mismatched hashes detect OpenAI model drift across time.
