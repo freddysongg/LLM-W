@@ -4,7 +4,7 @@ import hashlib
 import json
 import time
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, cast
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -15,6 +15,7 @@ from app.services.eval.judge import JudgeError, JudgeProvider
 
 if TYPE_CHECKING:
     import instructor
+    from openai.types.chat import ChatCompletionMessageParam
 
 
 class _JudgeLLMOutput(BaseModel):
@@ -223,7 +224,7 @@ class OpenAIJudge(JudgeProvider):
             llm_output, completion = await client.chat.completions.create_with_completion(
                 model=model,
                 response_model=_JudgeLLMOutput,
-                messages=messages,
+                messages=cast("list[ChatCompletionMessageParam]", messages),
                 temperature=temperature,
             )
         except JudgeError:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -14,6 +14,7 @@ from app.services.eval.openai_judge import OpenAIJudge, _build_messages
 
 if TYPE_CHECKING:
     import instructor
+    from openai.types.chat import ChatCompletionMessageParam
 
 
 StepsGenerator = Callable[[Rubric], Awaitable[list[str]]]
@@ -103,7 +104,7 @@ async def _generate_steps_openai(
         response = await resolved_client.chat.completions.create(
             model=rubric.judge_model_pin,
             response_model=_EvalSteps,
-            messages=messages,
+            messages=cast("list[ChatCompletionMessageParam]", messages),
             temperature=0.0,
         )
     except JudgeError:
