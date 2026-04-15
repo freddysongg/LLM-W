@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 from collections.abc import AsyncIterator, Callable
@@ -20,10 +21,12 @@ from app.schemas.eval import EvaluationCase, Score
 from app.schemas.rubric import Rubric
 from app.services.eval.judge import JudgeError, JudgeProvider
 from app.services.eval_runner import (
+    _IN_FLIGHT_TASKS,
     EvalOrchestrationError,
     RubricVersionNotFoundError,
     _default_case_provider,
     create_eval_run_row,
+    drain_in_flight_tasks,
     execute_eval_run,
     recover_stale_eval_runs,
 )
@@ -598,3 +601,63 @@ async def test_recover_stale_eval_runs_marks_running_as_failed(
         assert row is not None
         assert row.status == "failed"
         assert row.completed_at is not None
+
+
+async def _sleep_forever() -> None:
+    await asyncio.sleep(3600)
+
+
+@pytest.mark.asyncio
+async def test_drain_in_flight_tasks_cancels_registered_tasks() -> None:
+    task = asyncio.create_task(_sleep_forever())
+    _IN_FLIGHT_TASKS.add(task)
+    task.add_done_callback(_IN_FLIGHT_TASKS.discard)
+
+    try:
+        await drain_in_flight_tasks(timeout_s=1.0)
+        assert task.cancelled() is True
+        assert task not in _IN_FLIGHT_TASKS
+    finally:
+        if not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        _IN_FLIGHT_TASKS.discard(task)
+
+
+@pytest.mark.asyncio
+async def test_drain_in_flight_tasks_noop_when_empty() -> None:
+    assert len(_IN_FLIGHT_TASKS) == 0
+    await drain_in_flight_tasks(timeout_s=1.0)
+    assert len(_IN_FLIGHT_TASKS) == 0
+
+
+@pytest.mark.asyncio
+async def test_drain_in_flight_tasks_logs_warning_on_timeout(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    inner_started = asyncio.Event()
+    release_gate = asyncio.Event()
+
+    async def _delayed_cancel_honor() -> None:
+        inner_started.set()
+        try:
+            await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            await release_gate.wait()
+            raise
+
+    task = asyncio.create_task(_delayed_cancel_honor())
+    _IN_FLIGHT_TASKS.add(task)
+    task.add_done_callback(_IN_FLIGHT_TASKS.discard)
+    await inner_started.wait()
+
+    try:
+        with caplog.at_level("WARNING", logger="app.services.eval_runner"):
+            await drain_in_flight_tasks(timeout_s=0.2)
+        assert any("did not finish" in record.getMessage() for record in caplog.records)
+    finally:
+        release_gate.set()
+        with contextlib.suppress(asyncio.CancelledError, TimeoutError):
+            await asyncio.wait_for(task, timeout=1.0)
+        _IN_FLIGHT_TASKS.discard(task)

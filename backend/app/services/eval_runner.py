@@ -784,6 +784,31 @@ def schedule_eval_run(
     return task
 
 
+async def drain_in_flight_tasks(timeout_s: float = 10.0) -> None:
+    """Cancel and await any in-flight eval orchestration tasks on shutdown.
+
+    A bounded wait prevents the FastAPI lifespan from hanging if a task does
+    not respond to cancellation; stragglers are logged but not re-raised since
+    each task is expected to surface ``CancelledError``.
+    """
+    snapshot = list(_IN_FLIGHT_TASKS)
+    if not snapshot:
+        return
+    for task in snapshot:
+        task.cancel()
+    _done, pending = await asyncio.wait(
+        snapshot,
+        timeout=timeout_s,
+        return_when=asyncio.ALL_COMPLETED,
+    )
+    if pending:
+        logger.warning(
+            "drain_in_flight_tasks: %d eval task(s) did not finish within %.1fs",
+            len(pending),
+            timeout_s,
+        )
+
+
 async def recover_stale_eval_runs(
     *,
     session_factory: async_sessionmaker[AsyncSession],
