@@ -115,5 +115,17 @@ bench:
   # The runner fails at startup if this mismatches the on-disk file.
   eval_split_hash: 4f97fe0a10c4ea7250c7bab19229ee3d28bb56a3a714816abc484a02ba096841
   perplexity_samples: 200
-  # 50-prompt judge-harness sanity set; populated/verified by #10.
+  # 50-prompt judge-harness sanity set used by scripts/bench/judge_sanity.py.
+  # Prompts must be disjoint from eval_split.jsonl AND from the calibration
+  # source set (eval/calibration/v1_raw.hash, landing with #21) — enforced at
+  # script startup. SHA256 integrity check mirrors the eval_split.hash pattern.
   judge_sanity_prompts_path: configs/bench/judge_sanity_prompts.jsonl
+  judge_sanity_prompts_hash: d882d82b6dd0097686fe866fbfe49b93d10abe86d328d82f83f038cade761a68
+  # Origin metadata. The initial 50 prompts are a hand-authored synthetic
+  # placeholder covering instruction-following, explanation, and creative
+  # styles — broad-domain enough for cross-backend judge sanity without
+  # requiring a HuggingFace dataset pull at script-build time. Replace with
+  # a sampled slice of (e.g.) databricks/databricks-dolly-15k or
+  # Open-Orca/OpenOrca (pinned revision + fixed seed) before the first real
+  # bench run is logged.
+  judge_sanity_prompts_source: synthetic-placeholder-v1

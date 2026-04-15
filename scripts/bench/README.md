@@ -13,9 +13,15 @@ downstream tooling (ingestion, leaderboards, #8/#9/#10) can consume.
   trainer subprocess launch, stdout JSON stream capture, summary emission.
 - `freeze_eval_split.py` — one-shot script that materializes the frozen
   200-example held-out eval split (see "Frozen eval split" below).
+- `judge_sanity.py` — post-training step: loads the saved LoRA adapter,
+  generates completions on 50 disjoint prompts, scores them with the v1
+  rubrics via the Tier-2 G-Eval judge, and mutates `summary.json` to
+  populate `judge_pass_rate` (see "Judge sanity" below).
 - `tests/test_run_local.py` — unit + integration tests (mock trainer).
 - `tests/test_freeze_eval_split.py` — determinism + disjointness tests for
   the freeze script, using a stubbed `datasets.load_dataset`.
+- `tests/test_judge_sanity.py` — unit tests for the judge-sanity runner
+  (disjointness, idempotency, stub-driven scoring, failure resilience).
 
 ## Usage
 
@@ -106,6 +112,70 @@ without `--force` the script exits non-zero.
   used during the WS2.x bring-up; unreachable now that the hash is
   populated).
 
+## Judge sanity
+
+After a successful training run the runner can optionally invoke
+`judge_sanity.py`, which:
+
+1. Loads the 50-prompt disjoint set from `configs/bench/judge_sanity_prompts.jsonl`,
+   verifies its SHA256 against `bench.judge_sanity_prompts_hash`, and asserts
+   no prompt overlaps the 200-example frozen eval split (and the calibration
+   set, if `eval/calibration/v1_raw.hash` exists — otherwise logs a warning).
+2. Locates the latest `checkpoint-<step>` under `<output-dir>/project/checkpoints/`
+   (or uses `--adapter-path` when passed explicitly), loads the base model
+   via `transformers.AutoModelForCausalLM` + applies the adapter via
+   `peft.PeftModel.from_pretrained`, and generates at `temperature=0.0`,
+   `max_new_tokens=256`.
+3. Writes `<output-dir>/judge_sanity_generations.jsonl`. If that file
+   already has 50 entries, generation is skipped entirely (idempotent re-run).
+4. Scores each `(prompt, output)` against both `rubrics/faithfulness.yaml`
+   and `rubrics/instruction_following.yaml` via `GEvalJudge(OpenAIJudge())`.
+   `EvaluationCase.reference` is left as `None`: the goal is equivalent-
+   quality cross-backend sanity, not perfect rubric semantics, and the
+   rubric's few-shot examples still carry references.
+5. Mutates `summary.json` atomically: sets `judge_pass_rate` to the mean of
+   the per-rubric pass rates, adds a `judge_breakdown` sub-field
+   `{faithfulness: <rate>, instruction_following: <rate>}`, and removes the
+   deferred-reason entry from `metric_unavailable_reasons`.
+
+Any failure in generation or scoring is caught and recorded in
+`metric_unavailable_reasons.judge_pass_rate`; `judge_pass_rate` stays `null`
+and the script exits 0. The training run is not considered failed.
+
+### Running from the bench wrapper
+
+Gated behind `--judge-sanity` (default off) so bench CI remains free:
+
+```bash
+./scripts/bench/run_local.sh \
+  --device mps \
+  --config configs/bench/qwen15b-lora.yaml \
+  --output-dir runs/bench-mps-$(date -u +%Y%m%dT%H%M%SZ) \
+  --judge-sanity
+```
+
+### Running standalone against an existing run
+
+```bash
+python3 scripts/bench/judge_sanity.py \
+  --summary runs/bench-mps-.../summary.json \
+  --config  configs/bench/qwen15b-lora.yaml \
+  --device  mps
+```
+
+Pass `--adapter-path <path>` to override the default (latest checkpoint
+under `<output-dir>/project/checkpoints/`).
+
+### Prompt source
+
+The initial `configs/bench/judge_sanity_prompts.jsonl` is a hand-authored
+synthetic placeholder (`judge_sanity_prompts_source: synthetic-placeholder-v1`)
+covering instruction-following, explanation, and creative styles. Replace
+with a sampled slice of a pinned public dataset (e.g. `databricks/dolly-15k`)
+before the first real bench run is logged — update the JSONL, the `.hash`
+file, the `bench.judge_sanity_prompts_hash`, and the
+`bench.judge_sanity_prompts_source` fields together.
+
 ## Environment variables
 
 | Variable                 | Required? | Purpose                                                                 |
@@ -150,9 +220,11 @@ without `--force` the script exits non-zero.
 ```
 
 `null` metric values always come paired with a `metric_unavailable_reasons`
-entry explaining why. `heldout_perplexity` and `judge_pass_rate` are always
-null in this runner; they are populated later by the eval (#9) and judge
-(#10) paths.
+entry explaining why. `heldout_perplexity` is populated later by the eval
+(#9) path. `judge_pass_rate` is populated in-place by the post-training
+judge-sanity step (see "Judge sanity" below) when `--judge-sanity` is passed;
+in that case a `judge_breakdown` sub-field is added with per-rubric pass
+rates.
 
 ### Peak-memory derivation
 

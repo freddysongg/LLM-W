@@ -73,6 +73,7 @@ class RunnerArgs:
     config_path: Path
     output_dir: Path
     repo_root: Path
+    run_judge_sanity: bool
 
 
 @dataclass
@@ -533,6 +534,41 @@ def _write_summary(
     tmp_path.rename(summary_path)
 
 
+def _invoke_judge_sanity(
+    *,
+    summary_path: Path,
+    config_path: Path,
+    repo_root: Path,
+    device: DeviceLiteral,
+    output_dir: Path,
+) -> int:
+    """Invoke scripts/bench/judge_sanity.py as a subprocess.
+
+    Runs in its own process so the judge step's ML imports (transformers,
+    peft) don't pollute the runner's import graph, and so a crash in the
+    best-effort scoring step cannot fail the trainer's summary write.
+    """
+    script_path = Path(__file__).resolve().parent / "judge_sanity.py"
+    command = [
+        sys.executable,
+        "-u",
+        str(script_path),
+        "--summary",
+        str(summary_path),
+        "--config",
+        str(config_path),
+        "--repo-root",
+        str(repo_root),
+        "--device",
+        device,
+        "--output-dir",
+        str(output_dir),
+    ]
+    env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+    completed = subprocess.run(command, env=env, check=False)
+    return completed.returncode
+
+
 def _spawn_trainer(
     *,
     command: list[str],
@@ -579,6 +615,16 @@ def _parse_args(*, argv: list[str]) -> RunnerArgs:
         default=None,
         help="Repo root (injected by run_local.sh; defaults to cwd).",
     )
+    parser.add_argument(
+        "--judge-sanity",
+        action="store_true",
+        help=(
+            "After a successful training run, invoke scripts/bench/judge_sanity.py "
+            "to generate 50 completions with the saved adapter and score them via "
+            "the Tier-2 G-Eval judge. Requires an OpenAI API key; costs a few cents "
+            "per invocation. Disabled by default so CI runs stay free."
+        ),
+    )
     parsed = parser.parse_args(argv)
 
     repo_root = Path(parsed.repo_root).resolve() if parsed.repo_root else Path.cwd()
@@ -593,6 +639,7 @@ def _parse_args(*, argv: list[str]) -> RunnerArgs:
         config_path=config_path,
         output_dir=output_dir,
         repo_root=repo_root,
+        run_judge_sanity=bool(parsed.judge_sanity),
     )
 
 
@@ -757,6 +804,20 @@ def run(*, argv: list[str]) -> int:
             "summary written but may be incomplete"
         )
         return 10
+
+    if args.run_judge_sanity:
+        judge_exit = _invoke_judge_sanity(
+            summary_path=summary_path,
+            config_path=args.config_path,
+            repo_root=args.repo_root,
+            device=args.device,
+            output_dir=args.output_dir,
+        )
+        if judge_exit != 0:
+            _eprint(
+                f"judge_sanity.py exited with code {judge_exit}; "
+                "summary.json may retain judge_pass_rate=null"
+            )
 
     return 0
 
