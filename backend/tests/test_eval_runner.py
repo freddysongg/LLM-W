@@ -4,7 +4,7 @@ import asyncio
 import hashlib
 import json
 from collections.abc import AsyncIterator, Callable
-from typing import Any
+from typing import Any, Literal, cast
 
 import pytest
 import yaml
@@ -20,8 +20,12 @@ from app.schemas.eval import EvaluationCase, Score
 from app.schemas.rubric import Rubric
 from app.services.eval.judge import JudgeError, JudgeProvider
 from app.services.eval_runner import (
+    EvalOrchestrationError,
+    RubricVersionNotFoundError,
+    _default_case_provider,
     create_eval_run_row,
     execute_eval_run,
+    recover_stale_eval_runs,
 )
 
 _TRIGGER_NO_UPDATE = """
@@ -89,7 +93,7 @@ def _build_score(
     per_criterion = {"claims_supported": verdict == "pass"}
     return Score(
         reasoning=reasoning,
-        verdict=verdict,  # type: ignore[arg-type]
+        verdict=cast(Literal["pass", "fail"], verdict),
         per_criterion=per_criterion,
         cost_usd=cost_usd,
         latency_ms=100,
@@ -310,7 +314,7 @@ async def test_cost_ceiling_terminates_and_emits_warning(
     async with engine_factory() as session:
         run_row = await session.get(EvalRun, eval_run_id)
         assert run_row is not None
-        assert run_row.status == "completed"
+        assert run_row.status == "cost_capped"
         assert run_row.total_cost_usd >= 0.015
 
 
@@ -353,15 +357,30 @@ async def test_judge_error_is_swallowed_and_run_continues(
 
     assert judge.successful_calls == 1
     case_events = [e for e in spy.events if e["event"] == "case_completed"]
+    case_failed_events = [e for e in spy.events if e["event"] == "case_failed"]
     run_events = [e for e in spy.events if e["event"] == "run_completed"]
     assert len(case_events) == 1
+    assert len(case_failed_events) == 1
     assert len(run_events) == 1
     assert run_events[0]["payload"]["totals"]["cases"] == 1
+    assert run_events[0]["payload"]["totals"]["failed_pairs"] == 1
 
     async with engine_factory() as session:
         run_row = await session.get(EvalRun, eval_run_id)
         assert run_row is not None
         assert run_row.status == "completed"
+        error_call_rows = (
+            await session.execute(
+                text(
+                    "SELECT tier, verdict FROM eval_calls "
+                    "WHERE eval_run_id = :rid AND tier = 'error'"
+                ),
+                {"rid": eval_run_id},
+            )
+        ).all()
+        assert len(error_call_rows) == 1
+        assert error_call_rows[0].tier == "error"
+        assert error_call_rows[0].verdict == "error"
 
 
 async def test_missing_rubric_version_marks_run_failed(
@@ -437,3 +456,145 @@ async def test_concurrent_event_delivery_does_not_block(
         event_bus.unsubscribe(event_type=f"project.{_PROJECT_ID}.ws", handler=_slow_handler)
 
     assert len(slow_invocations) >= 2
+
+
+class _UnexpectedlyRaisingJudge(JudgeProvider):
+    async def evaluate(self, *, case: EvaluationCase, rubric: Rubric) -> Score:
+        raise RuntimeError("unexpected failure outside JudgeError")
+
+
+async def test_unexpected_exception_marks_run_failed(
+    engine_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with engine_factory() as session:
+        await _seed_rubric_version(
+            session=session,
+            rubric_id="rubric_unexpected",
+            rubric_row_id="rubric-row-unexpected",
+            rubric_version_id="rv-unexpected",
+        )
+        eval_run = await create_eval_run_row(
+            session=session, training_run_id=None, max_cost_usd=None
+        )
+        eval_run_id = eval_run.id
+
+    spy = _EventSpy()
+    event_bus.subscribe(event_type=f"project.{_PROJECT_ID}.ws", handler=spy.handle)
+    try:
+        await execute_eval_run(
+            session_factory=engine_factory,
+            project_id=_PROJECT_ID,
+            eval_run_id=eval_run_id,
+            rubric_version_ids=["rv-unexpected"],
+            max_cost_usd=None,
+            judge_factory=lambda _r: _UnexpectedlyRaisingJudge(),
+            case_provider=_single_case(),
+        )
+    finally:
+        event_bus.unsubscribe(event_type=f"project.{_PROJECT_ID}.ws", handler=spy.handle)
+
+    run_events = [e for e in spy.events if e["event"] == "run_completed"]
+    assert len(run_events) == 1
+    assert run_events[0]["payload"]["status"] == "failed"
+
+    async with engine_factory() as session:
+        run_row = await session.get(EvalRun, eval_run_id)
+        assert run_row is not None
+        assert run_row.status == "failed"
+
+
+async def test_malformed_calibration_row_raises_orchestration_error(tmp_path: Any) -> None:
+    bad_file = tmp_path / "bad.jsonl"
+    bad_file.write_text("{not-json\n", encoding="utf-8")
+
+    from app.services import eval_runner as runner_module
+
+    original_path = runner_module._DEFAULT_CALIBRATION_PATH
+    runner_module._DEFAULT_CALIBRATION_PATH = bad_file
+    try:
+        with pytest.raises(EvalOrchestrationError) as exc_info:
+            await _default_case_provider()
+        assert "malformed calibration row 0" in str(exc_info.value)
+    finally:
+        runner_module._DEFAULT_CALIBRATION_PATH = original_path
+
+
+async def test_create_eval_run_row_raises_when_rubric_missing(
+    engine_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with engine_factory() as session:
+        with pytest.raises(RubricVersionNotFoundError):
+            await create_eval_run_row(
+                session=session,
+                training_run_id=None,
+                max_cost_usd=None,
+                rubric_version_ids=["rv-does-not-exist"],
+            )
+
+
+async def test_cost_capped_status_distinct_from_completed(
+    engine_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with engine_factory() as session:
+        await _seed_rubric_version(
+            session=session,
+            rubric_id="rubric_cap",
+            rubric_row_id="rubric-row-cap",
+            rubric_version_id="rv-cap",
+        )
+        eval_run = await create_eval_run_row(
+            session=session, training_run_id=None, max_cost_usd=0.015
+        )
+        eval_run_id = eval_run.id
+
+    async def _many_cases() -> list[EvaluationCase]:
+        return [EvaluationCase(prompt=f"Q{idx}", output=f"A{idx}") for idx in range(5)]
+
+    spy = _EventSpy()
+    event_bus.subscribe(event_type=f"project.{_PROJECT_ID}.ws", handler=spy.handle)
+    try:
+        judge = _ScriptedJudge(scripted_scores=[_build_score(cost_usd=0.01) for _ in range(5)])
+        await execute_eval_run(
+            session_factory=engine_factory,
+            project_id=_PROJECT_ID,
+            eval_run_id=eval_run_id,
+            rubric_version_ids=["rv-cap"],
+            max_cost_usd=0.015,
+            judge_factory=lambda _r: judge,
+            case_provider=_many_cases,
+        )
+    finally:
+        event_bus.unsubscribe(event_type=f"project.{_PROJECT_ID}.ws", handler=spy.handle)
+
+    run_events = [e for e in spy.events if e["event"] == "run_completed"]
+    assert len(run_events) == 1
+    assert run_events[0]["payload"]["status"] == "cost_capped"
+
+    async with engine_factory() as session:
+        run_row = await session.get(EvalRun, eval_run_id)
+        assert run_row is not None
+        assert run_row.status == "cost_capped"
+
+
+async def test_recover_stale_eval_runs_marks_running_as_failed(
+    engine_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with engine_factory() as session:
+        eval_run = await create_eval_run_row(
+            session=session, training_run_id=None, max_cost_usd=None
+        )
+        eval_run_id = eval_run.id
+        await session.rollback()
+        async with session.begin():
+            stuck = await session.get(EvalRun, eval_run_id)
+            assert stuck is not None
+            stuck.status = "running"
+
+    recovered = await recover_stale_eval_runs(session_factory=engine_factory)
+    assert recovered == 1
+
+    async with engine_factory() as session:
+        row = await session.get(EvalRun, eval_run_id)
+        assert row is not None
+        assert row.status == "failed"
+        assert row.completed_at is not None

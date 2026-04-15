@@ -23,7 +23,8 @@ from app.api.routes.suggestions import router as suggestions_router
 from app.api.websocket.handler import router as ws_router
 from app.api.websocket.stream import connection_manager
 from app.core.config import settings
-from app.core.database import create_tables
+from app.core.database import async_session_factory, create_tables
+from app.services.eval_runner import recover_stale_eval_runs
 from app.services.settings_service import _load_persisted_overrides
 from app.services.watchdog import recover_stale_runs
 
@@ -35,6 +36,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await create_tables()
     _load_persisted_overrides()
     await recover_stale_runs()
+    await recover_stale_eval_runs(session_factory=async_session_factory)
     await connection_manager.start_resource_poller()
     yield
     await connection_manager.stop_resource_poller()

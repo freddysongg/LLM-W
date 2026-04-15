@@ -234,3 +234,21 @@ async def test_create_eval_run_rejects_missing_rubrics(client: AsyncClient) -> N
         },
     )
     assert http_response.status_code == 422
+
+
+async def test_create_eval_run_returns_404_for_unknown_rubric_version(
+    client: AsyncClient,
+) -> None:
+    http_response = await client.post(
+        "/api/v1/eval/runs",
+        json={
+            "project_id": _PROJECT_ID,
+            "training_run_id": None,
+            "rubric_version_ids": ["rv-does-not-exist"],
+            "max_cost_usd": None,
+        },
+    )
+    assert http_response.status_code == 404
+    body = http_response.json()
+    assert body["error"]["code"] == "RUBRIC_VERSION_NOT_FOUND"
+    assert body["error"]["details"]["rubric_version_id"] == "rv-does-not-exist"
