@@ -4,46 +4,142 @@ A local-first LLM fine-tuning workbench with a research-backed observability and
 
 ## Architecture
 
+Four load-bearing boxes — **Observability Core** wires the other three together: the training runner writes events, the eval harness writes judgments, and the feedback loop turns failing cases into regression datasets that re-enter the eval harness. Deeper component, route, and table breakdowns live in [`docs/architecture.md`](docs/architecture.md).
+
+### System diagram
+
 ```mermaid
 flowchart LR
-    subgraph UI["Frontend (React + TS)"]
-        pages[Pages] --> hooks[Hooks]
-        hooks --> rest[REST client]
-        hooks --> ws[WS client]
+    subgraph UI["Frontend (React 19 + Vite)"]
+        pages["Pages<br/>runs · eval · datasets · models<br/>adapters · weights · compare · settings"]
+        restc["REST client<br/>(api/*.ts)"]
+        wsc["WS client<br/>(ws/client.ts)"]
+        pages --> restc
+        pages --> wsc
     end
 
-    subgraph API["Backend (FastAPI)"]
-        routes[api/routes] --> services
-        wsroutes[api/websocket] --> services
-        services --> adapters[Model adapters]
-        services --> orch[Run orchestrator]
-        services --> judge[Eval judge]
+    subgraph API["FastAPI backend"]
+        routes["api/routes<br/>projects · configs · models · datasets<br/>runs · artifacts · storage · suggestions<br/>eval · rubrics · settings · health"]
+        wsep["/ws/{project_id}<br/>channels: run_state · metrics · logs · system · eval"]
     end
 
-    subgraph Obs["Observability core"]
-        events[Event bus]
-        metrics[(SQLite metrics)]
-        artifacts[(Checkpoints / logs)]
+    subgraph Core["Observability Core"]
+        bus["Event bus<br/>(core/events.py)"]
+        conn["ConnectionManager<br/>per-channel routing + resource poller"]
+        db[("SQLite / aiosqlite<br/>runs · run_stages · metric_points<br/>eval_runs · eval_cases · eval_calls<br/>rubrics · rubric_versions<br/>projects · config_versions · artifacts")]
     end
 
-    subgraph Training["Training runner"]
-        trainer[Trainer subprocess]
-        accel[accelerate single / FSDP]
+    subgraph Svc["Services layer"]
+        orch["orchestrator<br/>14-stage lifecycle"]
+        disp["training_dispatcher<br/>local | modal"]
+        wd["watchdog<br/>heartbeat + rank-aware kill"]
+        sm["storage_manager<br/>atomic checkpoints"]
+        re["rule_engine"]
+        er["eval_runner"]
+    end
+
+    subgraph Train["Training runner (subprocess)"]
+        tr["trainer.py<br/>PyTorch + HF + PEFT + TRL<br/>accelerate (single / FSDP)"]
+        stdoutjson["stdout JSON events<br/>stage · metric · log · checkpoint"]
+        tr --> stdoutjson
+    end
+
+    subgraph Adapt["Model adapters"]
+        base["ModelAdapter (abstract)"]
+        clm["CausalLMAdapter"]
+        modal["cloud/modal_adapter (stubbed)"]
     end
 
     subgraph Eval["Eval harness"]
-        t1[Tier 1 — deterministic]
-        t2[Tier 2 — G-Eval CoT judge]
-        cp[ChainPoll variant]
-        t1 & t2 & cp --> replay[Replay / response hashes]
+        t1["Tier 1<br/>deterministic + OpenAI Moderation"]
+        t2["Tier 2 — G-Eval<br/>CoT · instructor · structured outputs"]
+        cp["ChainPoll N=3"]
+        oj["openai_judge (shared client)"]
+        rl["rubric_loader (versioned YAML)"]
+        rp["replay (eval_call → hash compare)"]
     end
 
-    rest & ws --> API
-    orch --> trainer --> accel
-    trainer --> events --> metrics
-    trainer --> artifacts
-    judge --> Eval
-    Eval -. failing cases .-> metrics
+    subgraph Loop["Feedback loop"]
+        fails["Failing cases<br/>(eval_calls.passed = false)"]
+        reg["Regression dataset"]
+    end
+
+    restc -->|HTTP| routes
+    wsc -->|WebSocket| wsep
+
+    routes --> Svc
+    wsep --> conn
+    conn --> bus
+
+    orch --> disp
+    disp -->|spawn| tr
+    stdoutjson -->|parsed| orch
+    orch --> bus
+    orch --> db
+    wd --> orch
+    sm --> db
+
+    orch --> Adapt
+    tr --> Adapt
+
+    routes --> er
+    er --> Eval
+    Eval --> db
+    Eval --> bus
+    t2 --> oj
+    cp --> oj
+    Eval --> rl
+
+    bus --> conn
+    conn -->|frames| wsc
+
+    fails -.-> reg
+    reg -.-> er
+    db --> fails
+```
+
+### Training-run lifecycle
+
+```mermaid
+sequenceDiagram
+    actor User as Browser
+    participant FE as Frontend
+    participant API as FastAPI routes
+    participant Orch as orchestrator
+    participant Disp as training_dispatcher
+    participant Sub as trainer subprocess
+    participant WD as watchdog
+    participant DB as SQLite
+    participant Bus as event bus
+    participant WS as WebSocket
+
+    User->>FE: start run (config version)
+    FE->>API: POST project runs
+    API->>Orch: start_run run_id
+    Orch->>DB: insert run + run_stages (14 stages)
+    Orch->>Disp: dispatch_training
+    Disp->>Sub: spawn app.services.trainer (stdout=PIPE)
+    Orch->>WD: register run heartbeat
+
+    par trainer → orchestrator (stdout JSON)
+        Sub-->>Orch: stage_enter / stage_complete
+        Sub-->>Orch: metric (loss, lr, tok/s, mem)
+        Sub-->>Orch: log line
+        Sub-->>Orch: checkpoint written (atomic: tmp → rename)
+    and watchdog polling
+        WD->>Sub: heartbeat ok?
+        WD-->>Orch: stall → cancel (rank-aware kill)
+    end
+
+    Orch->>DB: batch-insert metric_points, update run_stages
+    Orch->>Bus: publish project id ws channel=run_state or metrics or logs
+    Bus->>WS: route to subscribed client
+    WS-->>FE: frames (typed envelope)
+    FE->>User: live charts + log stream
+
+    Sub-->>Orch: final status
+    Orch->>DB: run.status = completed | failed | cancelled
+    Orch->>Bus: run_state terminal event
 ```
 
 ## Tech stack
@@ -118,6 +214,7 @@ Numbers are populated by the benchmarking workstream — same codepath, three de
 ## Docs
 
 - [`SPEC.md`](SPEC.md) — canonical product and technical specification (architecture, data models, REST/WS protocol, run lifecycle, failure recovery)
+- [`docs/architecture.md`](docs/architecture.md) — deeper architecture notes (routes, services, adapters, WS channels, SQLite tables, run lifecycle)
 - [`BENCHMARKS.md`](BENCHMARKS.md) — hardware benchmarking study (setup, system + quality metrics, cost governance, FSDP scaling)
 - [`EVAL.md`](EVAL.md) — two-tier LLM-as-Judge harness (rubrics, calibration methodology, replay, CI gate)
 - [`LICENSE`](LICENSE) — MIT
