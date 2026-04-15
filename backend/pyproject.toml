@@ -29,6 +29,9 @@ dependencies = [
     "jsonschema>=4.0.0",
 ]
 
+[project.scripts]
+llmw = "app.cli:main"
+
 [project.optional-dependencies]
 training = [
     "torch>=2.2.0",
