@@ -11,6 +11,7 @@ import AdaptersPage from "@/pages/adapters-page";
 import WeightsPage from "@/pages/weights-page";
 import RunsPage from "@/pages/runs-page";
 import ComparePage from "@/pages/compare-page";
+import EvalPage from "@/pages/eval-page";
 import SuggestionsPage from "@/pages/suggestions-page";
 import ArtifactsPage from "@/pages/artifacts-page";
 import SettingsPage from "@/pages/settings-page";
@@ -39,6 +40,7 @@ export default function App(): React.JSX.Element {
             <Route path="/weights" element={<WeightsPage />} />
             <Route path="/runs" element={<RunsPage />} />
             <Route path="/compare" element={<ComparePage />} />
+            <Route path="/eval" element={<EvalPage />} />
             <Route path="/suggestions" element={<SuggestionsPage />} />
             <Route path="/artifacts" element={<ArtifactsPage />} />
             <Route path="/settings" element={<SettingsPage />} />

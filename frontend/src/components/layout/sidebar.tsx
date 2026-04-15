@@ -9,6 +9,7 @@ import {
   Layers,
   Play,
   GitCompareArrows,
+  ClipboardCheck,
   Sparkles,
   Archive,
   Settings,
@@ -67,6 +68,7 @@ const NAV_GROUPS: ReadonlyArray<NavGroup> = [
     items: [
       { label: "Runs", path: "/runs", icon: Play },
       { label: "Compare", path: "/compare", icon: GitCompareArrows },
+      { label: "Evaluation", path: "/eval", icon: ClipboardCheck },
     ],
   },
   {
