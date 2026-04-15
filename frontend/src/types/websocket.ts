@@ -1,13 +1,13 @@
 import type { MetricName, RunStatus, StageName } from "./run";
 import type { ArtifactType } from "./artifact";
 
-export type WebSocketChannel = "run_state" | "metrics" | "logs" | "system";
+export type WebSocketChannel = "run_state" | "metrics" | "logs" | "system" | "eval";
 export type LogSeverity = "debug" | "info" | "warning" | "error" | "critical";
 
 export interface WebSocketEnvelope<T = unknown> {
   readonly channel: WebSocketChannel;
   readonly event: string;
-  readonly runId: string;
+  readonly runId: string | null;
   readonly timestamp: string;
   readonly payload: T;
 }

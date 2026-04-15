@@ -11,9 +11,11 @@ from fastapi.responses import JSONResponse
 from app.api.routes.artifacts import router as artifacts_router
 from app.api.routes.configs import router as configs_router
 from app.api.routes.datasets import router as datasets_router
+from app.api.routes.eval import router as eval_router
 from app.api.routes.health import router as health_router
 from app.api.routes.models import router as models_router
 from app.api.routes.projects import router as projects_router
+from app.api.routes.rubrics import router as rubrics_router
 from app.api.routes.runs import router as runs_router
 from app.api.routes.settings import router as settings_router
 from app.api.routes.storage import router as storage_router
@@ -62,6 +64,8 @@ app.include_router(runs_router)
 app.include_router(artifacts_router)
 app.include_router(storage_router)
 app.include_router(suggestions_router)
+app.include_router(eval_router)
+app.include_router(rubrics_router)
 app.include_router(ws_router)
 
 
