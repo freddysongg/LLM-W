@@ -282,8 +282,8 @@ class CloudLLMEngine(RecommendationEngine):
             if self._provider == "anthropic":
                 import anthropic
 
-                client = anthropic.Anthropic(api_key=self._api_key)
-                client.messages.create(
+                anthropic_client = anthropic.Anthropic(api_key=self._api_key)
+                anthropic_client.messages.create(
                     model=self._model_id,
                     max_tokens=1,
                     messages=[{"role": "user", "content": "ping"}],
@@ -291,8 +291,8 @@ class CloudLLMEngine(RecommendationEngine):
             elif self._provider in ("openai", "openai_compatible"):
                 import openai
 
-                client = openai.OpenAI(api_key=self._api_key, base_url=self._base_url)
-                client.chat.completions.create(
+                openai_client = openai.OpenAI(api_key=self._api_key, base_url=self._base_url)
+                openai_client.chat.completions.create(
                     model=self._model_id,
                     max_tokens=1,
                     messages=[{"role": "user", "content": "ping"}],

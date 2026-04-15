@@ -140,8 +140,8 @@ async def test_ai_connection() -> AITestResponse:
         if provider == "anthropic":
             import anthropic
 
-            client = anthropic.Anthropic(api_key=api_key)
-            client.messages.create(
+            anthropic_client = anthropic.Anthropic(api_key=api_key)
+            anthropic_client.messages.create(
                 model=model_id,
                 max_tokens=1,
                 messages=[{"role": "user", "content": "ping"}],
@@ -154,8 +154,8 @@ async def test_ai_connection() -> AITestResponse:
                 if provider == "openai"
                 else current.ai_base_url
             )
-            client = openai.OpenAI(api_key=api_key, base_url=base_url)
-            client.chat.completions.create(
+            openai_client = openai.OpenAI(api_key=api_key, base_url=base_url)
+            openai_client.chat.completions.create(
                 model=model_id,
                 max_tokens=1,
                 messages=[{"role": "user", "content": "ping"}],
