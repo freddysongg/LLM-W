@@ -30,7 +30,7 @@ class ConfigVersionResponse(BaseModel):
         if v is None:
             return None
         if isinstance(v, str):
-            return json.loads(v)  # type: ignore[no-any-return]
+            return json.loads(v)
         return v
 
 

@@ -245,7 +245,7 @@ class CloudLLMEngine(RecommendationEngine):
                 raise ValueError(f"Anthropic API error {exc.status_code}: {exc.message}") from exc
             block = response.content[0]
             if hasattr(block, "text"):
-                return block.text  # type: ignore[no-any-return]
+                return block.text
             raise ValueError("Unexpected Anthropic response content type")
 
         return await asyncio.get_running_loop().run_in_executor(None, _sync_call)

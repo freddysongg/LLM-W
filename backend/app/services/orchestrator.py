@@ -917,7 +917,7 @@ async def resume_run(*, session: AsyncSession, project_id: str, run_id: str) -> 
             import psutil
 
             try:
-                psutil.Process(proc.pid).resume()  # type: ignore[union-attr]
+                psutil.Process(proc.pid).resume()
             except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
                 pass
             else:
