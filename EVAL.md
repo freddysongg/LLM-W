@@ -78,4 +78,10 @@ Full training-run replay is explicitly out of scope for v4.
 
 `llmw eval --config eval.yaml` is the CI entry point. GitHub Actions workflow at `.github/workflows/eval-gate.yml` runs on every PR that touches training or rubric files. Gate passes iff every **calibrated** rubric meets its per-rubric threshold in `eval.yaml` (default 0.80) AND no rubric regresses by more than 5pp versus the prior run. Cost is capped per-run via `max_cost_usd` in the config; cap exceeded aborts cleanly with a partial-results flush and `eval_runs.status = 'aborted_cost_cap'`.
 
-Training lifecycle stage 11 (`evaluation` in `orchestrator.py`) remains a reserved no-op placeholder. Evaluation runs are triggered manually — via the UI button or CLI — never automatically at the end of a training run.
+## Training Lifecycle Integration
+
+**Stage 11 of the 14-stage training lifecycle is the `evaluation` stage. In v4 it is a reserved no-op placeholder — training emits `stage_enter` and `stage_complete` events for stage 11 but performs no work. Evaluation is triggered manually via the UI button or `llmw eval` CLI, never automatically at training completion.**
+
+This is deliberate reservation, not a missing feature. The v4 improvement plan addresses risk R-15 ("Stage 11 'evaluation' placeholder is misleading in 14-stage claim") by requiring explicit state-transition emission even in the no-op path. The "14-stage instrumented" claim remains honest because stage 11 does emit lifecycle events — the stage appears in every run's timeline with `output_summary = "reserved no-op; v4 eval runs manually via UI or CLI"` and `duration_ms = 0`.
+
+The unconditional emission lives in `backend/app/services/trainer.py` in the main run sequence, placed between `training_start` (stage 9 / 10) and `artifact_finalization` (stage 13). Orchestrator-side stage ordering is defined in `backend/app/services/orchestrator.py` (`_STAGE_ORDER`). No code path in the trainer or orchestrator auto-triggers the eval harness at run completion; the separation keeps training deterministic and eval cost visible to the operator.

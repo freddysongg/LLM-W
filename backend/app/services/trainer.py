@@ -1069,6 +1069,16 @@ def main() -> int:
                 k: float(v) for k, v in last_log.items() if isinstance(v, (int, float))
             }
 
+        # Stage 11 is a reserved no-op placeholder in v4: eval runs manually
+        # via the UI button or `llmw eval` CLI, never inline at training
+        # completion. The emission keeps the 14-stage timeline contract honest.
+        _emit_stage_enter(stage_name="evaluation", stage_order=11)
+        _emit_stage_complete(
+            stage_name="evaluation",
+            duration_ms=0,
+            output_summary="reserved no-op; v4 eval runs manually via UI or CLI",
+        )
+
         heartbeat_state["stage"] = "artifact_finalization"
         _stage_artifact_finalization(trainer=trainer, project_dir=project_dir)
 
