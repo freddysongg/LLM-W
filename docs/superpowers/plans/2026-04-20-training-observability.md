@@ -30,7 +30,7 @@
 - `backend/tests/test_weight_snapshots.py`
 
 ### Backend — modify
-- `backend/app/services/config_service.py` — public `compute_config_diff`, `serialize_effective_config_yaml`
+- `backend/app/services/config_service.py` — public `compute_config_diff`, `serialize_config_yaml_snapshot`
 - `backend/app/services/orchestrator.py` — `_write_config_snapshot`, retention lifecycle hooks, new event handlers (`model_profile`, `weight_stats`), metric-names service
 - `backend/app/services/run_service.py` — `get_config_snapshot`, `list_metric_names`, `get_run_summary`, `get_model_profile`, `list_weight_snapshots`
 - `backend/app/services/storage_manager.py` — rename `_apply_retention_for_run` → `apply_retention_for_run` (remove underscore); add `apply_retention_after_checkpoint(*, session, run_id)` convenience wrapper
@@ -147,7 +147,7 @@ from app.core.database import Base, get_db_session
 from app.main import app
 from app.services.config_service import (
     compute_config_diff,
-    serialize_effective_config_yaml,
+    serialize_config_yaml_snapshot,
 )
 
 
@@ -178,8 +178,8 @@ def test_compute_config_diff_reports_changed_and_added() -> None:
     assert diff["removed"] == {}
 
 
-def test_serialize_effective_config_yaml_round_trips() -> None:
-    out = serialize_effective_config_yaml(raw_yaml=_BASE_YAML)
+def test_serialize_config_yaml_snapshot_round_trips() -> None:
+    out = serialize_config_yaml_snapshot(raw_yaml=_BASE_YAML)
     assert "project:" in out
     assert "learning_rate: 0.0002" in out
 ```
@@ -187,7 +187,7 @@ def test_serialize_effective_config_yaml_round_trips() -> None:
 - [ ] **1.4 Run failing test**
 
 Run: `cd backend && pytest tests/test_config_snapshot.py -v`
-Expected: ImportError on `compute_config_diff` / `serialize_effective_config_yaml`.
+Expected: ImportError on `compute_config_diff` / `serialize_config_yaml_snapshot`.
 
 - [ ] **1.5 Implement helpers**
 
@@ -216,7 +216,7 @@ def compute_config_diff(*, old_yaml: str, new_yaml: str) -> dict[str, Any]:
     return _compute_diff(old, new)
 
 
-def serialize_effective_config_yaml(*, raw_yaml: str) -> str:
+def serialize_config_yaml_snapshot(*, raw_yaml: str) -> str:
     from app.schemas.workbench_config import WorkbenchConfig
 
     raw = yaml.safe_load(raw_yaml)
@@ -239,7 +239,7 @@ Run: `cd backend && ruff check app/services/config_service.py`
 
 ```bash
 git add backend/app/services/config_service.py backend/tests/test_config_snapshot.py
-git commit -m "add: compute_config_diff and serialize_effective_config_yaml public helpers in config_service"
+git commit -m "add: compute_config_diff and serialize_config_yaml_snapshot public helpers in config_service"
 ```
 
 ---
@@ -332,7 +332,7 @@ In `backend/app/services/orchestrator.py`, near `_record_artifact`, add:
 from pathlib import Path
 
 from app.core.config import settings
-from app.services.config_service import serialize_effective_config_yaml
+from app.services.config_service import serialize_config_yaml_snapshot
 
 
 async def _write_config_snapshot(
@@ -345,7 +345,7 @@ async def _write_config_snapshot(
     run_dir = Path(settings.projects_dir) / project_id / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     snapshot_path = run_dir / "config.yaml"
-    effective_yaml = serialize_effective_config_yaml(raw_yaml=config_yaml)
+    effective_yaml = serialize_config_yaml_snapshot(raw_yaml=config_yaml)
     snapshot_path.write_text(effective_yaml, encoding="utf-8")
 
     artifact = Artifact(
