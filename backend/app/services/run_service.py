@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
-from sqlalchemy import func, select
+from sqlalchemy import distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import (
@@ -35,7 +35,7 @@ from app.schemas.run import (
     RunResumeResponse,
     RunStageResponse,
 )
-from app.schemas.run_observability import ConfigDiff, ConfigSnapshotResponse
+from app.schemas.run_observability import ConfigDiff, ConfigSnapshotResponse, MetricNamesResponse
 from app.services.config_service import compute_config_diff
 
 _CANCELLABLE_STATUSES = frozenset({"pending", "running", "paused"})
@@ -340,6 +340,22 @@ async def get_config_snapshot(
         yaml=snapshot_yaml,
         diff=ConfigDiff(**diff_dict),
     )
+
+
+async def list_metric_names(
+    *,
+    session: AsyncSession,
+    project_id: str,
+    run_id: str,
+) -> MetricNamesResponse:
+    await get_run(session=session, run_id=run_id, project_id=project_id)
+    result = await session.execute(
+        select(distinct(MetricPoint.metric_name))
+        .where(MetricPoint.run_id == run_id)
+        .order_by(MetricPoint.metric_name)
+    )
+    names = [row[0] for row in result.all()]
+    return MetricNamesResponse(metric_names=names)
 
 
 async def compare_runs(

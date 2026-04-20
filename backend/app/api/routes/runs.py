@@ -24,7 +24,7 @@ from app.schemas.run import (
     RunResumeResponse,
     RunStageResponse,
 )
-from app.schemas.run_observability import ConfigSnapshotResponse
+from app.schemas.run_observability import ConfigSnapshotResponse, MetricNamesResponse
 from app.services import orchestrator, run_service
 from app.services.project_service import get_project
 from app.services.training_dispatcher import UnsupportedEnvironmentError
@@ -276,6 +276,28 @@ async def get_run_metrics(
         limit=limit,
     )
     return [MetricPointResponse.model_validate(mp) for mp in metric_points]
+
+
+@router.get(
+    "/{project_id}/runs/{run_id}/metrics/names",
+    response_model=MetricNamesResponse,
+)
+async def list_run_metric_names(
+    project_id: str,
+    run_id: str,
+    session: DbSession,
+) -> MetricNamesResponse:
+    try:
+        return await run_service.list_metric_names(
+            session=session,
+            project_id=project_id,
+            run_id=run_id,
+        )
+    except RunNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "RUN_NOT_FOUND", "message": str(exc), "details": {}},
+        ) from exc
 
 
 @router.get("/{project_id}/runs/{run_id}/checkpoints", response_model=list[CheckpointResponse])
