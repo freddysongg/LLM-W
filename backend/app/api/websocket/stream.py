@@ -174,9 +174,10 @@ class ConnectionManager:
                 raw = _collect_system_resources()
                 resource_payload = {
                     "gpuMemoryUsedMb": raw["gpu_memory_used_mb"],
-                    "gpuUtilizationPct": raw["gpu_utilization_pct"],
+                    "vramTotalMb": raw["vram_total_mb"],
                     "cpuPct": raw["cpu_pct"],
                     "ramUsedMb": raw["ram_used_mb"],
+                    "ramTotalMb": raw["ram_total_mb"],
                 }
             except Exception:
                 logger.exception("failed to collect system resources")
@@ -196,30 +197,30 @@ class ConnectionManager:
                 )
 
 
-def _collect_system_resources() -> dict[str, float]:
+def _collect_system_resources() -> dict[str, float | None]:
     cpu_pct = psutil.cpu_percent(interval=None)
     ram = psutil.virtual_memory()
-    ram_used_mb = ram.used / (1024 * 1024)
 
     gpu_memory_used_mb = 0.0
-    gpu_utilization_pct = 0.0
+    vram_total_mb: float | None = None
 
     try:
         import torch  # noqa: PLC0415
 
         if torch.cuda.is_available():
             gpu_memory_used_mb = torch.cuda.memory_allocated() / (1024 * 1024)
-            # utilization not reliably available without pynvml
+            vram_total_mb = torch.cuda.get_device_properties(0).total_memory / (1024 * 1024)
         elif torch.backends.mps.is_available():
             gpu_memory_used_mb = torch.mps.current_allocated_memory() / (1024 * 1024)
-    except Exception:
+    except Exception:  # noqa: BLE001
         pass
 
     return {
         "gpu_memory_used_mb": gpu_memory_used_mb,
-        "gpu_utilization_pct": gpu_utilization_pct,
+        "vram_total_mb": vram_total_mb,
         "cpu_pct": cpu_pct,
-        "ram_used_mb": ram_used_mb,
+        "ram_used_mb": ram.used / (1024 * 1024),
+        "ram_total_mb": ram.total / (1024 * 1024),
     }
 
 
