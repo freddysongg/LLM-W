@@ -19,9 +19,10 @@ export interface RunStreamState {
   readonly liveMetrics: ReadonlyArray<MetricPoint>;
   readonly systemResources: {
     readonly gpuMemoryUsedMb: number;
-    readonly gpuUtilizationPct: number;
+    readonly vramTotalMb: number | null;
     readonly cpuPct: number;
     readonly ramUsedMb: number;
+    readonly ramTotalMb: number;
   } | null;
   readonly liveCheckpoints: ReadonlyArray<Checkpoint>;
   readonly progressPct: number | null;
@@ -115,9 +116,10 @@ export function useRunStream({
           const payload = envelope.payload as ResourceUpdatePayload;
           setSystemResources({
             gpuMemoryUsedMb: payload.gpuMemoryUsedMb,
-            gpuUtilizationPct: payload.gpuUtilizationPct,
+            vramTotalMb: payload.vramTotalMb,
             cpuPct: payload.cpuPct,
             ramUsedMb: payload.ramUsedMb,
+            ramTotalMb: payload.ramTotalMb,
           });
         }
         if (envelope.event === "checkpoint_saved") {

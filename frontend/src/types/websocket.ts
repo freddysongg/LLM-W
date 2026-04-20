@@ -89,9 +89,10 @@ export interface LogBatchPayload {
 
 export interface ResourceUpdatePayload {
   readonly gpuMemoryUsedMb: number;
-  readonly gpuUtilizationPct: number;
+  readonly vramTotalMb: number | null;
   readonly cpuPct: number;
   readonly ramUsedMb: number;
+  readonly ramTotalMb: number;
 }
 
 export interface CheckpointSavedPayload {
