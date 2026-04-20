@@ -4,6 +4,8 @@ import { Sidebar } from "./sidebar";
 import { Topbar } from "./topbar";
 import { RightDrawer } from "./right-drawer";
 import { BottomPanel } from "./bottom-panel";
+import { CommandPalette } from "./command-palette";
+import { TweaksPanel } from "./tweaks-panel";
 import { useAppStore } from "@/stores/app-store";
 import { useGlobalShortcuts } from "@/hooks/use-global-shortcuts";
 import { getRouteSlug } from "@/lib/nav";
@@ -52,6 +54,8 @@ export function AppShell(): React.JSX.Element {
         <BottomPanel />
       </div>
       <RightDrawer />
+      <CommandPalette />
+      <TweaksPanel />
     </div>
   );
 }

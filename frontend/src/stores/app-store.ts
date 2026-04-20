@@ -56,6 +56,7 @@ interface AppState {
   readonly bottomPanelHeight: number;
   readonly navGroupExpanded: NavGroupExpandedState;
   readonly isCommandPaletteOpen: boolean;
+  readonly isTweaksPanelOpen: boolean;
   readonly modelForm: ModelFormState;
   readonly datasetForm: DatasetFormState;
 }
@@ -70,6 +71,7 @@ interface AppActions {
   setBottomPanelHeight: (height: number) => void;
   toggleNavGroup: (group: NavGroupKey) => void;
   setCommandPaletteOpen: (open: boolean) => void;
+  setTweaksPanelOpen: (open: boolean) => void;
   setModelForm: (updates: Partial<ModelFormState>) => void;
   setDatasetForm: (updates: Partial<DatasetFormState>) => void;
 }
@@ -126,6 +128,7 @@ export const useAppStore = create<AppStore>()(
       bottomPanelHeight: 200,
       navGroupExpanded: DEFAULT_NAV_GROUP_EXPANDED,
       isCommandPaletteOpen: false,
+      isTweaksPanelOpen: false,
       modelForm: DEFAULT_MODEL_FORM,
       datasetForm: DEFAULT_DATASET_FORM,
 
@@ -167,6 +170,7 @@ export const useAppStore = create<AppStore>()(
           },
         })),
       setCommandPaletteOpen: (open) => set({ isCommandPaletteOpen: open }),
+      setTweaksPanelOpen: (open) => set({ isTweaksPanelOpen: open }),
       setModelForm: (updates) =>
         set((state) => ({ modelForm: { ...state.modelForm, ...updates } })),
       setDatasetForm: (updates) =>
