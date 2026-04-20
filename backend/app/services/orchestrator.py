@@ -31,6 +31,7 @@ from app.models.run_stage import RunStage
 from app.schemas.run import RunCreate, RunResponse
 from app.schemas.workbench_config import ExecutionConfig
 from app.services import suggestion_service
+from app.services.config_service import serialize_config_yaml_snapshot
 from app.services.training_dispatcher import (
     TrainingProcess,
     UnsupportedEnvironmentError,
@@ -202,6 +203,13 @@ async def create_run(
     await session.commit()
     await session.refresh(run)
 
+    await _write_config_snapshot(
+        session=session,
+        run_id=run.id,
+        project_id=project_id,
+        config_yaml=config_version.yaml_blob,
+    )
+
     await event_bus.publish(
         event_type=f"project.{project_id}.ws",
         payload={
@@ -372,6 +380,33 @@ async def _record_artifact(
         )
         session.add(artifact)
         await session.commit()
+
+
+async def _write_config_snapshot(
+    *,
+    session: AsyncSession,
+    run_id: str,
+    project_id: str,
+    config_yaml: str,
+) -> None:
+    run_dir = Path(settings.projects_dir) / project_id / "runs" / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    snapshot_path = run_dir / "config.yaml"
+    effective_yaml = serialize_config_yaml_snapshot(raw_yaml=config_yaml)
+    snapshot_path.write_text(effective_yaml, encoding="utf-8")
+
+    artifact = Artifact(
+        id=str(uuid.uuid4()),
+        run_id=run_id,
+        project_id=project_id,
+        artifact_type="config_snapshot",
+        file_path=str(snapshot_path),
+        file_size_bytes=snapshot_path.stat().st_size,
+        is_retained=1,
+        created_at=datetime.now(UTC).isoformat(),
+    )
+    session.add(artifact)
+    await session.commit()
 
 
 async def _process_trainer_event(

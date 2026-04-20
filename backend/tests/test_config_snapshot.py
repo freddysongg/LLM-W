@@ -1,8 +1,16 @@
 from __future__ import annotations
 
-import pytest
+from pathlib import Path
 
+import pytest
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+from app.core.database import Base, get_db_session
 from app.core.exceptions import ConfigValidationError
+from app.main import app
+from app.models.artifact import Artifact
 from app.services.config_service import (
     compute_config_diff,
     serialize_config_yaml_snapshot,
@@ -67,3 +75,64 @@ def test_serialize_config_yaml_snapshot_rejects_non_mapping() -> None:
 def test_serialize_config_yaml_snapshot_wraps_yaml_parse_errors() -> None:
     with pytest.raises(ConfigValidationError):
         serialize_config_yaml_snapshot(raw_yaml=": :: : bad")
+
+
+@pytest.fixture
+async def db_session():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as session:
+        yield session
+    await engine.dispose()
+
+
+@pytest.fixture
+async def client(db_session, tmp_path, monkeypatch):
+    from app.core import config as cfg_module
+
+    monkeypatch.setattr(cfg_module.settings, "projects_dir", tmp_path)
+
+    async def override_db():
+        yield db_session
+
+    app.dependency_overrides[get_db_session] = override_db
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        yield c
+    app.dependency_overrides.clear()
+
+
+async def test_create_run_writes_config_snapshot_artifact(
+    client: AsyncClient,
+    db_session,
+    tmp_path: Path,
+) -> None:
+    project_response = await client.post(
+        "/api/v1/projects", json={"name": "snap", "description": ""}
+    )
+    project = project_response.json()
+    run_response = await client.post(
+        f"/api/v1/projects/{project['id']}/runs",
+        json={"config_version_id": project["active_config_version_id"], "name": "r"},
+    )
+    run = run_response.json()
+
+    expected = tmp_path / project["id"] / "runs" / run["id"] / "config.yaml"
+    assert expected.exists()
+
+    rows = (
+        (
+            await db_session.execute(
+                select(Artifact).where(
+                    Artifact.run_id == run["id"],
+                    Artifact.artifact_type == "config_snapshot",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1
+    assert rows[0].file_path == str(expected)
+    assert rows[0].is_retained == 1
