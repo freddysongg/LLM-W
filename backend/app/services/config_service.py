@@ -260,8 +260,11 @@ def compute_config_diff(*, old_yaml: str, new_yaml: str) -> dict[str, Any]:
     }
 
 
-def serialize_effective_config_yaml(*, raw_yaml: str) -> str:
-    parsed = yaml.safe_load(raw_yaml)
+def serialize_config_yaml_snapshot(*, raw_yaml: str) -> str:
+    try:
+        parsed = yaml.safe_load(raw_yaml)
+    except yaml.YAMLError as exc:
+        raise ConfigValidationError(str(exc)) from exc
     if not isinstance(parsed, dict):
         raise ConfigValidationError("Config must be a YAML mapping")
     return yaml.safe_dump(parsed, sort_keys=False)
