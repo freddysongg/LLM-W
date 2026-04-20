@@ -1,25 +1,25 @@
 import * as React from "react";
-import type { AdaptersConfig, OptimizationConfig, QuantizationConfig } from "@/types/config";
 import type {
+  AdaptersConfig,
+  OptimizationConfig,
+  QuantizationConfig,
   AdapterType,
-  BiasMode,
-  OptimizerType,
-  SchedulerType,
-  MixedPrecisionMode,
   QuantMode,
-  QuantType,
+  QuantComputeDtype,
+  MixedPrecisionMode,
 } from "@/types/config";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
+import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Chip } from "@/components/shared/chip";
+import { KVList } from "@/components/shared/kv-list";
+import { EffectiveShapeDiagram } from "@/components/adapters/effective-shape-diagram";
+import { VramBudgetBar, type VramSegment } from "@/components/adapters/vram-budget-bar";
+import { cn } from "@/lib/utils";
+
+export type AdaptersFormSection = "lora" | "quantization" | "memory" | "all";
 
 interface AdaptersFormProps {
   readonly adapters: AdaptersConfig;
@@ -28,6 +28,59 @@ interface AdaptersFormProps {
   readonly onAdaptersChange: (updates: Partial<AdaptersConfig>) => void;
   readonly onOptimizationChange: (updates: Partial<OptimizationConfig>) => void;
   readonly onQuantizationChange: (updates: Partial<QuantizationConfig>) => void;
+  readonly section?: AdaptersFormSection;
+  readonly assumedHiddenDim?: number;
+}
+
+interface SegmentOption<T extends string> {
+  readonly value: T;
+  readonly label: string;
+}
+
+interface SegmentedControlProps<T extends string> {
+  readonly value: T;
+  readonly onChange: (next: T) => void;
+  readonly options: ReadonlyArray<SegmentOption<T>>;
+  readonly ariaLabel: string;
+}
+
+function SegmentedControl<T extends string>({
+  value,
+  onChange,
+  options,
+  ariaLabel,
+}: SegmentedControlProps<T>): React.JSX.Element {
+  return (
+    <div
+      role="radiogroup"
+      aria-label={ariaLabel}
+      className="inline-flex items-center gap-0.5 rounded-full border border-hairline bg-surface-2 p-[3px]"
+    >
+      {options.map(({ value: optionValue, label }) => {
+        const isActive = value === optionValue;
+        return (
+          <button
+            key={optionValue}
+            type="button"
+            role="radio"
+            aria-checked={isActive}
+            onClick={() => onChange(optionValue)}
+            className={cn(
+              "inline-flex items-center rounded-full px-2.5 py-1",
+              "font-mono text-[10px] uppercase leading-none tracking-[0.08em]",
+              "transition-colors duration-[var(--dur-1)]",
+              "focus-visible:outline-none focus-visible:[box-shadow:var(--focus-ring)]",
+              isActive
+                ? "bg-ink-1 text-[color:var(--surface)]"
+                : "text-ink-2 hover:bg-surface-3 hover:text-ink-1",
+            )}
+          >
+            {label}
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 const TARGET_MODULE_PRESETS: ReadonlyArray<string> = [
@@ -40,18 +93,80 @@ const TARGET_MODULE_PRESETS: ReadonlyArray<string> = [
   "down_proj",
 ];
 
-export function AdaptersForm({
+const ADAPTER_TYPE_OPTIONS: ReadonlyArray<SegmentOption<AdapterType>> = [
+  { value: "lora", label: "LoRA" },
+  { value: "qlora", label: "QLoRA" },
+];
+
+const QUANT_MODE_OPTIONS: ReadonlyArray<SegmentOption<QuantMode>> = [
+  { value: "4bit", label: "4-bit" },
+  { value: "8bit", label: "8-bit" },
+];
+
+const COMPUTE_DTYPE_OPTIONS: ReadonlyArray<SegmentOption<QuantComputeDtype>> = [
+  { value: "float16", label: "fp16" },
+  { value: "bfloat16", label: "bf16" },
+];
+
+const MIXED_PRECISION_OPTIONS: ReadonlyArray<SegmentOption<MixedPrecisionMode>> = [
+  { value: "no", label: "fp32" },
+  { value: "bf16", label: "bf16" },
+  { value: "fp16", label: "fp16" },
+];
+
+const DEFAULT_HIDDEN_DIM = 1536;
+
+function computeTrainablePercentage({
   adapters,
+  hiddenDim,
+}: {
+  readonly adapters: AdaptersConfig;
+  readonly hiddenDim: number;
+}): number {
+  if (!adapters.enabled) return 0;
+  const moduleCount = (adapters.targetModules ?? []).length;
+  if (moduleCount === 0) return 0;
+  const approxTotal = hiddenDim * hiddenDim * 28;
+  const approxTrainable = adapters.rank * hiddenDim * 2 * moduleCount * 28;
+  return approxTotal > 0 ? (approxTrainable / (approxTotal * 28)) * 100 : 0;
+}
+
+function resolveVramSegments({
   optimization,
-  quantization,
+}: {
+  readonly optimization: OptimizationConfig;
+}): ReadonlyArray<VramSegment> {
+  return [
+    { label: "Weights (bf16)", gb: 3.1, color: "oklch(0.82 0.13 310)" },
+    {
+      label: "Gradients",
+      gb: optimization.gradientCheckpointing ? 0.8 : 3.1,
+      color: "oklch(0.80 0.14 260)",
+    },
+    { label: "Optimizer", gb: 3.1, color: "oklch(0.88 0.14 150)" },
+    {
+      label: "Activations",
+      gb: optimization.gradientCheckpointing ? 2.0 : 6.8,
+      color: "oklch(0.86 0.11 200)",
+    },
+  ];
+}
+
+interface LoRaSectionProps {
+  readonly adapters: AdaptersConfig;
+  readonly onAdaptersChange: (updates: Partial<AdaptersConfig>) => void;
+  readonly hiddenDim: number;
+}
+
+function LoRaSection({
+  adapters,
   onAdaptersChange,
-  onOptimizationChange,
-  onQuantizationChange,
-}: AdaptersFormProps): React.JSX.Element {
-  const [customModule, setCustomModule] = React.useState("");
+  hiddenDim,
+}: LoRaSectionProps): React.JSX.Element {
+  const selectedModules = adapters.targetModules ?? [];
 
   const toggleTargetModule = (module: string): void => {
-    const current = new Set(adapters.targetModules ?? []);
+    const current = new Set(selectedModules);
     if (current.has(module)) {
       current.delete(module);
     } else {
@@ -60,20 +175,14 @@ export function AdaptersForm({
     onAdaptersChange({ targetModules: Array.from(current) });
   };
 
-  const addCustomModule = (): void => {
-    const trimmed = customModule.trim();
-    const currentModules = adapters.targetModules ?? [];
-    if (trimmed && !currentModules.includes(trimmed)) {
-      onAdaptersChange({ targetModules: [...currentModules, trimmed] });
-      setCustomModule("");
-    }
-  };
+  const trainablePercentage = computeTrainablePercentage({ adapters, hiddenDim });
+  const alphaRatio = adapters.rank > 0 ? (adapters.alpha / adapters.rank).toFixed(2) : "—";
 
   return (
-    <div className="space-y-6">
+    <div className="grid gap-4 lg:grid-cols-2">
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm">Adapters (PEFT)</CardTitle>
+          <CardTitle>LoRA parameters</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-center gap-3">
@@ -82,279 +191,286 @@ export function AdaptersForm({
               checked={adapters.enabled}
               onCheckedChange={(val) => onAdaptersChange({ enabled: val })}
             />
-            <Label htmlFor="adapter-toggle">Enable Adapters</Label>
+            <Label htmlFor="adapter-toggle" className="font-mono text-[11px] text-ink-2">
+              Enable adapters
+            </Label>
           </div>
 
-          {adapters.enabled && (
-            <>
-              <div className="space-y-2">
-                <Label htmlFor="adapter-type">Adapter Type</Label>
-                <Select
-                  value={adapters.type}
-                  onValueChange={(val) => onAdaptersChange({ type: val as AdapterType })}
-                >
-                  <SelectTrigger id="adapter-type">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="lora">LoRA</SelectItem>
-                    <SelectItem value="qlora">QLoRA</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+          <div className="space-y-1.5">
+            <Label className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3">
+              Type
+            </Label>
+            <SegmentedControl
+              value={adapters.type}
+              onChange={(next) => onAdaptersChange({ type: next })}
+              options={ADAPTER_TYPE_OPTIONS}
+              ariaLabel="Adapter type"
+            />
+          </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="lora-rank">Rank (r)</Label>
-                  <Input
-                    id="lora-rank"
-                    type="number"
-                    min="1"
-                    step="1"
-                    value={adapters.rank}
-                    onChange={(e) => onAdaptersChange({ rank: Number(e.target.value) })}
-                  />
-                </div>
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <Label className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3">
+                Rank (r)
+              </Label>
+              <span className="font-mono text-[11px] text-ink-1">{adapters.rank}</span>
+            </div>
+            <Slider
+              value={[adapters.rank]}
+              min={4}
+              max={128}
+              step={4}
+              onValueChange={([value]) => onAdaptersChange({ rank: value })}
+            />
+          </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="lora-alpha">Alpha</Label>
-                  <Input
-                    id="lora-alpha"
-                    type="number"
-                    min="1"
-                    step="1"
-                    value={adapters.alpha}
-                    onChange={(e) => onAdaptersChange({ alpha: Number(e.target.value) })}
-                  />
-                </div>
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <Label className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3">
+                Alpha (α)
+              </Label>
+              <span className="font-mono text-[11px] text-ink-1">{adapters.alpha}</span>
+            </div>
+            <Slider
+              value={[adapters.alpha]}
+              min={4}
+              max={128}
+              step={4}
+              onValueChange={([value]) => onAdaptersChange({ alpha: value })}
+            />
+          </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="lora-dropout">Dropout</Label>
-                  <Input
-                    id="lora-dropout"
-                    type="number"
-                    min="0"
-                    max="1"
-                    step="0.01"
-                    value={adapters.dropout}
-                    onChange={(e) => onAdaptersChange({ dropout: Number(e.target.value) })}
-                  />
-                </div>
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <Label className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3">
+                Dropout
+              </Label>
+              <span className="font-mono text-[11px] text-ink-1">
+                {adapters.dropout.toFixed(2)}
+              </span>
+            </div>
+            <Slider
+              value={[adapters.dropout]}
+              min={0}
+              max={0.3}
+              step={0.01}
+              onValueChange={([value]) => onAdaptersChange({ dropout: value })}
+            />
+          </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="lora-bias">Bias</Label>
-                  <Select
-                    value={adapters.bias}
-                    onValueChange={(val) => onAdaptersChange({ bias: val as BiasMode })}
-                  >
-                    <SelectTrigger id="lora-bias">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
-                      <SelectItem value="all">All</SelectItem>
-                      <SelectItem value="lora_only">LoRA Only</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Target Modules</Label>
-                <div className="flex flex-wrap gap-2">
-                  {TARGET_MODULE_PRESETS.map((module) => (
-                    <button
-                      key={module}
-                      type="button"
-                      onClick={() => toggleTargetModule(module)}
-                      className={`px-2 py-1 text-xs rounded border transition-colors ${
-                        (adapters.targetModules ?? []).includes(module)
-                          ? "bg-primary text-primary-foreground border-primary"
-                          : "bg-background border-input hover:bg-accent"
-                      }`}
-                    >
-                      {module}
-                    </button>
-                  ))}
-                </div>
-                {(adapters.targetModules ?? [])
-                  .filter((m) => !TARGET_MODULE_PRESETS.includes(m))
-                  .map((module) => (
-                    <div key={module} className="flex items-center gap-2">
-                      <span className="text-xs font-mono bg-muted px-2 py-1 rounded">{module}</span>
-                      <button
-                        type="button"
-                        onClick={() => toggleTargetModule(module)}
-                        className="text-xs text-destructive hover:underline"
-                      >
-                        remove
-                      </button>
-                    </div>
-                  ))}
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="custom_module_name"
-                    value={customModule}
-                    onChange={(e) => setCustomModule(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        addCustomModule();
-                      }
-                    }}
-                    className="text-xs h-8"
-                  />
-                  <button
-                    type="button"
-                    onClick={addCustomModule}
-                    className="px-3 text-xs rounded border border-input hover:bg-accent"
-                  >
-                    Add
-                  </button>
-                </div>
-              </div>
-            </>
-          )}
+          <div className="space-y-2">
+            <Label className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3">
+              Target modules
+            </Label>
+            <div className="flex flex-wrap gap-1.5">
+              {TARGET_MODULE_PRESETS.map((module) => (
+                <Chip
+                  key={module}
+                  label={module}
+                  isOn={selectedModules.includes(module)}
+                  onToggle={() => toggleTargetModule(module)}
+                />
+              ))}
+            </div>
+          </div>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm">Optimizer &amp; Scheduler</CardTitle>
+          <CardTitle>Effective shape</CardTitle>
+          <Badge variant="iris" dot={false}>
+            {trainablePercentage.toFixed(2)}% trainable
+          </Badge>
         </CardHeader>
-        <CardContent className="grid grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="optimizer">Optimizer</Label>
-            <Select
-              value={optimization.optimizer}
-              onValueChange={(val) => onOptimizationChange({ optimizer: val as OptimizerType })}
-            >
-              <SelectTrigger id="optimizer">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="adamw">AdamW</SelectItem>
-                <SelectItem value="adam">Adam</SelectItem>
-                <SelectItem value="sgd">SGD</SelectItem>
-                <SelectItem value="adafactor">Adafactor</SelectItem>
-                <SelectItem value="paged_adamw_8bit">Paged AdamW 8-bit</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+        <CardContent className="space-y-4">
+          <EffectiveShapeDiagram rank={adapters.rank} hiddenDim={hiddenDim} />
+          <KVList
+            rows={[
+              { key: "Rank (r)", value: adapters.rank.toString() },
+              { key: "Alpha (α)", value: adapters.alpha.toString() },
+              { key: "α / r", value: alphaRatio },
+              { key: "Targets", value: selectedModules.join(", ") || "—" },
+            ]}
+          />
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
 
-          <div className="space-y-2">
-            <Label htmlFor="scheduler">LR Scheduler</Label>
-            <Select
-              value={optimization.scheduler}
-              onValueChange={(val) => onOptimizationChange({ scheduler: val as SchedulerType })}
-            >
-              <SelectTrigger id="scheduler">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="cosine">Cosine</SelectItem>
-                <SelectItem value="linear">Linear</SelectItem>
-                <SelectItem value="constant">Constant</SelectItem>
-                <SelectItem value="constant_with_warmup">Constant with Warmup</SelectItem>
-                <SelectItem value="cosine_with_restarts">Cosine with Restarts</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+interface QuantizationSectionProps {
+  readonly quantization: QuantizationConfig;
+  readonly onQuantizationChange: (updates: Partial<QuantizationConfig>) => void;
+}
 
-          <div className="space-y-2">
-            <Label htmlFor="warmup-ratio">Warmup Ratio</Label>
-            <Input
-              id="warmup-ratio"
-              type="number"
-              min="0"
-              max="1"
-              step="0.01"
-              value={optimization.warmupRatio}
-              onChange={(e) => onOptimizationChange({ warmupRatio: Number(e.target.value) })}
-            />
-          </div>
+function QuantizationSection({
+  quantization,
+  onQuantizationChange,
+}: QuantizationSectionProps): React.JSX.Element {
+  const bitsLabel = quantization.mode === "4bit" ? "4" : "8";
+  const weightsSizeGb = (1.54 * (quantization.mode === "4bit" ? 4 : 8)) / 8;
+  const expectedQuality = quantization.mode === "4bit" ? "~1% degradation" : "lossless";
 
-          <div className="space-y-2">
-            <Label htmlFor="mixed-precision">Mixed Precision</Label>
-            <Select
-              value={optimization.mixedPrecision}
-              onValueChange={(val) =>
-                onOptimizationChange({ mixedPrecision: val as MixedPrecisionMode })
-              }
-            >
-              <SelectTrigger id="mixed-precision">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="no">None</SelectItem>
-                <SelectItem value="fp16">fp16</SelectItem>
-                <SelectItem value="bf16">bf16</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Quantization</CardTitle>
+        <Badge variant="iris" dot={false}>
+          {bitsLabel}-bit
+        </Badge>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex items-center gap-3">
+          <Switch
+            id="quant-toggle"
+            checked={quantization.enabled}
+            onCheckedChange={(val) => onQuantizationChange({ enabled: val })}
+          />
+          <Label htmlFor="quant-toggle" className="font-mono text-[11px] text-ink-2">
+            Enable quantization
+          </Label>
+        </div>
 
-          <div className="col-span-2 flex items-center gap-3">
+        <div className="space-y-1.5">
+          <Label className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3">
+            Weight precision
+          </Label>
+          <SegmentedControl
+            value={quantization.mode}
+            onChange={(next) => onQuantizationChange({ mode: next })}
+            options={QUANT_MODE_OPTIONS}
+            ariaLabel="Weight precision"
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3">
+            Compute dtype
+          </Label>
+          <SegmentedControl
+            value={quantization.computeDtype}
+            onChange={(next) => onQuantizationChange({ computeDtype: next })}
+            options={COMPUTE_DTYPE_OPTIONS}
+            ariaLabel="Compute dtype"
+          />
+        </div>
+
+        <KVList
+          rows={[
+            { key: "Weights size", value: `${weightsSizeGb.toFixed(2)} GB` },
+            { key: "VRAM (est)", value: `${(weightsSizeGb + 6).toFixed(1)} GB` },
+            { key: "Quality", value: expectedQuality },
+            { key: "Double quant", value: quantization.doubleQuant ? "yes" : "no" },
+          ]}
+        />
+      </CardContent>
+    </Card>
+  );
+}
+
+interface MemorySectionProps {
+  readonly optimization: OptimizationConfig;
+  readonly onOptimizationChange: (updates: Partial<OptimizationConfig>) => void;
+}
+
+function MemorySection({
+  optimization,
+  onOptimizationChange,
+}: MemorySectionProps): React.JSX.Element {
+  const segments = resolveVramSegments({ optimization });
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-2">
+      <Card>
+        <CardHeader>
+          <CardTitle>Memory strategies</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="grad-checkpoint" className="font-mono text-[11px] text-ink-2">
+              Gradient checkpointing
+            </Label>
             <Switch
               id="grad-checkpoint"
               checked={optimization.gradientCheckpointing}
               onCheckedChange={(val) => onOptimizationChange({ gradientCheckpointing: val })}
             />
-            <Label htmlFor="grad-checkpoint">Gradient Checkpointing</Label>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3">
+              Mixed precision
+            </Label>
+            <SegmentedControl
+              value={optimization.mixedPrecision}
+              onChange={(next) => onOptimizationChange({ mixedPrecision: next })}
+              options={MIXED_PRECISION_OPTIONS}
+              ariaLabel="Mixed precision"
+            />
           </div>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm">Quantization</CardTitle>
+          <CardTitle>VRAM budget</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center gap-3">
-            <Switch
-              id="quant-toggle"
-              checked={quantization.enabled}
-              onCheckedChange={(val) => onQuantizationChange({ enabled: val })}
-            />
-            <Label htmlFor="quant-toggle">Enable Quantization</Label>
-          </div>
-
-          {quantization.enabled && (
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="quant-mode">Mode</Label>
-                <Select
-                  value={quantization.mode}
-                  onValueChange={(val) => onQuantizationChange({ mode: val as QuantMode })}
-                >
-                  <SelectTrigger id="quant-mode">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="4bit">4-bit</SelectItem>
-                    <SelectItem value="8bit">8-bit</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="quant-type">Quant Type</Label>
-                <Select
-                  value={quantization.quantType}
-                  onValueChange={(val) => onQuantizationChange({ quantType: val as QuantType })}
-                >
-                  <SelectTrigger id="quant-type">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="nf4">nf4</SelectItem>
-                    <SelectItem value="fp4">fp4</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          )}
+        <CardContent>
+          <VramBudgetBar segments={segments} totalGb={40} />
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+export function AdaptersForm({
+  adapters,
+  optimization,
+  quantization,
+  onAdaptersChange,
+  onOptimizationChange,
+  onQuantizationChange,
+  section = "all",
+  assumedHiddenDim = DEFAULT_HIDDEN_DIM,
+}: AdaptersFormProps): React.JSX.Element {
+  if (section === "lora") {
+    return (
+      <LoRaSection
+        adapters={adapters}
+        onAdaptersChange={onAdaptersChange}
+        hiddenDim={assumedHiddenDim}
+      />
+    );
+  }
+
+  if (section === "quantization") {
+    return (
+      <QuantizationSection
+        quantization={quantization}
+        onQuantizationChange={onQuantizationChange}
+      />
+    );
+  }
+
+  if (section === "memory") {
+    return (
+      <MemorySection optimization={optimization} onOptimizationChange={onOptimizationChange} />
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <LoRaSection
+        adapters={adapters}
+        onAdaptersChange={onAdaptersChange}
+        hiddenDim={assumedHiddenDim}
+      />
+      <QuantizationSection
+        quantization={quantization}
+        onQuantizationChange={onQuantizationChange}
+      />
+      <MemorySection optimization={optimization} onOptimizationChange={onOptimizationChange} />
     </div>
   );
 }

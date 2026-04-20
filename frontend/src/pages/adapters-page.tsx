@@ -1,7 +1,9 @@
 import * as React from "react";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { Check, RefreshCw } from "lucide-react";
 import { useAppStore } from "@/stores/app-store";
 import { useActiveConfig, useSaveConfig } from "@/hooks/useConfigs";
+import { useModelArchitecture } from "@/hooks/useModelArchitecture";
 import { AdaptersForm } from "@/components/adapters/adapters-form";
 import { AdaptersPresetsPanel } from "@/components/adapters/adapters-presets-panel";
 import type { AdaptersPresetValues } from "@/components/adapters/adapters-presets-panel";
@@ -16,20 +18,46 @@ import type {
   QuantizationConfig,
   WorkbenchConfig,
 } from "@/types/config";
+import type { LayerNode, ModelArchitectureResponse } from "@/types/model";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
+
+type AdaptersTab = "lora" | "quantization" | "memory";
+
+const DEFAULT_HIDDEN_DIM = 1536;
+
+function findEmbeddingDim(node: LayerNode): number | null {
+  if (node.type.toLowerCase().includes("embedding") && node.shape && node.shape.length >= 2) {
+    return node.shape[1];
+  }
+  for (const child of node.children ?? []) {
+    const match = findEmbeddingDim(child);
+    if (match !== null) return match;
+  }
+  return null;
+}
+
+function deriveHiddenDim({
+  architecture,
+}: {
+  readonly architecture: ModelArchitectureResponse | undefined;
+}): number {
+  if (!architecture) return DEFAULT_HIDDEN_DIM;
+  return findEmbeddingDim(architecture.tree) ?? DEFAULT_HIDDEN_DIM;
+}
 
 export default function AdaptersPage(): React.JSX.Element {
   const { activeProjectId } = useAppStore();
   const { toast } = useToast();
+  const [activeTab, setActiveTab] = React.useState<AdaptersTab>("lora");
   const {
     data: configVersion,
     isLoading,
     error,
-  } = useActiveConfig({
-    projectId: activeProjectId ?? "",
-  });
+  } = useActiveConfig({ projectId: activeProjectId ?? "" });
   const saveConfig = useSaveConfig({ projectId: activeProjectId ?? "" });
+  const { data: architecture } = useModelArchitecture({ projectId: activeProjectId ?? "" });
 
   const [localAdapters, setLocalAdapters] = React.useState<AdaptersConfig | null>(null);
   const [localOptimization, setLocalOptimization] = React.useState<OptimizationConfig | null>(null);
@@ -55,6 +83,8 @@ export default function AdaptersPage(): React.JSX.Element {
     }
   }, [parsedConfig, localAdapters]);
 
+  const hiddenDim = React.useMemo(() => deriveHiddenDim({ architecture }), [architecture]);
+
   const handleSave = (): void => {
     if (!parsedConfig || !localAdapters || !localOptimization || !localQuantization) return;
     const updated: WorkbenchConfig = {
@@ -72,19 +102,17 @@ export default function AdaptersPage(): React.JSX.Element {
         },
       },
       {
-        onSuccess: () => {
+        onSuccess: () =>
           toast({
             title: "Config saved",
             description: "Adapters & Optimization configuration saved successfully.",
-          });
-        },
-        onError: () => {
+          }),
+        onError: () =>
           toast({
             title: "Save failed",
             description: "Failed to save adapters configuration.",
             variant: "destructive",
-          });
-        },
+          }),
       },
     );
   };
@@ -105,6 +133,17 @@ export default function AdaptersPage(): React.JSX.Element {
     }
   };
 
+  const handleResetToParsed = (): void => {
+    if (!parsedConfig) return;
+    setLocalAdapters({
+      ...parsedConfig.adapters,
+      targetModules: parsedConfig.adapters.targetModules ?? [],
+    });
+    setLocalOptimization(parsedConfig.optimization);
+    setLocalQuantization(parsedConfig.quantization);
+    toast({ title: "Reset", description: "Reverted to last saved configuration." });
+  };
+
   if (!activeProjectId) {
     return (
       <NoProjectSelected
@@ -115,55 +154,128 @@ export default function AdaptersPage(): React.JSX.Element {
   }
 
   return (
-    <div className="p-6 flex gap-8 items-start">
-      <div className="flex-1 max-w-2xl space-y-4">
-        <div className="flex items-center justify-between">
-          <h1 className="text-xl font-semibold">Adapters &amp; Optimization</h1>
-          <div className="flex items-center gap-2">
-            {localAdapters && localOptimization && localQuantization && (
-              <CopyForAI
-                buildPrompt={() =>
-                  buildAdaptersPrompt({
-                    adapters: localAdapters,
-                    optimization: localOptimization,
-                    quantization: localQuantization,
-                  })
-                }
-              />
-            )}
-            {localAdapters && (
-              <Button onClick={handleSave} disabled={saveConfig.isPending} size="sm">
-                {saveConfig.isPending ? "Saving…" : "Save Config"}
-              </Button>
-            )}
-          </div>
+    <div className="flex h-full flex-col">
+      <div className="flex h-14 items-center justify-between border-b border-hairline px-6">
+        <div>
+          <h1 className="font-mono text-[16px] font-semibold tracking-tight text-ink-1">
+            Adapters &amp; Optimization
+          </h1>
+          <p className="font-mono text-[11px] text-ink-3">
+            LoRA · Quantization · Memory strategies
+          </p>
         </div>
-
-        {isLoading && <div className="text-sm text-muted-foreground">Loading config…</div>}
-        {error && <div className="text-sm text-destructive">Failed to load config.</div>}
-
-        {localAdapters && localOptimization && localQuantization && (
-          <>
-            <TrainableParamsPreview adapters={localAdapters} projectId={activeProjectId} />
-            <AdaptersForm
-              adapters={localAdapters}
-              optimization={localOptimization}
-              quantization={localQuantization}
-              onAdaptersChange={(updates) =>
-                setLocalAdapters((prev) => (prev ? { ...prev, ...updates } : null))
-              }
-              onOptimizationChange={(updates) =>
-                setLocalOptimization((prev) => (prev ? { ...prev, ...updates } : null))
-              }
-              onQuantizationChange={(updates) =>
-                setLocalQuantization((prev) => (prev ? { ...prev, ...updates } : null))
+        <div className="flex items-center gap-2">
+          {localAdapters && localOptimization && localQuantization && (
+            <CopyForAI
+              buildPrompt={() =>
+                buildAdaptersPrompt({
+                  adapters: localAdapters,
+                  optimization: localOptimization,
+                  quantization: localQuantization,
+                })
               }
             />
-          </>
-        )}
+          )}
+          {parsedConfig && (
+            <Button variant="outline" size="sm" onClick={handleResetToParsed}>
+              <RefreshCw className="size-3" aria-hidden="true" />
+              Reset
+            </Button>
+          )}
+          {localAdapters && (
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={handleSave}
+              disabled={saveConfig.isPending}
+            >
+              <Check className="size-3" aria-hidden="true" />
+              {saveConfig.isPending ? "Saving…" : "Save"}
+            </Button>
+          )}
+        </div>
       </div>
 
-      {localAdapters && <AdaptersPresetsPanel onApply={handlePresetApply} />}
+      <div className="flex-1 overflow-y-auto p-6">
+        {isLoading && <p className="font-mono text-[11px] text-ink-3">Loading config…</p>}
+        {error && (
+          <p className="font-mono text-[11px] text-[color:var(--danger)]">Failed to load config.</p>
+        )}
+
+        {localAdapters && localOptimization && localQuantization && (
+          <div className="flex gap-6">
+            <div className="flex-1 space-y-4">
+              <TrainableParamsPreview adapters={localAdapters} projectId={activeProjectId} />
+              <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as AdaptersTab)}>
+                <TabsList>
+                  <TabsTrigger value="lora">LoRA</TabsTrigger>
+                  <TabsTrigger value="quantization">Quantization</TabsTrigger>
+                  <TabsTrigger value="memory">Memory</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="lora">
+                  <AdaptersForm
+                    section="lora"
+                    adapters={localAdapters}
+                    optimization={localOptimization}
+                    quantization={localQuantization}
+                    onAdaptersChange={(updates) =>
+                      setLocalAdapters((prev) => (prev ? { ...prev, ...updates } : null))
+                    }
+                    onOptimizationChange={(updates) =>
+                      setLocalOptimization((prev) => (prev ? { ...prev, ...updates } : null))
+                    }
+                    onQuantizationChange={(updates) =>
+                      setLocalQuantization((prev) => (prev ? { ...prev, ...updates } : null))
+                    }
+                    assumedHiddenDim={hiddenDim}
+                  />
+                </TabsContent>
+
+                <TabsContent value="quantization">
+                  <AdaptersForm
+                    section="quantization"
+                    adapters={localAdapters}
+                    optimization={localOptimization}
+                    quantization={localQuantization}
+                    onAdaptersChange={(updates) =>
+                      setLocalAdapters((prev) => (prev ? { ...prev, ...updates } : null))
+                    }
+                    onOptimizationChange={(updates) =>
+                      setLocalOptimization((prev) => (prev ? { ...prev, ...updates } : null))
+                    }
+                    onQuantizationChange={(updates) =>
+                      setLocalQuantization((prev) => (prev ? { ...prev, ...updates } : null))
+                    }
+                    assumedHiddenDim={hiddenDim}
+                  />
+                </TabsContent>
+
+                <TabsContent value="memory">
+                  <AdaptersForm
+                    section="memory"
+                    adapters={localAdapters}
+                    optimization={localOptimization}
+                    quantization={localQuantization}
+                    onAdaptersChange={(updates) =>
+                      setLocalAdapters((prev) => (prev ? { ...prev, ...updates } : null))
+                    }
+                    onOptimizationChange={(updates) =>
+                      setLocalOptimization((prev) => (prev ? { ...prev, ...updates } : null))
+                    }
+                    onQuantizationChange={(updates) =>
+                      setLocalQuantization((prev) => (prev ? { ...prev, ...updates } : null))
+                    }
+                    assumedHiddenDim={hiddenDim}
+                  />
+                </TabsContent>
+              </Tabs>
+            </div>
+
+            <AdaptersPresetsPanel onApply={handlePresetApply} />
+          </div>
+        )}
+      </div>
     </div>
   );
 }

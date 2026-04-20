@@ -7,6 +7,7 @@ export interface RunRowProps {
   readonly isHeader?: boolean;
   readonly onClick?: () => void;
   readonly className?: string;
+  readonly style?: React.CSSProperties;
 }
 
 export function RunRow({
@@ -15,6 +16,7 @@ export function RunRow({
   isHeader = false,
   onClick,
   className,
+  style,
 }: RunRowProps): React.JSX.Element {
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
     if (!onClick) return;
@@ -31,6 +33,7 @@ export function RunRow({
       onClick={onClick}
       onKeyDown={onClick ? handleKeyDown : undefined}
       aria-selected={onClick ? selected : undefined}
+      style={style}
       className={cn(
         "group relative grid items-center gap-3 border-b border-hairline px-3 py-2",
         "transition-colors duration-[var(--dur-1)]",
