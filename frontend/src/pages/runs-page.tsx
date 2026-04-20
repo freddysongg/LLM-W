@@ -19,6 +19,7 @@ import { useSettings } from "@/hooks/useSettings";
 import { useRunStream } from "@/hooks/useRunStream";
 import { ActiveRunBanner } from "@/components/runs/active-run-banner";
 import { CheckpointList } from "@/components/runs/checkpoint-list";
+import { ConfigSnapshotTab } from "@/components/runs/config-snapshot-tab";
 import { EnvironmentSelector } from "@/components/runs/environment-selector";
 import { FailurePanel } from "@/components/runs/failure-panel";
 import { LiveMetricsCharts } from "@/components/runs/live-metrics-charts";
@@ -362,6 +363,7 @@ export default function RunsPage(): React.JSX.Element {
               <TabsTrigger value="metrics">Metrics</TabsTrigger>
               <TabsTrigger value="logs">Logs</TabsTrigger>
               <TabsTrigger value="system">System</TabsTrigger>
+              <TabsTrigger value="config">Config</TabsTrigger>
               <TabsTrigger value="ckpts">
                 Checkpoints
                 {allCheckpoints.length > 0 ? (
@@ -393,6 +395,16 @@ export default function RunsPage(): React.JSX.Element {
 
             <TabsContent value="system">
               <SystemResourceMonitor resources={streamState.systemResources} />
+            </TabsContent>
+
+            <TabsContent value="config" className="space-y-3">
+              {activeProjectId && selectedRunId ? (
+                <ConfigSnapshotTab projectId={activeProjectId} runId={selectedRunId} />
+              ) : (
+                <div className="text-xs text-muted-foreground">
+                  Select a run to view its config.
+                </div>
+              )}
             </TabsContent>
 
             <TabsContent value="ckpts">
