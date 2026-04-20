@@ -501,7 +501,7 @@ async def test_get_config_snapshot_404_for_missing_run(client: AsyncClient) -> N
     project = (await client.post("/api/v1/projects", json={"name": "n", "description": ""})).json()
     resp = await client.get(f"/api/v1/projects/{project['id']}/runs/bogus/config-snapshot")
     assert resp.status_code == 404
-    assert resp.json()["detail"]["code"] == "RUN_NOT_FOUND"
+    assert resp.json()["error"]["code"] == "RUN_NOT_FOUND"
 ```
 
 - [ ] **4.3 Run failing tests**
