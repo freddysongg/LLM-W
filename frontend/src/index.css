@@ -252,6 +252,27 @@
   .page-fade {
     animation: fade-up var(--dur-2) var(--ease-out) both;
   }
+
+  .btn-primary-shimmer {
+    position: relative;
+    overflow: hidden;
+  }
+  .btn-primary-shimmer::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in oklch, var(--iris-3) 40%, transparent),
+      transparent
+    );
+    transform: translateX(-100%);
+    pointer-events: none;
+  }
+  .btn-primary-shimmer:hover::after {
+    animation: shimmer-sheen 900ms ease-out;
+  }
 }
 
 [data-motion="off"] *,
