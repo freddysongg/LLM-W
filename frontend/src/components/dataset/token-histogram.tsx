@@ -6,6 +6,7 @@ interface TokenHistogramProps {
 }
 
 const BIN_COUNT = 16;
+const AXIS_SCALE: ReadonlyArray<number> = [0, 256, 512, 1024, 2048];
 
 function buildSyntheticDensity({
   mean,
@@ -34,9 +35,14 @@ export function TokenHistogram({ stats }: TokenHistogramProps): React.JSX.Elemen
   const chartWidth = 480;
   const chartHeight = 120;
   const baseline = 110;
+  const leftPad = 10;
+  const plotWidth = chartWidth - leftPad * 2;
   const barSlot = chartWidth / BIN_COUNT;
   const barWidth = barSlot - 8;
   const maxBarHeight = 88;
+
+  const visibleAxisTicks = AXIS_SCALE.filter((tick) => tick >= min && tick <= max);
+  const axisRange = Math.max(1, max - min);
 
   return (
     <svg
@@ -47,7 +53,7 @@ export function TokenHistogram({ stats }: TokenHistogramProps): React.JSX.Elemen
     >
       {densities.map((density, i) => {
         const barHeight = (density / peak) * maxBarHeight;
-        const x = 10 + i * barSlot;
+        const x = leftPad + i * barSlot;
         const y = baseline - barHeight;
         const mix = 40 + i * 3;
         return (
@@ -62,24 +68,24 @@ export function TokenHistogram({ stats }: TokenHistogramProps): React.JSX.Elemen
           />
         );
       })}
-      {binCenters
-        .filter((_, i) => i === 0 || i === Math.floor(BIN_COUNT / 2) || i === BIN_COUNT - 1)
-        .map((center, i, arr) => {
-          const anchors: ReadonlyArray<"start" | "middle" | "end"> = ["start", "middle", "end"];
-          return (
-            <text
-              key={center}
-              x={10 + (i / (arr.length - 1)) * (chartWidth - 20)}
-              y={118}
-              fontFamily="var(--font-mono)"
-              fontSize={10}
-              fill="var(--ink-3)"
-              textAnchor={anchors[i]}
-            >
-              {Math.round(center).toLocaleString()}
-            </text>
-          );
-        })}
+      {visibleAxisTicks.map((tick, i) => {
+        const xPos = leftPad + ((tick - min) / axisRange) * plotWidth;
+        const anchor: "start" | "middle" | "end" =
+          i === 0 ? "start" : i === visibleAxisTicks.length - 1 ? "end" : "middle";
+        return (
+          <text
+            key={tick}
+            x={xPos}
+            y={118}
+            fontFamily="var(--font-mono)"
+            fontSize={10}
+            fill="var(--ink-3)"
+            textAnchor={anchor}
+          >
+            {tick.toLocaleString()}
+          </text>
+        );
+      })}
     </svg>
   );
 }

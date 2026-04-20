@@ -1,16 +1,17 @@
 import * as React from "react";
-import { Eye, Plus } from "lucide-react";
+import { Download, Eye, Plus } from "lucide-react";
 import { useAppStore } from "@/stores/app-store";
 import { useDatasetProfile, useResolveDataset } from "@/hooks/useDatasetProfile";
 import { useDatasetSamples, usePreviewTransform } from "@/hooks/useDatasetSamples";
+import { useToast } from "@/hooks/use-toast";
 import type {
   DatasetProfile,
   DatasetResolveRequest,
   PreviewTransformResponse,
 } from "@/types/dataset";
+import type { DatasetFormat, DatasetSource } from "@/types/config";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -18,6 +19,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Slider } from "@/components/ui/slider";
 import { DatasetSourceSelector } from "@/components/dataset/dataset-source-selector";
 import { DatasetIdInput } from "@/components/dataset/dataset-id-input";
 import { FormatSelector } from "@/components/dataset/format-selector";
@@ -34,22 +45,106 @@ import { RunRow, RunRowCell } from "@/components/shared/run-row";
 import { KVList } from "@/components/shared/kv-list";
 import { CodeBlock } from "@/components/shared/code-block";
 import { Callout } from "@/components/shared/callout";
+import { BigMetric } from "@/components/shared/big-metric";
+import { RangePills } from "@/components/shared/range-pills";
 
-type DialogKind = "add" | "validate" | "inspect" | null;
+type DialogKind = "add" | "validate" | "inspect" | "splits" | null;
+
+type LibraryFormatFilter = "all" | "chatml" | "alpaca" | "paired";
+
+type AddDatasetSplitMode = "auto" | "manual" | "single";
 
 interface LibraryEntry {
   readonly name: string;
-  readonly format: string;
+  readonly format: DatasetFormat;
   readonly rows: string;
   readonly size: string;
   readonly isFrozen: boolean;
   readonly isActive: boolean;
 }
 
+interface AddDatasetDraft {
+  readonly source: DatasetSource;
+  readonly path: string;
+  readonly format: DatasetFormat;
+  readonly splitMode: AddDatasetSplitMode;
+}
+
+interface SplitDraft {
+  readonly train: number;
+  readonly val: number;
+  readonly test: number;
+  readonly seed: number;
+}
+
+interface BuildLibraryParams {
+  readonly profile: DatasetProfile | null;
+}
+
+interface ApplyTrainRatioParams {
+  readonly train: number;
+  readonly current: SplitDraft;
+}
+
 const LIBRARY_ROW_COLUMNS = "18px minmax(0,1fr) 72px 64px 32px";
 
 const LIBRARY_ROW_STYLE: React.CSSProperties = {
   gridTemplateColumns: LIBRARY_ROW_COLUMNS,
+};
+
+const FORMAT_FILTER_OPTIONS: ReadonlyArray<{
+  readonly value: LibraryFormatFilter;
+  readonly label: string;
+}> = [
+  { value: "all", label: "ALL" },
+  { value: "chatml", label: "CHATML" },
+  { value: "alpaca", label: "ALPACA" },
+  { value: "paired", label: "PAIRED" },
+];
+
+const ADD_SOURCE_OPTIONS: ReadonlyArray<{
+  readonly value: DatasetSource;
+  readonly label: string;
+  readonly placeholder: string;
+}> = [
+  { value: "huggingface", label: "HuggingFace", placeholder: "HuggingFaceH4/ultrachat_200k" },
+  { value: "local_jsonl", label: "Local JSONL", placeholder: "data/train.jsonl" },
+  { value: "local_csv", label: "Local CSV", placeholder: "data/train.csv" },
+  { value: "custom", label: "Custom", placeholder: "path/to/dataset" },
+];
+
+const ADD_FORMAT_OPTIONS: ReadonlyArray<{
+  readonly value: DatasetFormat;
+  readonly label: string;
+}> = [
+  { value: "default", label: "default (auto-detect)" },
+  { value: "sharegpt", label: "sharegpt" },
+  { value: "openai", label: "openai" },
+  { value: "alpaca", label: "alpaca" },
+  { value: "custom", label: "custom" },
+];
+
+const SPLIT_MODE_OPTIONS: ReadonlyArray<{
+  readonly value: AddDatasetSplitMode;
+  readonly label: string;
+}> = [
+  { value: "auto", label: "auto" },
+  { value: "manual", label: "manual" },
+  { value: "single", label: "single" },
+];
+
+const DEFAULT_ADD_DRAFT: AddDatasetDraft = {
+  source: "huggingface",
+  path: "",
+  format: "default",
+  splitMode: "auto",
+};
+
+const DEFAULT_SPLIT_DRAFT: SplitDraft = {
+  train: 90,
+  val: 8,
+  test: 2,
+  seed: 42,
 };
 
 function formatRowCount(count: number): string {
@@ -63,11 +158,7 @@ function estimateSizeLabel(totalRows: number): string {
   return `${totalRows} rows`;
 }
 
-function buildLibraryEntries({
-  profile,
-}: {
-  readonly profile: DatasetProfile | null;
-}): ReadonlyArray<LibraryEntry> {
+function buildLibraryEntries({ profile }: BuildLibraryParams): ReadonlyArray<LibraryEntry> {
   if (!profile) return [];
   return [
     {
@@ -81,12 +172,39 @@ function buildLibraryEntries({
   ];
 }
 
+function computeStddev(stats: {
+  readonly mean: number;
+  readonly median: number;
+  readonly min: number;
+  readonly max: number;
+}): number {
+  const { mean, median, min, max } = stats;
+  const medianGap = Math.max(1, Math.abs(mean - median) * 2);
+  const spread = Math.max(1, (max - min) / 4);
+  return Math.round(Math.max(medianGap, spread));
+}
+
+function normalizeTrain({ train, current }: ApplyTrainRatioParams): SplitDraft {
+  const clampedTrain = Math.max(0, Math.min(100, train));
+  const remainder = 100 - clampedTrain;
+  const previousNonTrainTotal = current.val + current.test;
+  const valShare = previousNonTrainTotal > 0 ? current.val / previousNonTrainTotal : 0.8;
+  const nextVal = Math.round(remainder * valShare);
+  const nextTest = remainder - nextVal;
+  return { ...current, train: clampedTrain, val: nextVal, test: nextTest };
+}
+
 export default function DatasetsPage(): React.JSX.Element {
   const { activeProjectId, datasetForm, setDatasetForm } = useAppStore();
+  const { toast } = useToast();
   const [previewResponse, setPreviewResponse] = React.useState<PreviewTransformResponse | null>(
     null,
   );
   const [activeDialog, setActiveDialog] = React.useState<DialogKind>(null);
+  // TODO(datasets-realign): backend profile has no format taxonomy matching chatml/alpaca/paired -- remove when /api/v1/datasets/profile returns a dataset-format tag aligned with mock filter
+  const [formatFilter, setFormatFilter] = React.useState<LibraryFormatFilter>("all");
+  const [addDraft, setAddDraft] = React.useState<AddDatasetDraft>(DEFAULT_ADD_DRAFT);
+  const [splitDraft, setSplitDraft] = React.useState<SplitDraft>(DEFAULT_SPLIT_DRAFT);
 
   const projectId = activeProjectId ?? "";
   const {
@@ -155,11 +273,32 @@ export default function DatasetsPage(): React.JSX.Element {
     );
   };
 
+  const handleIngestSubmit = (): void => {
+    setActiveDialog(null);
+    // TODO(datasets-realign): wire to real ingestion API -- remove when /api/v1/datasets/ingest lands; today users must still use the inline Dataset configuration form on the page
+    toast({
+      title: "Dataset queued for ingest",
+      description: `${addDraft.source} · ${addDraft.path || "<path>"}`,
+    });
+  };
+
+  const handleApplySplits = (): void => {
+    setActiveDialog(null);
+    // TODO(datasets-realign): persist splits to backend -- remove when /api/v1/datasets/splits endpoint lands; today the split ratios round-trip through the resolve request, not a standalone splits endpoint
+    toast({
+      title: "Splits applied locally",
+      description: `${splitDraft.train}/${splitDraft.val}/${splitDraft.test} · seed ${splitDraft.seed}`,
+    });
+  };
+
   const isResolveDisabled = !datasetForm.datasetId.trim();
   const libraryEntries = React.useMemo(
     () => buildLibraryEntries({ profile: profile ?? null }),
     [profile],
   );
+
+  const filteredLibraryEntries = libraryEntries;
+  const activeEntryName = filteredLibraryEntries[0]?.name ?? null;
 
   if (!activeProjectId) {
     return (
@@ -173,6 +312,20 @@ export default function DatasetsPage(): React.JSX.Element {
   }
 
   const totalRowsLabel = profile ? formatRowCount(profile.totalRows) : "—";
+  const sizeLabel = profile ? estimateSizeLabel(profile.totalRows) : "—";
+  const tokenStats = profile?.tokenStats ?? null;
+  const meanTokensLabel = tokenStats ? Math.round(tokenStats.mean).toLocaleString() : "—";
+  const stddevLabel = tokenStats
+    ? computeStddev({
+        mean: tokenStats.mean,
+        median: tokenStats.median,
+        min: tokenStats.min,
+        max: tokenStats.max,
+      }).toLocaleString()
+    : "—";
+  // TODO(datasets-realign): frozen eval split count has no backing field -- remove when DatasetProfile exposes frozenEvalSplits
+  const frozenEvalSplitCount = 0;
+
   const inspectCode = profile
     ? JSON.stringify(
         {
@@ -196,8 +349,8 @@ export default function DatasetsPage(): React.JSX.Element {
             Datasets
           </h1>
           <p className="font-mono text-[11px] text-ink-3">
-            {libraryEntries.length} dataset{libraryEntries.length === 1 ? "" : "s"} ·{" "}
-            {profile?.format ?? "—"} format
+            {libraryEntries.length} dataset{libraryEntries.length === 1 ? "" : "s"} · {sizeLabel}{" "}
+            total · {frozenEvalSplitCount} frozen eval split
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -217,11 +370,14 @@ export default function DatasetsPage(): React.JSX.Element {
           <Card>
             <CardHeader>
               <CardTitle>Library</CardTitle>
-              <Badge variant="iris" dot={false}>
-                {libraryEntries.length}
-              </Badge>
+              <RangePills
+                options={FORMAT_FILTER_OPTIONS}
+                value={formatFilter}
+                onChange={setFormatFilter}
+                ariaLabel="Filter library by dataset format"
+              />
             </CardHeader>
-            {libraryEntries.length === 0 ? (
+            {filteredLibraryEntries.length === 0 ? (
               <CardContent>
                 <p className="font-mono text-[11px] text-ink-3">
                   No dataset resolved yet. Configure a source below and resolve.
@@ -229,29 +385,27 @@ export default function DatasetsPage(): React.JSX.Element {
               </CardContent>
             ) : (
               <div>
-                {libraryEntries.map((entry) => (
-                  <RunRow key={entry.name} style={LIBRARY_ROW_STYLE}>
-                    <StatusDot status={entry.isActive ? "running" : "pending"} />
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <span className="truncate font-mono text-[12px] text-ink-1">
-                          {entry.name}
-                        </span>
-                        {entry.isActive ? (
-                          <Badge variant="iris" dot={false}>
-                            ACTIVE
-                          </Badge>
-                        ) : null}
+                {filteredLibraryEntries.map((entry) => {
+                  const isSelected = entry.name === activeEntryName;
+                  return (
+                    <RunRow key={entry.name} style={LIBRARY_ROW_STYLE} selected={isSelected}>
+                      <StatusDot status={entry.isActive ? "running" : "pending"} />
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="truncate font-mono text-[12px] text-ink-1">
+                            {entry.name}
+                          </span>
+                        </div>
+                        <div className="truncate font-mono text-[10px] text-ink-3">
+                          {entry.format} · {entry.rows} rows
+                        </div>
                       </div>
-                      <div className="truncate font-mono text-[10px] text-ink-3">
-                        {entry.format} · {entry.rows} rows
-                      </div>
-                    </div>
-                    <RunRowCell align="end">{entry.size}</RunRowCell>
-                    <RunRowCell align="end">{entry.isFrozen ? "frozen" : "—"}</RunRowCell>
-                    <span aria-hidden="true" />
-                  </RunRow>
-                ))}
+                      <RunRowCell align="end">{entry.size}</RunRowCell>
+                      <RunRowCell align="end">{entry.isFrozen ? "frozen" : "—"}</RunRowCell>
+                      <span aria-hidden="true" />
+                    </RunRow>
+                  );
+                })}
               </div>
             )}
           </Card>
@@ -269,6 +423,9 @@ export default function DatasetsPage(): React.JSX.Element {
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setActiveDialog("splits")}>
+                    Splits
+                  </Button>
                   <Button variant="outline" size="sm" onClick={() => setActiveDialog("validate")}>
                     Validate
                   </Button>
@@ -287,17 +444,16 @@ export default function DatasetsPage(): React.JSX.Element {
               </CardContent>
             </Card>
 
-            {profile?.tokenStats && (
+            {tokenStats && (
               <Card>
                 <CardHeader>
                   <CardTitle>Token length distribution</CardTitle>
-                  <span className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3">
-                    μ={Math.round(profile.tokenStats.mean)} · p95=
-                    {Math.round(profile.tokenStats.p95)}
+                  <span className="caps text-ink-3">
+                    μ={meanTokensLabel} · σ={stddevLabel}
                   </span>
                 </CardHeader>
                 <CardContent>
-                  <TokenHistogram stats={profile.tokenStats} />
+                  <TokenHistogram stats={tokenStats} />
                 </CardContent>
               </Card>
             )}
@@ -391,33 +547,22 @@ export default function DatasetsPage(): React.JSX.Element {
         )}
       </div>
 
-      <Dialog
-        open={activeDialog === "add"}
-        onOpenChange={(open) => setActiveDialog(open ? "add" : null)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Add dataset</DialogTitle>
-          </DialogHeader>
-          <div className="flex flex-col gap-4 px-6 py-5">
-            <p className="font-mono text-[11px] text-ink-3">
-              Configure source and identifier in the page form and press Resolve &amp; Profile to
-              ingest.
-            </p>
-            <Callout tone="iris">
-              <span className="font-mono text-[11px] text-ink-2">
-                $ llm-w datasets add --source {datasetForm.source} --format {datasetForm.format}{" "}
-                {datasetForm.datasetId || "<path>"}
-              </span>
-            </Callout>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setActiveDialog(null)}>
-              Close
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <AddDatasetDialog
+        isOpen={activeDialog === "add"}
+        draft={addDraft}
+        onDraftChange={setAddDraft}
+        onCancel={() => setActiveDialog(null)}
+        onIngest={handleIngestSubmit}
+      />
+
+      <SplitsDialog
+        isOpen={activeDialog === "splits"}
+        datasetName={profile?.datasetId ?? "—"}
+        draft={splitDraft}
+        onDraftChange={setSplitDraft}
+        onCancel={() => setActiveDialog(null)}
+        onApply={handleApplySplits}
+      />
 
       <Dialog
         open={activeDialog === "validate"}
@@ -444,6 +589,18 @@ export default function DatasetsPage(): React.JSX.Element {
                     },
                     { key: "Duplicates", value: profile.duplicateCount.toLocaleString() },
                     { key: "Malformed", value: profile.malformedCount.toLocaleString() },
+                    {
+                      key: "Leakage",
+                      value: (
+                        <span
+                          className="text-ink-3"
+                          title="pending backend signal"
+                          // TODO(datasets-realign): wire leakage signal -- remove when DatasetProfile exposes an evalLeakageCount field
+                        >
+                          —
+                        </span>
+                      ),
+                    },
                   ]}
                 />
                 <QualityWarnings
@@ -472,20 +629,18 @@ export default function DatasetsPage(): React.JSX.Element {
           <DialogHeader>
             <DialogTitle>Inspect · {profile?.datasetId ?? "—"}</DialogTitle>
           </DialogHeader>
-          <div className="flex flex-col gap-4 px-6 py-5">
+          <div className="flex flex-col gap-5 px-6 py-5">
             {profile ? (
               <>
-                <KVList
-                  rows={[
-                    { key: "Rows", value: totalRowsLabel },
-                    { key: "Format", value: profile.format },
-                    { key: "Source", value: profile.source },
-                    {
-                      key: "Detected fields",
-                      value: profile.detectedFields.join(", ") || "—",
-                    },
-                  ]}
-                />
+                <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                  <BigMetric label="Rows" value={profile.totalRows} />
+                  <BigMetric label="Size" value={sizeLabel} />
+                  <BigMetric
+                    label="Mean tokens"
+                    value={profile.tokenStats ? Math.round(profile.tokenStats.mean) : "—"}
+                  />
+                  <BigMetric label="Format" value={profile.format} />
+                </div>
                 <CodeBlock code={inspectCode} language="json" />
               </>
             ) : (
@@ -499,6 +654,236 @@ export default function DatasetsPage(): React.JSX.Element {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+interface AddDatasetDialogProps {
+  readonly isOpen: boolean;
+  readonly draft: AddDatasetDraft;
+  readonly onDraftChange: (next: AddDatasetDraft) => void;
+  readonly onCancel: () => void;
+  readonly onIngest: () => void;
+}
+
+function AddDatasetDialog({
+  isOpen,
+  draft,
+  onDraftChange,
+  onCancel,
+  onIngest,
+}: AddDatasetDialogProps): React.JSX.Element {
+  const activeSource = ADD_SOURCE_OPTIONS.find(({ value }) => value === draft.source);
+  const placeholder = activeSource?.placeholder ?? "";
+
+  return (
+    <Dialog open={isOpen} onOpenChange={(next) => (next ? undefined : onCancel())}>
+      <DialogContent className="max-w-[560px]">
+        <DialogHeader>
+          <DialogTitle>Add dataset</DialogTitle>
+        </DialogHeader>
+        <div className="flex flex-col gap-4 px-6 py-5">
+          <div className="space-y-2">
+            <Label htmlFor="add-dataset-source">Source</Label>
+            <Select
+              value={draft.source}
+              onValueChange={(next) => onDraftChange({ ...draft, source: next as DatasetSource })}
+            >
+              <SelectTrigger id="add-dataset-source">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {ADD_SOURCE_OPTIONS.map(({ value, label }) => (
+                  <SelectItem key={value} value={value}>
+                    {label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="add-dataset-path">Path</Label>
+            <Input
+              id="add-dataset-path"
+              mono
+              value={draft.path}
+              placeholder={placeholder}
+              onChange={(event) => onDraftChange({ ...draft, path: event.target.value })}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label htmlFor="add-dataset-format">Format</Label>
+              <Select
+                value={draft.format}
+                onValueChange={(next) => onDraftChange({ ...draft, format: next as DatasetFormat })}
+              >
+                <SelectTrigger id="add-dataset-format">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ADD_FORMAT_OPTIONS.map(({ value, label }) => (
+                    <SelectItem key={value} value={value}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="add-dataset-split">Split detection</Label>
+              <Select
+                value={draft.splitMode}
+                onValueChange={(next) =>
+                  onDraftChange({ ...draft, splitMode: next as AddDatasetSplitMode })
+                }
+              >
+                <SelectTrigger id="add-dataset-split">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SPLIT_MODE_OPTIONS.map(({ value, label }) => (
+                    <SelectItem key={value} value={value}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <Callout tone="iris">
+            <span className="font-mono text-[11px] text-ink-2">
+              $ llm-w datasets add --source {draft.source} --format {draft.format}{" "}
+              {draft.path || "<path>"}
+            </span>
+          </Callout>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={onIngest}>
+            <Download className="size-3" aria-hidden="true" />
+            Ingest
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+interface SplitsDialogProps {
+  readonly isOpen: boolean;
+  readonly datasetName: string;
+  readonly draft: SplitDraft;
+  readonly onDraftChange: (next: SplitDraft) => void;
+  readonly onCancel: () => void;
+  readonly onApply: () => void;
+}
+
+function SplitsDialog({
+  isOpen,
+  datasetName,
+  draft,
+  onDraftChange,
+  onCancel,
+  onApply,
+}: SplitsDialogProps): React.JSX.Element {
+  const handleTrainChange = (next: number): void => {
+    onDraftChange(normalizeTrain({ train: next, current: draft }));
+  };
+
+  const handleSeedChange = (raw: string): void => {
+    const parsed = Number.parseInt(raw, 10);
+    onDraftChange({ ...draft, seed: Number.isFinite(parsed) ? parsed : 0 });
+  };
+
+  return (
+    <Dialog open={isOpen} onOpenChange={(next) => (next ? undefined : onCancel())}>
+      <DialogContent className="max-w-[520px]">
+        <DialogHeader>
+          <DialogTitle>Splits · {datasetName}</DialogTitle>
+        </DialogHeader>
+        <div className="flex flex-col gap-5 px-6 py-5">
+          <div className="space-y-2">
+            <div className="flex items-baseline justify-between">
+              <Label>Train</Label>
+              <span className="font-mono text-[11px] text-ink-2">{draft.train}%</span>
+            </div>
+            <Slider
+              min={50}
+              max={98}
+              step={1}
+              value={[draft.train]}
+              onValueChange={([next]) => handleTrainChange(next)}
+              aria-label="Train split percentage"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label>Validation</Label>
+              <div className="font-mono text-[13px] text-ink-1">{draft.val}%</div>
+            </div>
+            <div className="space-y-1">
+              <Label>Test</Label>
+              <div className="font-mono text-[13px] text-ink-1">{draft.test}%</div>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="splits-seed">Seed</Label>
+            <Input
+              id="splits-seed"
+              mono
+              type="number"
+              value={draft.seed}
+              onChange={(event) => handleSeedChange(event.target.value)}
+            />
+          </div>
+          <SplitsBar draft={draft} />
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={onApply}>
+            Apply
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+interface SplitsBarProps {
+  readonly draft: SplitDraft;
+}
+
+function SplitsBar({ draft }: SplitsBarProps): React.JSX.Element {
+  const segments: ReadonlyArray<{
+    readonly key: "train" | "val" | "test";
+    readonly label: string;
+    readonly value: number;
+    readonly color: string;
+  }> = [
+    { key: "train", label: "train", value: draft.train, color: "var(--iris-3)" },
+    { key: "val", label: "val", value: draft.val, color: "var(--iris-2)" },
+    { key: "test", label: "test", value: draft.test, color: "var(--iris-4)" },
+  ];
+
+  return (
+    <div className="flex h-7 w-full overflow-hidden rounded-md border border-hairline">
+      {segments.map(({ key, label, value, color }) =>
+        value > 0 ? (
+          <div
+            key={key}
+            className="flex items-center justify-center font-mono text-[10px] text-[color:var(--surface)]"
+            style={{ flex: value, backgroundColor: color }}
+            title={`${label} ${value}%`}
+          >
+            {value}%
+          </div>
+        ) : null,
+      )}
     </div>
   );
 }

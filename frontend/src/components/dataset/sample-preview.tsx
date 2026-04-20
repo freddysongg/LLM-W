@@ -67,11 +67,9 @@ export function SamplePreview({ samples, detectedFields }: SamplePreviewProps): 
   if (chatRenderedSamples.length === samples.length && chatRenderedSamples.length > 0) {
     return (
       <div className="flex flex-col gap-2.5">
-        {chatRenderedSamples.flatMap(({ sample, messages }) =>
-          messages.map((message, msgIdx) => (
-            <ChatSample key={`${sample.index}-${msgIdx}`} message={message} />
-          )),
-        )}
+        {chatRenderedSamples.map(({ sample, messages }) => (
+          <ChatSample key={sample.index} messages={messages} />
+        ))}
       </div>
     );
   }
