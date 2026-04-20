@@ -1,39 +1,53 @@
-import { Outlet } from "react-router-dom";
-import { PanelRight } from "lucide-react";
+import * as React from "react";
+import { Outlet, useLocation } from "react-router-dom";
 import { Sidebar } from "./sidebar";
+import { Topbar } from "./topbar";
 import { RightDrawer } from "./right-drawer";
 import { BottomPanel } from "./bottom-panel";
 import { useAppStore } from "@/stores/app-store";
-import { Button } from "@/components/ui/button";
+import { useGlobalShortcuts } from "@/hooks/use-global-shortcuts";
+import { getRouteSlug } from "@/lib/nav";
 
 export function AppShell(): React.JSX.Element {
-  const { openRightDrawer, isRightDrawerOpen, rightDrawerContent } = useAppStore();
+  const { pathname } = useLocation();
+  const isRightDrawerOpen = useAppStore((state) => state.isRightDrawerOpen);
+  const rightDrawerContent = useAppStore((state) => state.rightDrawerContent);
+  const openRightDrawer = useAppStore((state) => state.openRightDrawer);
+  const closeRightDrawer = useAppStore((state) => state.closeRightDrawer);
+  const toggleSidebar = useAppStore((state) => state.toggleSidebar);
+  const setCommandPaletteOpen = useAppStore((state) => state.setCommandPaletteOpen);
 
-  const handleToggleDrawer = (): void => {
+  const handleToggleRightDrawer = React.useCallback((): void => {
     if (isRightDrawerOpen) {
-      useAppStore.getState().closeRightDrawer();
+      closeRightDrawer();
     } else {
       openRightDrawer({ content: rightDrawerContent ?? "run-detail" });
     }
-  };
+  }, [closeRightDrawer, isRightDrawerOpen, openRightDrawer, rightDrawerContent]);
+
+  const handleOpenCommandPalette = React.useCallback((): void => {
+    setCommandPaletteOpen(true);
+  }, [setCommandPaletteOpen]);
+
+  useGlobalShortcuts({
+    onOpenCommandPalette: handleOpenCommandPalette,
+    onToggleSidebar: toggleSidebar,
+  });
+
+  const pageSlug = getRouteSlug(pathname);
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-background">
+    <div className="flex h-screen w-screen overflow-hidden" style={{ background: "var(--canvas)" }}>
       <Sidebar />
-      <div className="flex flex-col flex-1 min-w-0">
-        <header className="flex items-center justify-end h-14 px-4 border-b border-border shrink-0">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={handleToggleDrawer}
-            aria-label="Toggle right drawer"
-            aria-expanded={isRightDrawerOpen}
-          >
-            <PanelRight className="h-4 w-4" />
-          </Button>
-        </header>
+      <div className="flex flex-col flex-1 min-w-0" data-page={pageSlug}>
+        <Topbar
+          onToggleRightDrawer={handleToggleRightDrawer}
+          isRightDrawerOpen={isRightDrawerOpen}
+        />
         <main className="flex-1 overflow-y-auto min-h-0">
-          <Outlet />
+          <div key={pathname} className="page-fade">
+            <Outlet />
+          </div>
         </main>
         <BottomPanel />
       </div>

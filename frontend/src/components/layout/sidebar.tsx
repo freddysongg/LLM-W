@@ -1,232 +1,318 @@
 import { NavLink } from "react-router-dom";
-import {
-  LayoutDashboard,
-  FolderKanban,
-  Brain,
-  Database,
-  Dumbbell,
-  Puzzle,
-  Layers,
-  Play,
-  GitCompareArrows,
-  ClipboardCheck,
-  Sparkles,
-  Archive,
-  Settings,
-  PanelLeftClose,
-  PanelLeftOpen,
-  ChevronRight,
-} from "lucide-react";
+import { ChevronRight, User, Settings, Lock, BookOpen, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app-store";
 import type { NavGroupKey } from "@/stores/app-store";
-import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { NAV_GROUPS, NAV_ICON_COMPONENTS, SETTINGS_NAV_ITEM } from "@/lib/nav";
+import type { NavItem } from "@/lib/nav";
+import { useToast } from "@/hooks/use-toast";
+import { useRunStreamStore } from "@/stores/run-stream-store";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
-interface NavItem {
-  readonly label: string;
-  readonly path: string;
-  readonly icon: React.ComponentType<{ className?: string }>;
-}
+const USER_NAME_STUB = "freddy";
+const USER_EMAIL_STUB = "freddy@llm-w.dev";
+const USER_INITIALS_STUB = "FS";
 
-interface NavGroup {
-  readonly key: NavGroupKey;
-  readonly label: string;
-  readonly items: ReadonlyArray<NavItem>;
-}
-
-const NAV_GROUPS: ReadonlyArray<NavGroup> = [
-  {
-    key: "overview",
-    label: "Overview",
-    items: [
-      { label: "Dashboard", path: "/", icon: LayoutDashboard },
-      { label: "Projects", path: "/projects", icon: FolderKanban },
-    ],
-  },
-  {
-    key: "modelData",
-    label: "Model & Data",
-    items: [
-      { label: "Models", path: "/models", icon: Brain },
-      { label: "Datasets", path: "/datasets", icon: Database },
-    ],
-  },
-  {
-    key: "training",
-    label: "Training",
-    items: [
-      { label: "Training", path: "/training", icon: Dumbbell },
-      { label: "Adapters & Optimization", path: "/adapters", icon: Puzzle },
-      { label: "Weights & Architecture", path: "/weights", icon: Layers },
-    ],
-  },
-  {
-    key: "execution",
-    label: "Execution",
-    items: [
-      { label: "Runs", path: "/runs", icon: Play },
-      { label: "Compare", path: "/compare", icon: GitCompareArrows },
-      { label: "Evaluation", path: "/eval", icon: ClipboardCheck },
-    ],
-  },
-  {
-    key: "intelligence",
-    label: "Intelligence",
-    items: [
-      { label: "AI Suggestions", path: "/suggestions", icon: Sparkles },
-      { label: "Artifacts", path: "/artifacts", icon: Archive },
-    ],
-  },
-];
-
-const SETTINGS_ITEM: NavItem = { label: "Settings", path: "/settings", icon: Settings };
-
-interface CollapsedNavItemProps {
+interface SidebarItemProps {
   readonly item: NavItem;
+  readonly collapsed: boolean;
+  readonly hasLiveBadge: boolean;
 }
 
-function CollapsedNavItem({ item }: CollapsedNavItemProps): React.JSX.Element {
-  const { label, path, icon: Icon } = item;
+function SidebarItem({ item, collapsed, hasLiveBadge }: SidebarItemProps): React.JSX.Element {
+  const { label, path, icon, badge } = item;
+  const IconComponent = NAV_ICON_COMPONENTS[icon];
+  const shouldShowBadge = Boolean(badge) && hasLiveBadge && !collapsed;
+
   return (
-    <li key={path}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <NavLink
-            to={path}
-            end={path === "/"}
-            className={({ isActive }) =>
-              cn(
-                "flex items-center justify-center h-9 w-9 mx-auto rounded-md text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors",
-                isActive && "bg-sidebar-accent text-sidebar-accent-foreground font-medium",
-              )
-            }
-            aria-label={label}
-          >
-            <Icon className="h-4 w-4" />
-          </NavLink>
-        </TooltipTrigger>
-        <TooltipContent side="right">{label}</TooltipContent>
-      </Tooltip>
-    </li>
+    <NavLink
+      to={path}
+      end={path === "/"}
+      title={collapsed ? label : undefined}
+      className={({ isActive }) =>
+        cn(
+          "relative flex items-center gap-2.5 px-2.5 py-[7px] rounded-[10px] text-[13px] font-[450] text-ink-3 transition-colors hover:bg-surface hover:text-ink-1",
+          collapsed && "justify-center p-[10px]",
+          isActive && "bg-surface text-ink-1 font-medium shadow-xs",
+        )
+      }
+    >
+      {({ isActive }) => (
+        <>
+          {isActive && (
+            <span
+              aria-hidden="true"
+              className="absolute -left-2 top-1/2 -translate-y-1/2 w-[3px] h-[18px] rounded-r-[2px] animate-fade-in"
+              style={{ background: "var(--ink-1)" }}
+            />
+          )}
+          <IconComponent className="h-4 w-4 shrink-0 opacity-85" />
+          {!collapsed && <span className="flex-1 truncate">{label}</span>}
+          {shouldShowBadge && (
+            <span className="inline-flex items-center gap-1 px-1.5 py-[1px] rounded-full border border-info/30 bg-info/10 text-[9px] font-mono font-medium uppercase tracking-wider text-info">
+              <span
+                aria-hidden="true"
+                className="h-1.5 w-1.5 rounded-full animate-pulse-dot"
+                style={{ background: "var(--info)" }}
+              />
+              {badge}
+            </span>
+          )}
+        </>
+      )}
+    </NavLink>
   );
 }
 
-interface ExpandedNavItemProps {
-  readonly item: NavItem;
+interface NavGroupBlockProps {
+  readonly groupKey: NavGroupKey;
+  readonly label: string;
+  readonly items: readonly NavItem[];
+  readonly collapsed: boolean;
+  readonly hasActiveRunStream: boolean;
 }
 
-function ExpandedNavItem({ item }: ExpandedNavItemProps): React.JSX.Element {
-  const { label, path, icon: Icon } = item;
+function NavGroupBlock({
+  groupKey,
+  label,
+  items,
+  collapsed,
+  hasActiveRunStream,
+}: NavGroupBlockProps): React.JSX.Element {
+  const isOpen = useAppStore((state) => state.navGroupExpanded[groupKey]);
+  const toggleNavGroup = useAppStore((state) => state.toggleNavGroup);
+
   return (
-    <li key={path}>
-      <NavLink
-        to={path}
-        end={path === "/"}
-        className={({ isActive }) =>
-          cn(
-            "flex items-center gap-2.5 h-9 px-2.5 rounded-md text-sm text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors",
-            isActive && "bg-sidebar-accent text-sidebar-accent-foreground font-medium",
-          )
-        }
+    <div className="mb-3.5">
+      {!collapsed && (
+        <button
+          type="button"
+          onClick={() => toggleNavGroup(groupKey)}
+          className="w-full px-2.5 pt-1 pb-1.5 flex items-center gap-1.5 font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-ink-4 hover:text-ink-3 transition-colors"
+          aria-expanded={isOpen}
+        >
+          <ChevronRight
+            className={cn(
+              "h-2.5 w-2.5 shrink-0 opacity-70 transition-transform duration-150",
+              isOpen && "rotate-90",
+            )}
+          />
+          <span>{label}</span>
+        </button>
+      )}
+      {(collapsed || isOpen) && (
+        <div className="flex flex-col gap-[2px] mt-[2px]">
+          {items.map((item) => (
+            <SidebarItem
+              key={item.path}
+              item={item}
+              collapsed={collapsed}
+              hasLiveBadge={item.badge === "LIVE" ? hasActiveRunStream : false}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface SidebarBrandProps {
+  readonly collapsed: boolean;
+  readonly onToggleCollapse: () => void;
+}
+
+function SidebarBrand({ collapsed, onToggleCollapse }: SidebarBrandProps): React.JSX.Element {
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-2.5 h-[54px] px-4 border-b border-hairline shrink-0",
+        collapsed && "px-0 justify-center relative",
+      )}
+    >
+      <div
+        className={cn(
+          "grid place-items-center w-[22px] h-[22px] text-ink-1 shrink-0",
+          collapsed && "m-0",
+        )}
+        aria-hidden="true"
       >
-        <Icon className="h-4 w-4 shrink-0" />
-        <span className="truncate">{label}</span>
-      </NavLink>
-    </li>
+        <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+          <rect
+            x="3.5"
+            y="3.5"
+            width="15"
+            height="15"
+            rx="3"
+            stroke="currentColor"
+            strokeWidth="1.4"
+            transform="rotate(45 11 11)"
+          />
+          <circle cx="11" cy="11" r="2.4" fill="currentColor" />
+        </svg>
+      </div>
+      {!collapsed && (
+        <div className="flex-1 min-w-0 flex flex-col">
+          <div className="font-mono text-[13px] font-semibold tracking-[-0.01em] text-ink-1 truncate">
+            LLM-W
+          </div>
+          <div className="font-mono text-[10px] text-ink-3 uppercase tracking-[0.08em] mt-0.5">
+            Workbench
+          </div>
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={onToggleCollapse}
+        aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        title={collapsed ? "Expand sidebar (⌘\\)" : "Collapse sidebar (⌘\\)"}
+        className={cn(
+          "grid place-items-center w-6 h-6 rounded-[6px] border border-hairline bg-transparent text-ink-3 shrink-0 hover:bg-surface hover:text-ink-1 hover:border-hairline-strong transition-colors",
+          collapsed && "absolute -right-3 top-4 bg-surface shadow-token-sm z-10",
+        )}
+      >
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <path
+            d={collapsed ? "M 5 3 L 9 7 L 5 11" : "M 9 3 L 5 7 L 9 11"}
+            stroke="currentColor"
+            strokeWidth="1.4"
+            fill="none"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
+interface SidebarFooterProps {
+  readonly collapsed: boolean;
+}
+
+function SidebarFooter({ collapsed }: SidebarFooterProps): React.JSX.Element {
+  const { toast } = useToast();
+
+  const handleShowToast = (title: string): void => {
+    toast({ title });
+  };
+
+  const handleOpenDocs = (): void => {
+    window.open("https://example.com", "_blank", "noopener,noreferrer");
+  };
+
+  return (
+    <div
+      className={cn(
+        "border-t border-hairline px-3 py-2.5 flex items-center gap-2.5 shrink-0",
+        collapsed && "justify-center px-2.5",
+      )}
+    >
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            className={cn(
+              "flex items-center gap-2.5 w-full rounded-[10px] p-1 hover:bg-surface transition-colors",
+              collapsed && "justify-center p-[10px]",
+            )}
+            aria-label="Account menu"
+          >
+            <div
+              className="w-7 h-7 rounded-full grid place-items-center font-mono text-[11px] font-semibold text-white shrink-0"
+              style={{ background: "linear-gradient(135deg, var(--iris-3), var(--iris-4))" }}
+              aria-hidden="true"
+            >
+              {USER_INITIALS_STUB}
+            </div>
+            {!collapsed && (
+              <div className="flex-1 min-w-0 text-left">
+                <div className="text-[12px] font-medium text-ink-1 truncate">{USER_NAME_STUB}</div>
+                <div className="font-mono text-[10px] text-ink-3 truncate">{USER_EMAIL_STUB}</div>
+              </div>
+            )}
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" side="top" className="w-60">
+          <DropdownMenuLabel>{USER_EMAIL_STUB}</DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem asChild>
+            <NavLink to={SETTINGS_NAV_ITEM.path} className="cursor-pointer">
+              <User className="h-4 w-4" />
+              <span>Profile</span>
+            </NavLink>
+          </DropdownMenuItem>
+          <DropdownMenuItem asChild>
+            <NavLink to={SETTINGS_NAV_ITEM.path} className="cursor-pointer">
+              <Settings className="h-4 w-4" />
+              <span>Settings</span>
+            </NavLink>
+          </DropdownMenuItem>
+          <DropdownMenuItem asChild>
+            <NavLink to={SETTINGS_NAV_ITEM.path} className="cursor-pointer">
+              <Lock className="h-4 w-4" />
+              <span>API keys</span>
+            </NavLink>
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={handleOpenDocs}>
+            <BookOpen className="h-4 w-4" />
+            <span>Documentation</span>
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() => handleShowToast("Signed out — stubbed")}
+            className="text-danger focus:text-danger"
+          >
+            <LogOut className="h-4 w-4" />
+            <span>Sign out</span>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+}
+
+function useHasActiveRunStream(): boolean {
+  return useRunStreamStore((state) =>
+    Object.values(state.runData).some(
+      (entry) => entry.progressPct !== null && (entry.progressPct ?? 0) < 100,
+    ),
   );
 }
 
 export function Sidebar(): React.JSX.Element {
-  const { isSidebarCollapsed, toggleSidebar, navGroupExpanded, toggleNavGroup } = useAppStore();
+  const isSidebarCollapsed = useAppStore((state) => state.isSidebarCollapsed);
+  const toggleSidebar = useAppStore((state) => state.toggleSidebar);
+  const hasActiveRunStream = useHasActiveRunStream();
 
   return (
-    <TooltipProvider delayDuration={300}>
-      <aside
-        className={cn(
-          "flex flex-col h-full border-r border-border bg-sidebar transition-all duration-150 shrink-0",
-          isSidebarCollapsed ? "w-[60px]" : "w-[240px]",
-        )}
-      >
-        <div className="flex items-center h-14 px-3 border-b border-border shrink-0">
-          <img
-            src="/workbench-transparent.png"
-            alt="Workbench logo"
-            className="h-6 w-6 shrink-0 dark:invert"
+    <aside
+      className={cn(
+        "flex flex-col h-screen shrink-0 border-r border-hairline bg-surface-2 transition-[width] duration-[260ms] ease-out overflow-hidden",
+        isSidebarCollapsed ? "w-[60px]" : "w-60",
+      )}
+      style={{ transitionTimingFunction: "var(--ease-out)" }}
+    >
+      <SidebarBrand collapsed={isSidebarCollapsed} onToggleCollapse={toggleSidebar} />
+      <nav className="flex-1 overflow-y-auto py-3 px-2" aria-label="Primary navigation">
+        {NAV_GROUPS.map(({ key, label, items }) => (
+          <NavGroupBlock
+            key={key}
+            groupKey={key as NavGroupKey}
+            label={label}
+            items={items}
+            collapsed={isSidebarCollapsed}
+            hasActiveRunStream={hasActiveRunStream}
           />
-          {!isSidebarCollapsed && (
-            <span className="text-sm font-semibold tracking-tight truncate flex-1 text-sidebar-foreground ml-2">
-              Workbench
-            </span>
-          )}
-        </div>
-        <nav className="flex-1 overflow-y-auto py-2 px-2" aria-label="Main navigation">
-          {isSidebarCollapsed ? (
-            <ul className="space-y-0.5">
-              {NAV_GROUPS.flatMap(({ items }) => items).map((item) => (
-                <CollapsedNavItem key={item.path} item={item} />
-              ))}
-              <CollapsedNavItem item={SETTINGS_ITEM} />
-            </ul>
-          ) : (
-            <div className="space-y-1">
-              {NAV_GROUPS.map(({ key, label, items }) => (
-                <Collapsible
-                  key={key}
-                  open={navGroupExpanded[key]}
-                  onOpenChange={() => toggleNavGroup(key)}
-                >
-                  <CollapsibleTrigger asChild>
-                    <button
-                      className="flex items-center w-full px-2.5 py-1 rounded-md text-xs font-medium text-sidebar-foreground/40 hover:text-sidebar-foreground/60 transition-colors"
-                      aria-label={`Toggle ${label} group`}
-                    >
-                      <ChevronRight
-                        className={cn(
-                          "h-3 w-3 mr-1.5 shrink-0 transition-transform duration-150",
-                          navGroupExpanded[key] && "rotate-90",
-                        )}
-                      />
-                      <span className="uppercase tracking-wider">{label}</span>
-                    </button>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent className="data-[state=open]:animate-none">
-                    <ul className="space-y-0.5 mt-0.5">
-                      {items.map((item) => (
-                        <ExpandedNavItem key={item.path} item={item} />
-                      ))}
-                    </ul>
-                  </CollapsibleContent>
-                </Collapsible>
-              ))}
-              <div className="mt-1 pt-1 border-t border-border/50">
-                <ul>
-                  <ExpandedNavItem item={SETTINGS_ITEM} />
-                </ul>
-              </div>
-            </div>
-          )}
-        </nav>
-        <div className="border-t border-border shrink-0 flex items-center justify-center h-9 px-2">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={toggleSidebar}
-            className={cn(
-              "h-9 w-9 text-sidebar-foreground/60",
-              isSidebarCollapsed ? "mx-auto" : "ml-auto",
-            )}
-            aria-label={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-          >
-            {isSidebarCollapsed ? (
-              <PanelLeftOpen className="h-4 w-4" />
-            ) : (
-              <PanelLeftClose className="h-4 w-4" />
-            )}
-          </Button>
-        </div>
-      </aside>
-    </TooltipProvider>
+        ))}
+      </nav>
+      <SidebarFooter collapsed={isSidebarCollapsed} />
+    </aside>
   );
 }
