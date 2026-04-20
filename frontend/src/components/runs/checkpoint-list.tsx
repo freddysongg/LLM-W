@@ -1,14 +1,11 @@
 import * as React from "react";
+import { RefreshCcw } from "lucide-react";
 import type { Checkpoint } from "@/types/run";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardHeader, CardTitle } from "@/components/ui/card";
+import { RunRow, RunRowCell } from "@/components/shared/run-row";
+import { StatusDot } from "@/components/shared/status-dot";
 
 interface CheckpointListProps {
   readonly checkpoints: ReadonlyArray<Checkpoint>;
@@ -16,9 +13,29 @@ interface CheckpointListProps {
   readonly selectedCheckpointPath: string | null;
 }
 
+const CHECKPOINT_ROW_COLUMNS = "grid-cols-[16px_1fr_120px_100px_90px_100px]";
+
 function formatBytes(bytes: number): string {
+  if (bytes === 0) return "0 B";
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(0)} MB`;
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+function formatRelative(iso: string): string {
+  const delta = Date.now() - new Date(iso).getTime();
+  const minutes = Math.round(delta / 60000);
+  if (minutes < 1) return "now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  return `${days}d ago`;
+}
+
+function totalSizeLabel(checkpoints: ReadonlyArray<Checkpoint>): string {
+  const totalBytes = checkpoints.reduce((sum, cp) => sum + cp.sizeBytes, 0);
+  return formatBytes(totalBytes);
 }
 
 export function CheckpointList({
@@ -28,50 +45,70 @@ export function CheckpointList({
 }: CheckpointListProps): React.JSX.Element {
   if (checkpoints.length === 0) {
     return (
-      <div className="py-6 text-center text-sm text-muted-foreground">No checkpoints yet.</div>
+      <Card>
+        <div className="py-6 text-center font-mono text-[11px] text-ink-3">No checkpoints yet.</div>
+      </Card>
     );
   }
 
-  const sorted = [...checkpoints].sort((a, b) => b.step - a.step);
+  const sorted = [...checkpoints].sort((left, right) => right.step - left.step);
+  const bestCheckpointId = sorted[0]?.id;
 
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Step</TableHead>
-          <TableHead>Path</TableHead>
-          <TableHead>Size</TableHead>
-          <TableHead>Retained</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {sorted.map((checkpoint) => (
-          <TableRow
+    <Card>
+      <CardHeader>
+        <CardTitle>Checkpoints</CardTitle>
+        <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-ink-3">
+          {sorted.length} saved · {totalSizeLabel(sorted)}
+        </span>
+      </CardHeader>
+      {sorted.map((checkpoint) => {
+        const isBest = checkpoint.id === bestCheckpointId;
+        const isSelected = selectedCheckpointPath === checkpoint.path;
+        return (
+          <RunRow
             key={checkpoint.id}
-            onClick={() => onSelectCheckpoint(checkpoint)}
-            className={`cursor-pointer ${
-              selectedCheckpointPath === checkpoint.path ? "bg-accent" : "hover:bg-muted/50"
-            }`}
+            className={`${CHECKPOINT_ROW_COLUMNS} px-[18px]`}
+            selected={isSelected}
           >
-            <TableCell className="font-mono text-xs">{checkpoint.step}</TableCell>
-            <TableCell className="font-mono text-xs text-muted-foreground truncate max-w-xs">
-              {checkpoint.path}
-            </TableCell>
-            <TableCell className="text-sm text-muted-foreground">
-              {formatBytes(checkpoint.sizeBytes)}
-            </TableCell>
-            <TableCell>
-              {checkpoint.isRetained ? (
-                <Badge variant="secondary" className="text-xs">
-                  Kept
-                </Badge>
-              ) : (
-                <span className="text-xs text-muted-foreground">—</span>
-              )}
-            </TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+            <StatusDot status={isBest ? "success" : "pending"} />
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="truncate text-[12.5px] font-medium text-ink-1">
+                  step_{checkpoint.step}.pt
+                </span>
+                {isBest ? (
+                  <Badge variant="success" dot={false}>
+                    BEST
+                  </Badge>
+                ) : null}
+                {checkpoint.isRetained ? (
+                  <Badge variant="secondary" dot={false}>
+                    kept
+                  </Badge>
+                ) : null}
+              </div>
+              <div className="truncate font-mono text-[10.5px] text-ink-3">{checkpoint.path}</div>
+            </div>
+            <RunRowCell>{formatBytes(checkpoint.sizeBytes)}</RunRowCell>
+            <RunRowCell>{checkpoint.isRetained ? "retained" : "—"}</RunRowCell>
+            <RunRowCell>{formatRelative(checkpoint.createdAt)}</RunRowCell>
+            <div className="flex justify-end">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onSelectCheckpoint(checkpoint);
+                }}
+              >
+                <RefreshCcw className="size-3" aria-hidden="true" />
+                Resume
+              </Button>
+            </div>
+          </RunRow>
+        );
+      })}
+    </Card>
   );
 }

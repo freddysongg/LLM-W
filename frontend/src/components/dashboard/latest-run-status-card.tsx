@@ -1,78 +1,98 @@
 import * as React from "react";
+import { useNavigate } from "react-router-dom";
 import type { Run } from "@/types/run";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
+import type { ActiveRunStatus } from "@/components/shared/active-run-banner";
+import { ActiveRunBanner } from "@/components/shared/active-run-banner";
 
 interface LatestRunStatusCardProps {
   readonly run: Run | null;
+  readonly configLabel?: string;
+  readonly currentStep?: number | null;
+  readonly totalSteps?: number | null;
+  readonly progressPct?: number | null;
+  readonly loss?: number | null;
+  readonly learningRate?: number | null;
+  readonly etaSeconds?: number | null;
+  readonly onPause?: () => void;
+  readonly onResume?: () => void;
+  readonly onStop?: () => void;
 }
 
-type BadgeVariant = "default" | "secondary" | "destructive" | "outline";
+const DEFAULT_LOSS_FALLBACK = 0;
+const DEFAULT_LR_FALLBACK = 0;
+const DEFAULT_ETA_FALLBACK = 0;
 
-function runStatusVariant(status: Run["status"]): BadgeVariant {
-  switch (status) {
-    case "running":
-      return "default";
-    case "completed":
-      return "secondary";
-    case "failed":
-      return "destructive";
-    case "cancelled":
-    case "paused":
-    case "pending":
-      return "outline";
-    default: {
-      const _exhaustive: never = status;
-      return _exhaustive;
-    }
-  }
+function resolveStatus(status: Run["status"]): ActiveRunStatus | null {
+  if (status === "running" || status === "pending") return "running";
+  if (status === "paused") return "paused";
+  return null;
 }
 
-function formatElapsed(startedAt: string): string {
-  const elapsed = Date.now() - new Date(startedAt).getTime();
-  const seconds = Math.floor(elapsed / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-  if (hours > 0) return `${hours}h ${minutes % 60}m`;
-  if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
-  return `${seconds}s`;
+function environmentLabel(run: Run): string {
+  if (!run.environment || run.environment === "local") return "local";
+  return run.modalGpuType ? `modal · ${run.modalGpuType}` : "modal";
 }
 
-export function LatestRunStatusCard({ run }: LatestRunStatusCardProps): React.JSX.Element {
-  if (!run) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">Latest Run</CardTitle>
-        </CardHeader>
-        <CardContent className="text-sm text-muted-foreground">No runs yet.</CardContent>
-      </Card>
-    );
-  }
+function computeEtaSeconds({
+  startedAt,
+  percent,
+}: {
+  readonly startedAt: string | null;
+  readonly percent: number;
+}): number {
+  if (!startedAt || percent <= 0) return 0;
+  const elapsedMs = Date.now() - new Date(startedAt).getTime();
+  if (elapsedMs <= 0) return 0;
+  const projectedTotalMs = elapsedMs / (percent / 100);
+  const remainingMs = Math.max(0, projectedTotalMs - elapsedMs);
+  return Math.round(remainingMs / 1000);
+}
 
-  const { id, status, currentStage, progressPct, startedAt } = run;
+export function LatestRunStatusCard({
+  run,
+  configLabel = "active config",
+  currentStep,
+  totalSteps,
+  progressPct,
+  loss,
+  learningRate,
+  etaSeconds,
+  onPause,
+  onResume,
+  onStop,
+}: LatestRunStatusCardProps): React.JSX.Element | null {
+  const navigate = useNavigate();
+
+  if (!run) return null;
+  const status = resolveStatus(run.status);
+  if (!status) return null;
+
+  const runName = `run ${run.id.slice(0, 6)}`;
+  const step = currentStep ?? run.currentStep;
+  const total = totalSteps ?? run.totalSteps ?? Math.max(step, 1);
+  const percent = progressPct ?? run.progressPct;
+  const resolvedEta = etaSeconds ?? computeEtaSeconds({ startedAt: run.startedAt, percent });
+
+  const handleMore = (): void => {
+    void navigate(`/runs`);
+  };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-sm">Latest Run</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <div className="flex items-center justify-between">
-          <span className="font-mono text-xs text-muted-foreground truncate">{id}</span>
-          <Badge variant={runStatusVariant(status)}>{status}</Badge>
-        </div>
-        {currentStage && (
-          <div className="text-xs text-muted-foreground">
-            Stage: {currentStage.replace(/_/g, " ")}
-          </div>
-        )}
-        <Progress value={progressPct} />
-        {startedAt && (
-          <div className="text-xs text-muted-foreground">Elapsed: {formatElapsed(startedAt)}</div>
-        )}
-      </CardContent>
-    </Card>
+    <ActiveRunBanner
+      runName={runName}
+      configLabel={configLabel}
+      runId={run.id}
+      env={environmentLabel(run)}
+      status={status}
+      step={step}
+      stepTotal={total}
+      loss={loss ?? DEFAULT_LOSS_FALLBACK}
+      lr={learningRate ?? DEFAULT_LR_FALLBACK}
+      etaSeconds={resolvedEta ?? DEFAULT_ETA_FALLBACK}
+      onPause={onPause}
+      onResume={onResume}
+      onStop={onStop}
+      onMore={handleMore}
+    />
   );
 }

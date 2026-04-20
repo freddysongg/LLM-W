@@ -1,17 +1,13 @@
 import * as React from "react";
-import { Trash2 } from "lucide-react";
-import type { Run } from "@/types/run";
+import { MoreHorizontal, Trash2 } from "lucide-react";
 import { MODAL_GPU_OPTIONS } from "@/api/cloud";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import type { Run, RunStatus } from "@/types/run";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { RunRow, RunRowActions, RunRowCell } from "@/components/shared/run-row";
+import { StatusDot } from "@/components/shared/status-dot";
+import type { RunStatus as DotStatus } from "@/components/shared/status-dot";
 
 interface RunListProps {
   readonly runs: ReadonlyArray<Run>;
@@ -24,20 +20,22 @@ interface RunListProps {
   readonly canStartRun?: boolean;
 }
 
-type BadgeVariant = "default" | "secondary" | "destructive" | "outline";
+const DELETABLE_STATUSES = new Set<RunStatus>(["completed", "failed", "cancelled"]);
+const RUN_ROW_COLUMNS = "grid-cols-[16px_1fr_150px_120px_90px_100px_32px]";
 
-function statusVariant(status: Run["status"]): BadgeVariant {
+function mapStatus(status: RunStatus): DotStatus {
   switch (status) {
     case "running":
-      return "default";
+      return "running";
     case "completed":
-      return "secondary";
+      return "success";
     case "failed":
-      return "destructive";
-    case "cancelled":
+      return "failed";
     case "paused":
+      return "paused";
     case "pending":
-      return "outline";
+    case "cancelled":
+      return "pending";
     default: {
       const _exhaustive: never = status;
       return _exhaustive;
@@ -45,26 +43,51 @@ function statusVariant(status: Run["status"]): BadgeVariant {
   }
 }
 
-function formatDuration(startedAt: string | null, completedAt: string | null): string {
-  if (!startedAt) return "—";
-  const end = completedAt ? new Date(completedAt) : new Date();
-  const ms = end.getTime() - new Date(startedAt).getTime();
-  const seconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-  if (hours > 0) return `${hours}h ${minutes % 60}m`;
-  if (minutes > 0) return `${minutes}m`;
-  return `${seconds}s`;
-}
-
-const DELETABLE_STATUSES = new Set(["completed", "failed", "cancelled"]);
-
 function environmentLabel(run: Run): string {
-  if (!run.environment || run.environment === "local") return "Local";
-  const gpuOption = run.modalGpuType
+  if (!run.environment || run.environment === "local") return "local";
+  const option = run.modalGpuType
     ? MODAL_GPU_OPTIONS.find(({ value }) => value === run.modalGpuType)
     : null;
-  return gpuOption ? `Modal · ${gpuOption.label}` : "Modal";
+  return option ? `modal · ${option.label.toLowerCase()}` : "modal";
+}
+
+function stepsLabel(run: Run): string {
+  const step = run.currentStep.toLocaleString();
+  const total = run.totalSteps !== null ? run.totalSteps.toLocaleString() : "—";
+  return `${step}/${total}`;
+}
+
+function formatRelative(iso: string | null): string {
+  if (!iso) return "—";
+  const delta = Date.now() - new Date(iso).getTime();
+  const minutes = Math.round(delta / 60000);
+  if (minutes < 1) return "now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  return `${days}d ago`;
+}
+
+function statusTag(status: RunStatus): React.ReactNode {
+  switch (status) {
+    case "running":
+      return <Badge variant="running">LIVE</Badge>;
+    case "paused":
+      return (
+        <Badge variant="warn" dot={false}>
+          PAUSED
+        </Badge>
+      );
+    case "failed":
+      return (
+        <Badge variant="danger" dot={false}>
+          FAILED
+        </Badge>
+      );
+    default:
+      return null;
+  }
 }
 
 export function RunList({
@@ -76,66 +99,77 @@ export function RunList({
 }: RunListProps): React.JSX.Element {
   if (runs.length === 0) {
     return (
-      <div className="py-12 flex flex-col items-center gap-3 text-sm text-muted-foreground">
-        <span>No runs yet.</span>
-      </div>
+      <Card>
+        <div className="flex flex-col items-center gap-3 py-12 font-mono text-[11px] text-ink-3">
+          No runs yet.
+        </div>
+      </Card>
     );
   }
 
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Run ID</TableHead>
-          <TableHead>Status</TableHead>
-          <TableHead>Environment</TableHead>
-          <TableHead>Stage</TableHead>
-          <TableHead>Duration</TableHead>
-          <TableHead>Config Version</TableHead>
-          <TableHead className="w-10" />
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {runs.map((run) => (
-          <TableRow
+    <Card>
+      <RunRow isHeader className={`${RUN_ROW_COLUMNS} px-[18px]`}>
+        <span />
+        <span>Run</span>
+        <span>Environment</span>
+        <span>Progress</span>
+        <span className="text-right">Started</span>
+        <span />
+        <span />
+      </RunRow>
+      {runs.map((run) => {
+        const isSelected = selectedRunId === run.id;
+        const isDeletable = DELETABLE_STATUSES.has(run.status);
+        return (
+          <RunRow
             key={run.id}
+            className={`${RUN_ROW_COLUMNS} px-[18px]`}
+            selected={isSelected}
             onClick={() => onSelectRun(run.id)}
-            className={`group cursor-pointer ${selectedRunId === run.id ? "bg-accent" : "hover:bg-muted/50"}`}
           >
-            <TableCell className="font-mono text-xs">{run.id.slice(0, 8)}</TableCell>
-            <TableCell>
-              <Badge variant={statusVariant(run.status)}>{run.status}</Badge>
-            </TableCell>
-            <TableCell className="text-xs text-muted-foreground">{environmentLabel(run)}</TableCell>
-            <TableCell className="text-sm text-muted-foreground">
-              {run.currentStage ?? "—"}
-            </TableCell>
-            <TableCell className="text-sm text-muted-foreground">
-              {formatDuration(run.startedAt, run.completedAt)}
-            </TableCell>
-            <TableCell className="font-mono text-xs text-muted-foreground">
-              {run.configVersionId.slice(0, 8)}
-            </TableCell>
-            <TableCell className="w-10 text-right">
-              {DELETABLE_STATUSES.has(run.status) && (
+            <StatusDot status={mapStatus(run.status)} />
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="truncate text-[12.5px] font-medium text-ink-1">
+                  run {run.id.slice(0, 6)}
+                </span>
+                {statusTag(run.status)}
+              </div>
+              <div className="font-mono text-[10.5px] text-ink-3">{run.id}</div>
+            </div>
+            <RunRowCell>{environmentLabel(run)}</RunRowCell>
+            <RunRowCell>{stepsLabel(run)}</RunRowCell>
+            <RunRowCell align="end">{formatRelative(run.startedAt ?? run.createdAt)}</RunRowCell>
+            <RunRowActions>
+              {isDeletable ? (
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
+                  className="h-7 w-7 text-ink-3 hover:text-[color:var(--danger)]"
                   disabled={isDeletingRunId === run.id}
-                  onClick={(e) => {
-                    e.stopPropagation();
+                  onClick={(event) => {
+                    event.stopPropagation();
                     onDeleteRun(run.id);
                   }}
                   aria-label="Delete run"
                 >
-                  <Trash2 className="h-3.5 w-3.5" />
+                  <Trash2 className="size-3.5" aria-hidden="true" />
                 </Button>
-              )}
-            </TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+              ) : null}
+            </RunRowActions>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-ink-3 opacity-0 group-hover:opacity-100"
+              onClick={(event) => event.stopPropagation()}
+              aria-label="More actions"
+            >
+              <MoreHorizontal className="size-3.5" aria-hidden="true" />
+            </Button>
+          </RunRow>
+        );
+      })}
+    </Card>
   );
 }

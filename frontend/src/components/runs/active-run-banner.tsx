@@ -1,7 +1,7 @@
 import * as React from "react";
 import type { Run } from "@/types/run";
-import { Progress } from "@/components/ui/progress";
-import { Badge } from "@/components/ui/badge";
+import type { ActiveRunStatus } from "@/components/shared/active-run-banner";
+import { ActiveRunBanner as SharedActiveRunBanner } from "@/components/shared/active-run-banner";
 
 interface ActiveRunBannerProps {
   readonly run: Run;
@@ -9,6 +9,39 @@ interface ActiveRunBannerProps {
   readonly totalSteps: number | null;
   readonly progressPct: number | null;
   readonly isConnected: boolean;
+  readonly configLabel?: string;
+  readonly lastLoss?: number | null;
+  readonly learningRate?: number | null;
+  readonly onPause?: () => void;
+  readonly onResume?: () => void;
+  readonly onStop?: () => void;
+}
+
+const DEFAULT_LOSS_FALLBACK = 0;
+const DEFAULT_LR_FALLBACK = 0;
+
+function resolveStatus(status: Run["status"]): ActiveRunStatus {
+  if (status === "paused") return "paused";
+  return "running";
+}
+
+function environmentLabel(run: Run): string {
+  if (!run.environment || run.environment === "local") return "local";
+  return run.modalGpuType ? `modal · ${run.modalGpuType}` : "modal";
+}
+
+function computeEtaSeconds({
+  startedAt,
+  percent,
+}: {
+  readonly startedAt: string | null;
+  readonly percent: number;
+}): number {
+  if (!startedAt || percent <= 0) return 0;
+  const elapsedMs = Date.now() - new Date(startedAt).getTime();
+  if (elapsedMs <= 0) return 0;
+  const projectedTotalMs = elapsedMs / (percent / 100);
+  return Math.max(0, Math.round((projectedTotalMs - elapsedMs) / 1000));
 }
 
 export function ActiveRunBanner({
@@ -17,44 +50,36 @@ export function ActiveRunBanner({
   totalSteps,
   progressPct,
   isConnected,
+  configLabel = "streaming",
+  lastLoss,
+  learningRate,
+  onPause,
+  onResume,
+  onStop,
 }: ActiveRunBannerProps): React.JSX.Element {
+  const status = resolveStatus(run.status);
   const displayPct = progressPct ?? run.progressPct;
-  const displayStep = currentStep ?? run.currentStep;
-  const displayTotal = totalSteps ?? run.totalSteps;
+  const step = currentStep ?? run.currentStep;
+  const total = totalSteps ?? run.totalSteps ?? Math.max(step, 1);
+  const etaSeconds = computeEtaSeconds({ startedAt: run.startedAt, percent: displayPct });
+  const connectionSuffix = isConnected ? "ws connected" : "ws reconnecting";
+  const runName = `run ${run.id.slice(0, 6)}`;
 
   return (
-    <div className="rounded-lg border bg-card p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
-          <span className="text-sm font-medium">Active Run</span>
-          <span className="font-mono text-xs text-muted-foreground">{run.id.slice(0, 8)}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          {!isConnected && (
-            <Badge variant="outline" className="text-xs text-yellow-600 border-yellow-400">
-              Reconnecting…
-            </Badge>
-          )}
-          {run.currentStage && (
-            <Badge variant="secondary" className="text-xs">
-              {run.currentStage.replace(/_/g, " ")}
-            </Badge>
-          )}
-        </div>
-      </div>
-
-      <div className="space-y-1">
-        <Progress value={displayPct} className="h-2" />
-        <div className="flex justify-between text-xs text-muted-foreground">
-          <span>{Math.round(displayPct)}%</span>
-          {displayTotal !== null && (
-            <span>
-              step {displayStep} / {displayTotal}
-            </span>
-          )}
-        </div>
-      </div>
-    </div>
+    <SharedActiveRunBanner
+      runName={runName}
+      configLabel={`${configLabel} · ${connectionSuffix}`}
+      runId={run.id}
+      env={environmentLabel(run)}
+      status={status}
+      step={step}
+      stepTotal={total}
+      loss={lastLoss ?? DEFAULT_LOSS_FALLBACK}
+      lr={learningRate ?? DEFAULT_LR_FALLBACK}
+      etaSeconds={etaSeconds}
+      onPause={onPause}
+      onResume={onResume}
+      onStop={onStop}
+    />
   );
 }

@@ -1,7 +1,7 @@
 import * as React from "react";
 import type { TrainingConfig } from "@/types/config";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 interface TrainingPreset {
   readonly name: string;
@@ -11,8 +11,8 @@ interface TrainingPreset {
 
 const TRAINING_PRESETS: ReadonlyArray<TrainingPreset> = [
   {
-    name: "Fast Convergence",
-    description: "Higher LR with short warmup — best for quick iteration on small datasets.",
+    name: "Fast convergence",
+    description: "Higher LR with short warmup — best for quick iteration.",
     values: {
       epochs: 3,
       batchSize: 4,
@@ -27,9 +27,8 @@ const TRAINING_PRESETS: ReadonlyArray<TrainingPreset> = [
     },
   },
   {
-    name: "Memory Efficient",
-    description:
-      "Minimal batch size with high gradient accumulation for large models on limited VRAM.",
+    name: "Memory efficient",
+    description: "Minimal batch size, high grad accumulation for large models.",
     values: {
       epochs: 2,
       batchSize: 1,
@@ -44,8 +43,8 @@ const TRAINING_PRESETS: ReadonlyArray<TrainingPreset> = [
     },
   },
   {
-    name: "Stable Baseline",
-    description: "Conservative LR and steady accumulation — reliable results with minimal tuning.",
+    name: "Stable baseline",
+    description: "Conservative LR and steady accumulation.",
     values: {
       epochs: 5,
       batchSize: 2,
@@ -67,28 +66,34 @@ interface TrainingPresetsPanelProps {
 
 export function TrainingPresetsPanel({ onApply }: TrainingPresetsPanelProps): React.JSX.Element {
   return (
-    <aside className="w-60 shrink-0 space-y-3">
-      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide px-1">
-        Presets
-      </p>
-      {TRAINING_PRESETS.map((preset) => (
-        <Card key={preset.name}>
-          <CardHeader className="pb-2 pt-4 px-4">
-            <CardTitle className="text-sm">{preset.name}</CardTitle>
-          </CardHeader>
-          <CardContent className="px-4 pb-4 space-y-3">
-            <p className="text-xs text-muted-foreground leading-relaxed">{preset.description}</p>
+    <Card>
+      <CardHeader>
+        <CardTitle>Presets</CardTitle>
+        <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-ink-3">
+          quick apply
+        </span>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        {TRAINING_PRESETS.map((preset) => (
+          <div
+            key={preset.name}
+            className="flex flex-col gap-2 rounded-md border border-hairline bg-surface-2 px-3 py-2.5"
+          >
+            <div className="text-[12.5px] font-medium text-ink-1">{preset.name}</div>
+            <div className="font-mono text-[10.5px] leading-snug text-ink-3">
+              {preset.description}
+            </div>
             <Button
               size="sm"
               variant="outline"
-              className="w-full text-xs h-7"
+              className="self-start"
               onClick={() => onApply(preset.values)}
             >
               Apply
             </Button>
-          </CardContent>
-        </Card>
-      ))}
-    </aside>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
   );
 }
