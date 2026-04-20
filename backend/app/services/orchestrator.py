@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import signal as _signal
 import sys
 import uuid
@@ -203,10 +204,12 @@ async def create_run(
     await session.commit()
     await session.refresh(run)
 
+    project_dir = Path(project.directory_path)
+
     await _write_config_snapshot(
-        session=session,
         run_id=run.id,
         project_id=project_id,
+        project_dir=project_dir,
         config_yaml=config_version.yaml_blob,
     )
 
@@ -232,10 +235,7 @@ async def create_run(
         if parent is not None and parent.last_checkpoint_path:
             resume_checkpoint = parent.last_checkpoint_path
 
-    config_path = _resolve_config_path(
-        config_version=config_version, project_dir=settings.projects_dir / project.name
-    )
-    project_dir = settings.projects_dir / project.name
+    config_path = _resolve_config_path(config_version=config_version, project_dir=project_dir)
 
     asyncio.create_task(
         _run_trainer_subprocess(
@@ -384,29 +384,35 @@ async def _record_artifact(
 
 async def _write_config_snapshot(
     *,
-    session: AsyncSession,
     run_id: str,
     project_id: str,
+    project_dir: Path,
     config_yaml: str,
 ) -> None:
-    run_dir = Path(settings.projects_dir) / project_id / "runs" / run_id
+    run_dir = project_dir / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     snapshot_path = run_dir / "config.yaml"
     effective_yaml = serialize_config_yaml_snapshot(raw_yaml=config_yaml)
-    snapshot_path.write_text(effective_yaml, encoding="utf-8")
 
-    artifact = Artifact(
-        id=str(uuid.uuid4()),
-        run_id=run_id,
-        project_id=project_id,
-        artifact_type="config_snapshot",
-        file_path=str(snapshot_path),
-        file_size_bytes=snapshot_path.stat().st_size,
-        is_retained=1,
-        created_at=datetime.now(UTC).isoformat(),
-    )
-    session.add(artifact)
-    await session.commit()
+    # tmp-write + os.replace keeps readers from observing a partial file if the
+    # process dies mid-write; matches trainer.py's checkpoint marker pattern.
+    tmp_path = snapshot_path.with_suffix(".yaml.tmp")
+    tmp_path.write_text(effective_yaml, encoding="utf-8")
+    os.replace(tmp_path, snapshot_path)
+
+    async with async_session_factory() as session:
+        artifact = Artifact(
+            id=str(uuid.uuid4()),
+            run_id=run_id,
+            project_id=project_id,
+            artifact_type="config_snapshot",
+            file_path=str(snapshot_path),
+            file_size_bytes=snapshot_path.stat().st_size,
+            is_retained=1,
+            created_at=datetime.now(UTC).isoformat(),
+        )
+        session.add(artifact)
+        await session.commit()
 
 
 async def _process_trainer_event(

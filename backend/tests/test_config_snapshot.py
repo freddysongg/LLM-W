@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -7,10 +8,12 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from app.core import config as cfg_module
 from app.core.database import Base, get_db_session
 from app.core.exceptions import ConfigValidationError
 from app.main import app
 from app.models.artifact import Artifact
+from app.services import orchestrator as orchestrator_module
 from app.services.config_service import (
     compute_config_diff,
     serialize_config_yaml_snapshot,
@@ -78,24 +81,42 @@ def test_serialize_config_yaml_snapshot_wraps_yaml_parse_errors() -> None:
 
 
 @pytest.fixture
-async def db_session():
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    async with factory() as session:
-        yield session
-    await engine.dispose()
+async def test_engine():
+    # Shared file-backed SQLite so the request-scoped session and the helper's
+    # internally-opened session both observe the same schema and data.
+    with tempfile.TemporaryDirectory(prefix="snapshot-test-") as tmp_dir:
+        db_path = Path(tmp_dir) / "workbench.db"
+        engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        try:
+            yield engine
+        finally:
+            await engine.dispose()
 
 
 @pytest.fixture
-async def client(db_session, tmp_path, monkeypatch):
-    from app.core import config as cfg_module
+async def db_session(test_engine):
+    factory = async_sessionmaker(test_engine, expire_on_commit=False)
+    async with factory() as session:
+        yield session
 
+
+@pytest.fixture
+async def client(test_engine, db_session, tmp_path, monkeypatch):
     monkeypatch.setattr(cfg_module.settings, "projects_dir", tmp_path)
 
+    async def _noop_trainer(*args: object, **kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(orchestrator_module, "_run_trainer_subprocess", _noop_trainer)
+
+    shared_factory = async_sessionmaker(test_engine, expire_on_commit=False)
+    monkeypatch.setattr(orchestrator_module, "async_session_factory", shared_factory)
+
     async def override_db():
-        yield db_session
+        async with shared_factory() as session:
+            yield session
 
     app.dependency_overrides[get_db_session] = override_db
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
@@ -106,7 +127,6 @@ async def client(db_session, tmp_path, monkeypatch):
 async def test_create_run_writes_config_snapshot_artifact(
     client: AsyncClient,
     db_session,
-    tmp_path: Path,
 ) -> None:
     project_response = await client.post(
         "/api/v1/projects", json={"name": "snap", "description": ""}
@@ -117,9 +137,6 @@ async def test_create_run_writes_config_snapshot_artifact(
         json={"config_version_id": project["active_config_version_id"], "name": "r"},
     )
     run = run_response.json()
-
-    expected = tmp_path / project["id"] / "runs" / run["id"] / "config.yaml"
-    assert expected.exists()
 
     rows = (
         (
@@ -134,5 +151,9 @@ async def test_create_run_writes_config_snapshot_artifact(
         .all()
     )
     assert len(rows) == 1
-    assert rows[0].file_path == str(expected)
+    snapshot_path = Path(rows[0].file_path)
+    assert snapshot_path.exists()
+    assert snapshot_path.parent.name == run["id"]
+    assert snapshot_path.parent.parent.name == "runs"
+    assert snapshot_path.parent.parent.parent == Path(project["directory_path"])
     assert rows[0].is_retained == 1
