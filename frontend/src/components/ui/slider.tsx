@@ -11,15 +11,17 @@ const Slider = React.forwardRef<
     className={cn("relative flex w-full touch-none select-none items-center", className)}
     {...props}
   >
-    <SliderPrimitive.Track className="relative h-[3px] w-full grow overflow-hidden rounded-full bg-hairline">
-      <SliderPrimitive.Range className="absolute h-full bg-[color:var(--iris-3)]" />
+    <SliderPrimitive.Track className="relative h-[2px] w-full grow overflow-hidden rounded-full bg-hairline">
+      <SliderPrimitive.Range className="absolute h-full bg-[color:var(--hairline-strong)]" />
     </SliderPrimitive.Track>
     <SliderPrimitive.Thumb
       className={cn(
-        "block h-4 w-4 rounded-full border border-hairline-strong bg-surface shadow-token-sm",
-        "transition-transform duration-[140ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
-        "hover:scale-110",
-        "focus-visible:outline-none focus-visible:[box-shadow:var(--focus-ring)]",
+        "block h-2 w-2 rounded-full bg-[color:var(--ink-1)]",
+        "shadow-[0_0_0_3px_var(--surface),0_0_0_4px_var(--hairline-strong)]",
+        "transition-[box-shadow] duration-[140ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
+        "hover:shadow-[0_0_0_3px_var(--surface),0_0_0_5px_var(--hairline-strong)]",
+        "focus-visible:outline-none",
+        "focus-visible:shadow-[0_0_0_3px_var(--surface),0_0_0_4px_var(--hairline-strong),var(--focus-ring)]",
         "disabled:pointer-events-none disabled:opacity-50",
       )}
     />

@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Slider } from "@/components/ui/slider";
+import { SliderRow } from "@/components/shared/slider-row";
 import {
   Select,
   SelectContent,
@@ -75,7 +75,7 @@ export function TrainingScheduleTab({
           <CardTitle>Checkpoints and eval</CardTitle>
         </CardHeader>
         <CardContent className="space-y-5">
-          <ScheduleSliderRow
+          <SliderRow
             label="Warmup steps"
             value={optimization.warmupSteps}
             min={0}
@@ -84,7 +84,7 @@ export function TrainingScheduleTab({
             formatValue={(value) => value.toFixed(0)}
             onChange={(value) => onChange({ optimization: { warmupSteps: value } })}
           />
-          <ScheduleSliderRow
+          <SliderRow
             label="Save checkpoint every"
             value={training.saveSteps}
             min={100}
@@ -93,7 +93,7 @@ export function TrainingScheduleTab({
             formatValue={(value) => `${value} steps`}
             onChange={(value) => onChange({ training: { saveSteps: value } })}
           />
-          <ScheduleSliderRow
+          <SliderRow
             label="Run eval every"
             value={training.evalSteps}
             min={100}
@@ -112,40 +112,6 @@ export function TrainingScheduleTab({
           </div>
         </CardContent>
       </Card>
-    </div>
-  );
-}
-
-interface ScheduleSliderRowProps {
-  readonly label: string;
-  readonly value: number;
-  readonly min: number;
-  readonly max: number;
-  readonly step: number;
-  readonly formatValue: (value: number) => string;
-  readonly onChange: (value: number) => void;
-}
-
-function ScheduleSliderRow({
-  label,
-  value,
-  min,
-  max,
-  step,
-  formatValue,
-  onChange,
-}: ScheduleSliderRowProps): React.JSX.Element {
-  const handleChange = (values: number[]): void => {
-    const next = values[0];
-    if (typeof next === "number") onChange(next);
-  };
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <span className="text-[12.5px] text-ink-2">{label}</span>
-        <span className="font-mono text-[11px] text-ink-1">{formatValue(value)}</span>
-      </div>
-      <Slider value={[value]} min={min} max={max} step={step} onValueChange={handleChange} />
     </div>
   );
 }

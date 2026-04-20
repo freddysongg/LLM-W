@@ -1,7 +1,7 @@
 import * as React from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Slider } from "@/components/ui/slider";
+import { SliderRow } from "@/components/shared/slider-row";
 import type { SampleMode } from "@/stores/app-store";
 import type { SplitCounts } from "@/types/dataset";
 
@@ -173,27 +173,17 @@ export function DatasetSubsetSelector({
         </div>
 
         {sampleMode === "percentage" && (
-          <div className="space-y-1">
-            <div className="flex items-center gap-4">
-              <Slider
-                min={10}
-                max={100}
-                step={5}
-                value={[percentageValue]}
-                onValueChange={([pct]) => handlePercentageChange(pct)}
-                disabled={totalRows === null}
-                className="flex-1"
-              />
-              <span className="mono text-ink-1 text-[13px] tabular-nums w-10 shrink-0 text-right">
-                {percentageValue}%
-              </span>
-            </div>
-            {computedRows !== null && (
-              <p className="text-xs text-muted-foreground">
-                ≈ {computedRows.toLocaleString()} rows
-              </p>
-            )}
-          </div>
+          <SliderRow
+            label="Sample"
+            value={percentageValue}
+            min={10}
+            max={100}
+            step={5}
+            formatValue={(pct) => `${pct}%`}
+            onChange={handlePercentageChange}
+            disabled={totalRows === null}
+            helpText={computedRows !== null ? `≈ ${computedRows.toLocaleString()} rows` : undefined}
+          />
         )}
 
         {sampleMode === "rows" && (

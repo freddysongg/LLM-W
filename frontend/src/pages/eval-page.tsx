@@ -18,7 +18,7 @@ import { BenchmarkRow } from "@/components/eval/benchmark-row";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Slider } from "@/components/ui/slider";
+import { SliderRow } from "@/components/shared/slider-row";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
@@ -115,48 +115,33 @@ function PlaygroundTab(): React.JSX.Element {
             rows={6}
             aria-label="Playground prompt"
           />
-          <div className="flex flex-col gap-1.5">
-            <div className="flex items-center justify-between font-mono text-[11px] text-ink-3">
-              <span>Temperature</span>
-              <span className="text-ink-1">{temperature.toFixed(2)}</span>
-            </div>
-            <Slider
-              aria-label="Temperature"
-              min={0}
-              max={2}
-              step={0.05}
-              value={[temperature]}
-              onValueChange={(next) => setTemperature(next[0] ?? 0)}
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <div className="flex items-center justify-between font-mono text-[11px] text-ink-3">
-              <span>top-p</span>
-              <span className="text-ink-1">{topP.toFixed(2)}</span>
-            </div>
-            <Slider
-              aria-label="top-p"
-              min={0}
-              max={1}
-              step={0.01}
-              value={[topP]}
-              onValueChange={(next) => setTopP(next[0] ?? 0)}
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <div className="flex items-center justify-between font-mono text-[11px] text-ink-3">
-              <span>Max tokens</span>
-              <span className="text-ink-1">{maxTokens}</span>
-            </div>
-            <Slider
-              aria-label="Max tokens"
-              min={32}
-              max={2048}
-              step={32}
-              value={[maxTokens]}
-              onValueChange={(next) => setMaxTokens(next[0] ?? 32)}
-            />
-          </div>
+          <SliderRow
+            label="Temperature"
+            value={temperature}
+            min={0}
+            max={2}
+            step={0.05}
+            formatValue={(value) => value.toFixed(2)}
+            onChange={setTemperature}
+          />
+          <SliderRow
+            label="top-p"
+            value={topP}
+            min={0}
+            max={1}
+            step={0.01}
+            formatValue={(value) => value.toFixed(2)}
+            onChange={setTopP}
+          />
+          <SliderRow
+            label="Max tokens"
+            value={maxTokens}
+            min={32}
+            max={2048}
+            step={32}
+            formatValue={(value) => value.toFixed(0)}
+            onChange={setMaxTokens}
+          />
           <Button variant="primary" size="sm" onClick={handleGenerate}>
             <Play aria-hidden="true" />
             Generate both

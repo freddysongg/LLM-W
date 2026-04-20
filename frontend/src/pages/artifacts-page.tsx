@@ -11,7 +11,6 @@ import { StorageBar } from "@/components/artifacts/storage-bar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import {
   AlertDialog,
@@ -27,6 +26,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { StatusDot } from "@/components/shared/status-dot";
 import { RunRow, RunRowActions, RunRowCell } from "@/components/shared/run-row";
+import { SliderRow } from "@/components/shared/slider-row";
 import { getArtifactDownloadUrl } from "@/api/artifacts";
 import { cn } from "@/lib/utils";
 
@@ -274,34 +274,24 @@ function StorageTab({
           <CardTitle>Retention policy</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <div className="flex flex-col gap-1.5">
-            <div className="flex items-center justify-between font-mono text-[11px] text-ink-3">
-              <span>Keep last N runs</span>
-              <span className="text-ink-1">{keepLastN}</span>
-            </div>
-            <Slider
-              aria-label="Keep last N runs"
-              min={1}
-              max={20}
-              step={1}
-              value={[keepLastN]}
-              onValueChange={(next) => setKeepLastN(next[0] ?? 1)}
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <div className="flex items-center justify-between font-mono text-[11px] text-ink-3">
-              <span>Archive after X days</span>
-              <span className="text-ink-1">{archiveAfterDays} days</span>
-            </div>
-            <Slider
-              aria-label="Archive after days"
-              min={1}
-              max={180}
-              step={1}
-              value={[archiveAfterDays]}
-              onValueChange={(next) => setArchiveAfterDays(next[0] ?? 1)}
-            />
-          </div>
+          <SliderRow
+            label="Keep last N runs"
+            value={keepLastN}
+            min={1}
+            max={20}
+            step={1}
+            formatValue={(value) => value.toFixed(0)}
+            onChange={setKeepLastN}
+          />
+          <SliderRow
+            label="Archive after X days"
+            value={archiveAfterDays}
+            min={1}
+            max={180}
+            step={1}
+            formatValue={(value) => `${value} days`}
+            onChange={setArchiveAfterDays}
+          />
           <label className="flex items-center justify-between gap-2 font-mono text-[11px] text-ink-2">
             <span>Auto-prune stale checkpoints</span>
             <Switch

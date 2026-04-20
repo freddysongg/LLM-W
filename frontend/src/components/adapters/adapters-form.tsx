@@ -9,12 +9,12 @@ import type {
   MixedPrecisionMode,
 } from "@/types/config";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Chip } from "@/components/shared/chip";
 import { KVList } from "@/components/shared/kv-list";
+import { SliderRow } from "@/components/shared/slider-row";
 import { EffectiveShapeDiagram } from "@/components/adapters/effective-shape-diagram";
 import { VramBudgetBar, type VramSegment } from "@/components/adapters/vram-budget-bar";
 import { cn } from "@/lib/utils";
@@ -208,55 +208,35 @@ function LoRaSection({
             />
           </div>
 
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <Label className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3">
-                Rank (r)
-              </Label>
-              <span className="font-mono text-[11px] text-ink-1">{adapters.rank}</span>
-            </div>
-            <Slider
-              value={[adapters.rank]}
-              min={4}
-              max={128}
-              step={4}
-              onValueChange={([value]) => onAdaptersChange({ rank: value })}
-            />
-          </div>
+          <SliderRow
+            label="Rank (r)"
+            value={adapters.rank}
+            min={4}
+            max={128}
+            step={4}
+            formatValue={(value) => value.toFixed(0)}
+            onChange={(value) => onAdaptersChange({ rank: value })}
+          />
 
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <Label className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3">
-                Alpha (α)
-              </Label>
-              <span className="font-mono text-[11px] text-ink-1">{adapters.alpha}</span>
-            </div>
-            <Slider
-              value={[adapters.alpha]}
-              min={4}
-              max={128}
-              step={4}
-              onValueChange={([value]) => onAdaptersChange({ alpha: value })}
-            />
-          </div>
+          <SliderRow
+            label="Alpha (α)"
+            value={adapters.alpha}
+            min={4}
+            max={128}
+            step={4}
+            formatValue={(value) => value.toFixed(0)}
+            onChange={(value) => onAdaptersChange({ alpha: value })}
+          />
 
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <Label className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3">
-                Dropout
-              </Label>
-              <span className="font-mono text-[11px] text-ink-1">
-                {adapters.dropout.toFixed(2)}
-              </span>
-            </div>
-            <Slider
-              value={[adapters.dropout]}
-              min={0}
-              max={0.3}
-              step={0.01}
-              onValueChange={([value]) => onAdaptersChange({ dropout: value })}
-            />
-          </div>
+          <SliderRow
+            label="Dropout"
+            value={adapters.dropout}
+            min={0}
+            max={0.3}
+            step={0.01}
+            formatValue={(value) => value.toFixed(2)}
+            onChange={(value) => onAdaptersChange({ dropout: value })}
+          />
 
           <div className="space-y-2">
             <Label className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3">

@@ -1,7 +1,7 @@
 import * as React from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Slider } from "@/components/ui/slider";
+import { SliderRow } from "@/components/shared/slider-row";
 import { cn } from "@/lib/utils";
 import type { AdaptersConfig, MixedPrecisionMode } from "@/types/config";
 import type {
@@ -252,40 +252,6 @@ export function TrainingConfigTab({ slice, onChange }: TrainingConfigTabProps): 
           </div>
         </CardContent>
       </Card>
-    </div>
-  );
-}
-
-interface SliderRowProps {
-  readonly label: string;
-  readonly value: number;
-  readonly min: number;
-  readonly max: number;
-  readonly step: number;
-  readonly formatValue: (value: number) => string;
-  readonly onChange: (value: number) => void;
-}
-
-function SliderRow({
-  label,
-  value,
-  min,
-  max,
-  step,
-  formatValue,
-  onChange,
-}: SliderRowProps): React.JSX.Element {
-  const handleChange = (values: number[]): void => {
-    const next = values[0];
-    if (typeof next === "number") onChange(next);
-  };
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <span className="text-[12.5px] text-ink-2">{label}</span>
-        <span className="font-mono text-[11px] text-ink-1">{formatValue(value)}</span>
-      </div>
-      <Slider value={[value]} min={min} max={max} step={step} onValueChange={handleChange} />
     </div>
   );
 }
