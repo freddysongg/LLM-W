@@ -25,7 +25,9 @@ const FORMAT_OPTIONS: ReadonlyArray<{ value: DatasetFormat; label: string }> = [
 export function FormatSelector({ value, onChange }: FormatSelectorProps): React.JSX.Element {
   return (
     <div className="space-y-2">
-      <Label htmlFor="dataset-format">Format</Label>
+      <Label htmlFor="dataset-format" className="caps text-ink-3">
+        Format
+      </Label>
       <Select value={value} onValueChange={(val) => onChange(val as DatasetFormat)}>
         <SelectTrigger id="dataset-format">
           <SelectValue />

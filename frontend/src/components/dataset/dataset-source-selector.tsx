@@ -1,6 +1,5 @@
 import * as React from "react";
 import type { DatasetSource } from "@/types/config";
-import { Label } from "@/components/ui/label";
 
 interface DatasetSourceSelectorProps {
   readonly value: DatasetSource;
@@ -36,7 +35,7 @@ export function DatasetSourceSelector({
 }: DatasetSourceSelectorProps): React.JSX.Element {
   return (
     <div className="space-y-2">
-      <Label>Dataset Source</Label>
+      <span className="caps block text-ink-3">Dataset Source</span>
       <div className="grid grid-cols-2 gap-2">
         {SOURCES.map((source) => (
           <button

@@ -30,7 +30,9 @@ export function DatasetIdInput({
 }: DatasetIdInputProps): React.JSX.Element {
   return (
     <div className="space-y-2">
-      <Label htmlFor="dataset-id">{LABELS[source]}</Label>
+      <Label htmlFor="dataset-id" className="caps text-ink-3">
+        {LABELS[source]}
+      </Label>
       <Input
         id="dataset-id"
         type="text"

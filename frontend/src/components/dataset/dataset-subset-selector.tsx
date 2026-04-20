@@ -1,5 +1,4 @@
 import * as React from "react";
-import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
@@ -100,19 +99,34 @@ export function DatasetSubsetSelector({
   return (
     <div className="space-y-4">
       <div className="space-y-2">
-        <Label>Split ratios</Label>
+        <span className="caps block text-ink-3">Split ratios</span>
         <div className="grid grid-cols-3 gap-3">
           {(
             [
-              { field: "train" as SplitField, label: "Train", ratio: trainRatio, resolved: splitCounts?.train ?? null },
-              { field: "val" as SplitField, label: "Validation", ratio: valRatio, resolved: splitCounts?.validation ?? null },
-              { field: "test" as SplitField, label: "Test", ratio: testRatio, resolved: splitCounts?.test ?? null },
+              {
+                field: "train" as SplitField,
+                label: "Train",
+                ratio: trainRatio,
+                resolved: splitCounts?.train ?? null,
+              },
+              {
+                field: "val" as SplitField,
+                label: "Validation",
+                ratio: valRatio,
+                resolved: splitCounts?.validation ?? null,
+              },
+              {
+                field: "test" as SplitField,
+                label: "Test",
+                ratio: testRatio,
+                resolved: splitCounts?.test ?? null,
+              },
             ] as const
           ).map(({ field, label, ratio, resolved }) => {
             const estimate = rowEstimate(ratio);
             return (
               <div key={field} className="space-y-1">
-                <Label className="text-xs text-muted-foreground">{label}</Label>
+                <span className="caps text-ink-3">{label}</span>
                 <div className="flex items-center gap-1">
                   <Input
                     type="number"
@@ -125,9 +139,7 @@ export function DatasetSubsetSelector({
                   />
                   <span className="text-xs text-muted-foreground shrink-0">%</span>
                 </div>
-                {estimate !== null && (
-                  <p className="text-xs text-muted-foreground">{estimate}</p>
-                )}
+                {estimate !== null && <p className="text-xs text-muted-foreground">{estimate}</p>}
                 {resolved !== null && (
                   <p className="text-xs text-muted-foreground">
                     resolved: {resolved.toLocaleString()}
@@ -143,7 +155,7 @@ export function DatasetSubsetSelector({
       </div>
 
       <div className="space-y-2">
-        <Label>Sample size</Label>
+        <span className="caps block text-ink-3">Sample size</span>
         <div className="flex gap-1">
           {(["all", "percentage", "rows"] as const).map((mode) => (
             <Button
@@ -153,6 +165,7 @@ export function DatasetSubsetSelector({
               size="sm"
               disabled={mode === "percentage" && totalRows === null}
               onClick={() => handleSampleModeChange(mode)}
+              className="font-mono uppercase tracking-[0.08em]"
             >
               {mode === "all" ? "All" : mode === "percentage" ? "Percentage" : "Row limit"}
             </Button>
@@ -161,16 +174,19 @@ export function DatasetSubsetSelector({
 
         {sampleMode === "percentage" && (
           <div className="space-y-1">
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-4">
               <Slider
                 min={10}
                 max={100}
                 step={5}
                 value={[percentageValue]}
                 onValueChange={([pct]) => handlePercentageChange(pct)}
+                disabled={totalRows === null}
                 className="flex-1"
               />
-              <span className="text-sm tabular-nums w-12 text-right">{percentageValue}%</span>
+              <span className="mono text-ink-1 text-[13px] tabular-nums w-10 shrink-0 text-right">
+                {percentageValue}%
+              </span>
             </div>
             {computedRows !== null && (
               <p className="text-xs text-muted-foreground">
