@@ -157,3 +157,45 @@ async def test_create_run_writes_config_snapshot_artifact(
     assert snapshot_path.parent.parent.name == "runs"
     assert snapshot_path.parent.parent.parent == Path(project["directory_path"])
     assert rows[0].is_retained == 1
+
+
+async def test_get_config_snapshot_returns_yaml_and_diff(client: AsyncClient) -> None:
+    project = (
+        await client.post(
+            "/api/v1/projects", json={"name": "d", "description": ""}
+        )
+    ).json()
+    run = (
+        await client.post(
+            f"/api/v1/projects/{project['id']}/runs",
+            json={
+                "config_version_id": project["active_config_version_id"],
+                "name": "r",
+            },
+        )
+    ).json()
+
+    resp = await client.get(
+        f"/api/v1/projects/{project['id']}/runs/{run['id']}/config-snapshot"
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["run_id"] == run["id"]
+    assert body["parent_config_version_id"] == project["active_config_version_id"]
+    assert "project:" in body["yaml"]
+    assert "changed" in body["diff"]
+    assert "added" in body["diff"]
+    assert "removed" in body["diff"]
+
+
+async def test_get_config_snapshot_404_for_missing_run(client: AsyncClient) -> None:
+    project = (
+        await client.post(
+            "/api/v1/projects", json={"name": "n", "description": ""}
+        )
+    ).json()
+    resp = await client.get(
+        f"/api/v1/projects/{project['id']}/runs/bogus/config-snapshot"
+    )
+    assert resp.status_code == 404
+    assert resp.json()["error"]["code"] == "RUN_NOT_FOUND"

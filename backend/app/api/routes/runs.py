@@ -24,6 +24,7 @@ from app.schemas.run import (
     RunResumeResponse,
     RunStageResponse,
 )
+from app.schemas.run_observability import ConfigSnapshotResponse
 from app.services import orchestrator, run_service
 from app.services.project_service import get_project
 from app.services.training_dispatcher import UnsupportedEnvironmentError
@@ -288,6 +289,28 @@ async def list_checkpoints(
             session=session,
             run_id=run_id,
             project_id=project_id,
+        )
+    except RunNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "RUN_NOT_FOUND", "message": str(exc), "details": {}},
+        ) from exc
+
+
+@router.get(
+    "/{project_id}/runs/{run_id}/config-snapshot",
+    response_model=ConfigSnapshotResponse,
+)
+async def get_run_config_snapshot(
+    project_id: str,
+    run_id: str,
+    session: DbSession,
+) -> ConfigSnapshotResponse:
+    try:
+        return await run_service.get_config_snapshot(
+            session=session,
+            project_id=project_id,
+            run_id=run_id,
         )
     except RunNotFoundError as exc:
         raise HTTPException(

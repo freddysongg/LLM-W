@@ -35,6 +35,8 @@ from app.schemas.run import (
     RunResumeResponse,
     RunStageResponse,
 )
+from app.schemas.run_observability import ConfigDiff, ConfigSnapshotResponse
+from app.services.config_service import compute_config_diff
 
 _CANCELLABLE_STATUSES = frozenset({"pending", "running", "paused"})
 _PAUSABLE_STATUSES = frozenset({"running"})
@@ -306,6 +308,38 @@ async def list_checkpoints(
         )
         for a in artifacts
     ]
+
+
+async def get_config_snapshot(
+    *,
+    session: AsyncSession,
+    project_id: str,
+    run_id: str,
+) -> ConfigSnapshotResponse:
+    run = await get_run(session=session, run_id=run_id, project_id=project_id)
+
+    artifact = (
+        await session.execute(
+            select(Artifact).where(
+                Artifact.run_id == run_id,
+                Artifact.artifact_type == "config_snapshot",
+            )
+        )
+    ).scalar_one_or_none()
+    if artifact is None:
+        raise RunNotFoundError(f"no config snapshot for run {run_id}")
+
+    snapshot_yaml = Path(artifact.file_path).read_text(encoding="utf-8")
+    parent = await session.get(ConfigVersion, run.config_version_id)
+    parent_yaml = parent.yaml_blob if parent is not None else ""
+    diff_dict = compute_config_diff(old_yaml=parent_yaml, new_yaml=snapshot_yaml)
+
+    return ConfigSnapshotResponse(
+        run_id=run_id,
+        parent_config_version_id=run.config_version_id,
+        yaml=snapshot_yaml,
+        diff=ConfigDiff(**diff_dict),
+    )
 
 
 async def compare_runs(
