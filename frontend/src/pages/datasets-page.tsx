@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Download, Eye, Plus } from "lucide-react";
+import { Check, Download, Eye, Pencil, Plus } from "lucide-react";
 import { useAppStore } from "@/stores/app-store";
 import { useDatasetProfile, useResolveDataset } from "@/hooks/useDatasetProfile";
 import { useDatasetSamples, usePreviewTransform } from "@/hooks/useDatasetSamples";
@@ -12,6 +12,7 @@ import type {
 import type { DatasetFormat, DatasetSource } from "@/types/config";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -54,6 +55,9 @@ type LibraryFormatFilter = "all" | "chatml" | "alpaca" | "paired";
 
 type AddDatasetSplitMode = "auto" | "manual" | "single";
 
+// TODO(datasets-realign): the four visible source pills are UI-only; only `huggingface` and `upload-file` map to real backend sources today -- remove when the backend DatasetSource union grows s3/gcs/url support
+type AddSourceOption = "huggingface" | "upload-file" | "s3-gcs" | "url";
+
 interface LibraryEntry {
   readonly name: string;
   readonly format: DatasetFormat;
@@ -64,10 +68,17 @@ interface LibraryEntry {
 }
 
 interface AddDatasetDraft {
-  readonly source: DatasetSource;
+  readonly sourceMode: AddSourceOption;
   readonly path: string;
   readonly format: DatasetFormat;
   readonly splitMode: AddDatasetSplitMode;
+}
+
+interface AddSourceMeta {
+  readonly label: string;
+  readonly fieldLabel: string;
+  readonly placeholder: string;
+  readonly cliSourceFlag: string;
 }
 
 interface SplitDraft {
@@ -86,7 +97,7 @@ interface ApplyTrainRatioParams {
   readonly current: SplitDraft;
 }
 
-const LIBRARY_ROW_COLUMNS = "18px minmax(0,1fr) 72px 64px 32px";
+const LIBRARY_ROW_COLUMNS = "18px minmax(0,1fr) 72px 64px 28px";
 
 const LIBRARY_ROW_STYLE: React.CSSProperties = {
   gridTemplateColumns: LIBRARY_ROW_COLUMNS,
@@ -102,16 +113,59 @@ const FORMAT_FILTER_OPTIONS: ReadonlyArray<{
   { value: "paired", label: "PAIRED" },
 ];
 
-const ADD_SOURCE_OPTIONS: ReadonlyArray<{
-  readonly value: DatasetSource;
+const ADD_SOURCE_PILLS: ReadonlyArray<{
+  readonly value: AddSourceOption;
   readonly label: string;
-  readonly placeholder: string;
 }> = [
-  { value: "huggingface", label: "HuggingFace", placeholder: "HuggingFaceH4/ultrachat_200k" },
-  { value: "local_jsonl", label: "Local JSONL", placeholder: "data/train.jsonl" },
-  { value: "local_csv", label: "Local CSV", placeholder: "data/train.csv" },
-  { value: "custom", label: "Custom", placeholder: "path/to/dataset" },
+  { value: "huggingface", label: "HuggingFace" },
+  { value: "upload-file", label: "Upload file" },
+  { value: "s3-gcs", label: "S3 / GCS" },
+  { value: "url", label: "URL" },
 ];
+
+const ADD_SOURCE_META: Record<AddSourceOption, AddSourceMeta> = {
+  huggingface: {
+    label: "HuggingFace",
+    fieldLabel: "HF dataset",
+    placeholder: "HuggingFaceH4/ultrachat_200k",
+    cliSourceFlag: "hf",
+  },
+  "upload-file": {
+    label: "Upload file",
+    fieldLabel: "File path",
+    placeholder: "./datasets/my-data.jsonl",
+    cliSourceFlag: "local",
+  },
+  "s3-gcs": {
+    label: "S3 / GCS",
+    fieldLabel: "S3 / GCS URI",
+    placeholder: "s3://bucket/path/data.jsonl",
+    cliSourceFlag: "s3",
+  },
+  url: {
+    label: "URL",
+    fieldLabel: "URL",
+    placeholder: "https://example.com/data.jsonl",
+    cliSourceFlag: "url",
+  },
+};
+
+// TODO(datasets-realign): only `huggingface` and `upload-file` have backend support today; s3/gcs and url fall through to a toast stub -- remove when ingestion for cloud sources exists
+function resolveIngestSource(sourceMode: AddSourceOption): DatasetSource | null {
+  switch (sourceMode) {
+    case "huggingface":
+      return "huggingface";
+    case "upload-file":
+      return "local_jsonl";
+    case "s3-gcs":
+    case "url":
+      return null;
+    default: {
+      const exhaustiveCheck: never = sourceMode;
+      return exhaustiveCheck;
+    }
+  }
+}
 
 const ADD_FORMAT_OPTIONS: ReadonlyArray<{
   readonly value: DatasetFormat;
@@ -134,7 +188,7 @@ const SPLIT_MODE_OPTIONS: ReadonlyArray<{
 ];
 
 const DEFAULT_ADD_DRAFT: AddDatasetDraft = {
-  source: "huggingface",
+  sourceMode: "huggingface",
   path: "",
   format: "default",
   splitMode: "auto",
@@ -274,11 +328,21 @@ export default function DatasetsPage(): React.JSX.Element {
   };
 
   const handleIngestSubmit = (): void => {
+    const resolvedSource = resolveIngestSource(addDraft.sourceMode);
+    const { label: sourceLabel } = ADD_SOURCE_META[addDraft.sourceMode];
+    if (resolvedSource === null) {
+      // TODO(datasets-realign): stub-only branch for s3/gcs/url -- remove when /api/v1/datasets/ingest supports cloud sources
+      toast({
+        title: "Coming soon",
+        description: `${sourceLabel} ingestion is not wired up yet.`,
+      });
+      return;
+    }
     setActiveDialog(null);
     // TODO(datasets-realign): wire to real ingestion API -- remove when /api/v1/datasets/ingest lands; today users must still use the inline Dataset configuration form on the page
     toast({
       title: "Dataset queued for ingest",
-      description: `${addDraft.source} · ${addDraft.path || "<path>"}`,
+      description: `${resolvedSource} · ${addDraft.path || "<path>"}`,
     });
   };
 
@@ -395,6 +459,7 @@ export default function DatasetsPage(): React.JSX.Element {
                           <span className="truncate font-mono text-[12px] text-ink-1">
                             {entry.name}
                           </span>
+                          {isSelected ? <Badge variant="iris">ACTIVE</Badge> : null}
                         </div>
                         <div className="truncate font-mono text-[10px] text-ink-3">
                           {entry.format} · {entry.rows} rows
@@ -424,9 +489,11 @@ export default function DatasetsPage(): React.JSX.Element {
                 </div>
                 <div className="flex items-center gap-2">
                   <Button variant="outline" size="sm" onClick={() => setActiveDialog("splits")}>
+                    <Pencil className="size-3" aria-hidden="true" />
                     Splits
                   </Button>
                   <Button variant="outline" size="sm" onClick={() => setActiveDialog("validate")}>
+                    <Check className="size-3" aria-hidden="true" />
                     Validate
                   </Button>
                 </div>
@@ -449,7 +516,7 @@ export default function DatasetsPage(): React.JSX.Element {
                 <CardHeader>
                   <CardTitle>Token length distribution</CardTitle>
                   <span className="caps text-ink-3">
-                    μ={meanTokensLabel} · σ={stddevLabel}
+                    M={meanTokensLabel} · Σ={stddevLabel}
                   </span>
                 </CardHeader>
                 <CardContent>
@@ -673,36 +740,29 @@ function AddDatasetDialog({
   onCancel,
   onIngest,
 }: AddDatasetDialogProps): React.JSX.Element {
-  const activeSource = ADD_SOURCE_OPTIONS.find(({ value }) => value === draft.source);
-  const placeholder = activeSource?.placeholder ?? "";
+  const { fieldLabel, placeholder, cliSourceFlag } = ADD_SOURCE_META[draft.sourceMode];
 
   return (
     <Dialog open={isOpen} onOpenChange={(next) => (next ? undefined : onCancel())}>
-      <DialogContent className="max-w-[560px]">
+      <DialogContent className="max-w-[760px]">
         <DialogHeader>
           <DialogTitle>Add dataset</DialogTitle>
         </DialogHeader>
         <div className="flex flex-col gap-4 px-6 py-5">
           <div className="space-y-2">
-            <Label htmlFor="add-dataset-source">Source</Label>
-            <Select
-              value={draft.source}
-              onValueChange={(next) => onDraftChange({ ...draft, source: next as DatasetSource })}
-            >
-              <SelectTrigger id="add-dataset-source">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {ADD_SOURCE_OPTIONS.map(({ value, label }) => (
-                  <SelectItem key={value} value={value}>
-                    {label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <span className="caps block text-ink-3">Source</span>
+            <RangePills
+              options={ADD_SOURCE_PILLS}
+              value={draft.sourceMode}
+              onChange={(next) => onDraftChange({ ...draft, sourceMode: next })}
+              ariaLabel="Dataset source"
+              className="flex w-full justify-between"
+            />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="add-dataset-path">Path</Label>
+            <Label htmlFor="add-dataset-path" className="caps text-ink-3">
+              {fieldLabel}
+            </Label>
             <Input
               id="add-dataset-path"
               mono
@@ -711,9 +771,11 @@ function AddDatasetDialog({
               onChange={(event) => onDraftChange({ ...draft, path: event.target.value })}
             />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="add-dataset-format">Format</Label>
+              <Label htmlFor="add-dataset-format" className="caps text-ink-3">
+                Format
+              </Label>
               <Select
                 value={draft.format}
                 onValueChange={(next) => onDraftChange({ ...draft, format: next as DatasetFormat })}
@@ -731,7 +793,9 @@ function AddDatasetDialog({
               </Select>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="add-dataset-split">Split detection</Label>
+              <Label htmlFor="add-dataset-split" className="caps text-ink-3">
+                Split detection
+              </Label>
               <Select
                 value={draft.splitMode}
                 onValueChange={(next) =>
@@ -751,9 +815,9 @@ function AddDatasetDialog({
               </Select>
             </div>
           </div>
-          <Callout tone="iris">
+          <Callout tone="warn">
             <span className="font-mono text-[11px] text-ink-2">
-              $ llm-w datasets add --source {draft.source} --format {draft.format}{" "}
+              $ llm-w datasets add --source {cliSourceFlag} --format {draft.format}{" "}
               {draft.path || "<path>"}
             </span>
           </Callout>
