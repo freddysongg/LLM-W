@@ -1174,6 +1174,47 @@ def _poll_cancel_flag(cancel_flag_path: Path, stop_event: threading.Event) -> No
         stop_event.wait(timeout=1.0)
 
 
+def _emit_final_evaluation(
+    *,
+    hf_trainer: Any,
+    has_eval_dataset: bool,
+) -> None:
+    if not _is_main_process():
+        return
+
+    start = time.perf_counter()
+    _emit_stage_enter(stage_name="evaluation", stage_order=11)
+
+    if not has_eval_dataset:
+        duration_ms = int((time.perf_counter() - start) * 1000)
+        _emit_stage_complete(
+            stage_name="evaluation",
+            duration_ms=duration_ms,
+            output_summary="skipped; no eval dataset configured",
+        )
+        return
+
+    eval_metrics = hf_trainer.evaluate()
+    step = hf_trainer.state.global_step
+    epoch = float(hf_trainer.state.epoch or 0.0)
+    final_metrics: dict[str, float] = {}
+    for key, value in eval_metrics.items():
+        if not isinstance(value, (int, float)):
+            continue
+        final_key = key if key.startswith("final_") else f"final_{key}"
+        final_metrics[final_key] = float(value)
+
+    if final_metrics:
+        _emit_metric(step=step, epoch=epoch, metrics=final_metrics)
+
+    duration_ms = int((time.perf_counter() - start) * 1000)
+    _emit_stage_complete(
+        stage_name="evaluation",
+        duration_ms=duration_ms,
+        output_summary=f"final eval at step {step}; {len(final_metrics)} metrics emitted",
+    )
+
+
 def main() -> int:
     if _IS_UNIX:
         signal.signal(signal.SIGTERM, _handle_sigterm)
@@ -1303,14 +1344,9 @@ def main() -> int:
                 k: float(v) for k, v in last_log.items() if isinstance(v, (int, float))
             }
 
-        # Stage 11 is a reserved no-op placeholder in v4: eval runs manually
-        # via the UI button or `llmw eval` CLI, never inline at training
-        # completion. The emission keeps the 14-stage timeline contract honest.
-        _emit_stage_enter(stage_name="evaluation", stage_order=11)
-        _emit_stage_complete(
-            stage_name="evaluation",
-            duration_ms=0,
-            output_summary="reserved no-op; v4 eval runs manually via UI or CLI",
+        _emit_final_evaluation(
+            hf_trainer=trainer,
+            has_eval_dataset=eval_dataset is not None,
         )
 
         heartbeat_state["stage"] = "artifact_finalization"
