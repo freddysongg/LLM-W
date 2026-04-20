@@ -62,7 +62,7 @@ function mergeSeries({
   });
 }
 
-const AXIS_TICK_STYLE: React.CSSProperties = {
+const AXIS_TICK_STYLE: React.SVGProps<SVGTextElement> = {
   fontFamily: "var(--font-mono)",
   fontSize: 10,
   fill: "var(--ink-3)",

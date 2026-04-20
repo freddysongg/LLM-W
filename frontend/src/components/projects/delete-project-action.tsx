@@ -43,9 +43,9 @@ export function DeleteProjectAction({
           <AlertDialogAction
             disabled={isDeleting}
             onClick={onConfirm}
-            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            className="bg-[color:var(--danger)] text-[color:var(--surface)] border-[color:var(--danger)] hover:bg-[color-mix(in_oklch,var(--danger)_88%,black)] hover:border-[color-mix(in_oklch,var(--danger)_88%,black)]"
           >
-            {isDeleting ? "Deleting..." : "Delete"}
+            {isDeleting ? "Deleting…" : "Delete"}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

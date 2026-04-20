@@ -2,6 +2,7 @@ import * as React from "react";
 import { useAppStore } from "@/stores/app-store";
 import { useRuns } from "@/hooks/useRuns";
 import { useRunComparison } from "@/hooks/useRunComparison";
+import { useLockEntered } from "@/hooks/use-lock-entered";
 import { RunSelector } from "@/components/compare/run-selector";
 import { ConfigDiffViewer } from "@/components/compare/config-diff-viewer";
 import { MetricOverlayChart } from "@/components/compare/metric-overlay-chart";
@@ -11,8 +12,15 @@ import { OutputComparisonPanel } from "@/components/compare/output-comparison-pa
 import { ActivationComparisonPanel } from "@/components/compare/activation-comparison-panel";
 import { AISummaryCard } from "@/components/compare/ai-summary-card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Card, CardContent } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
-const OVERLAY_METRICS: ReadonlyArray<{ name: string; title: string }> = [
+interface OverlayMetric {
+  readonly name: string;
+  readonly title: string;
+}
+
+const OVERLAY_METRICS: ReadonlyArray<OverlayMetric> = [
   { name: "train_loss", title: "Training Loss" },
   { name: "eval_loss", title: "Eval Loss" },
   { name: "learning_rate", title: "Learning Rate" },
@@ -24,8 +32,8 @@ export default function ComparePage(): React.JSX.Element {
   const [selectedRunIds, setSelectedRunIds] = React.useState<ReadonlyArray<string>>([]);
 
   const projectId = activeProjectId ?? "";
-
   const { data: runs = [] } = useRuns({ projectId });
+  const isAnimationLocked = useLockEntered();
 
   const { compareData, runMetrics, isLoading, error } = useRunComparison({
     projectId,
@@ -34,47 +42,62 @@ export default function ComparePage(): React.JSX.Element {
 
   if (!activeProjectId) {
     return (
-      <div className="flex items-center justify-center h-full text-muted-foreground">
-        Select a project to compare runs.
+      <div className="p-6">
+        <h1 className="font-mono text-[22px] font-semibold tracking-[-0.01em] text-ink-1">
+          Compare runs
+        </h1>
+        <p className="mt-2 font-mono text-[11px] text-ink-3">Select a project to compare runs.</p>
       </div>
     );
   }
 
-  return (
-    <div className="flex flex-col h-full">
-      <div className="px-6 py-4 border-b">
-        <h1 className="text-xl font-semibold mb-3">Compare Runs</h1>
-        <RunSelector
-          runs={runs}
-          selectedRunIds={selectedRunIds}
-          onSelectionChange={setSelectedRunIds}
-        />
-        {selectedRunIds.length > 0 && selectedRunIds.length < 2 && (
-          <p className="mt-2 text-xs text-muted-foreground">Select at least 2 runs to compare.</p>
-        )}
-      </div>
+  const enteredClass = isAnimationLocked ? "entered" : "";
 
-      <div className="flex-1 overflow-y-auto">
-        {selectedRunIds.length < 2 ? (
-          <div className="flex items-center justify-center h-64 text-muted-foreground text-sm">
-            {selectedRunIds.length === 0
-              ? "Select 2 or more runs above to begin comparing."
-              : "Select one more run to start the comparison."}
-          </div>
-        ) : error ? (
-          <div className="p-6">
-            <div className="rounded-md border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
-              Failed to load comparison data:{" "}
-              {error instanceof Error ? error.message : "Unknown error"}
-            </div>
-          </div>
-        ) : isLoading ? (
-          <div className="flex items-center justify-center h-64 text-muted-foreground text-sm">
-            Loading comparison…
-          </div>
-        ) : (
-          <Tabs defaultValue="metrics" className="flex flex-col h-full">
-            <div className="px-6 pt-4 border-b">
+  return (
+    <div className="flex h-full flex-col gap-4 p-6">
+      <header className={cn("enter enter-1", enteredClass)}>
+        <h1 className="font-mono text-[22px] font-semibold tracking-[-0.01em] text-ink-1">
+          Compare runs
+        </h1>
+        <p className="mt-1 font-mono text-[11px] text-ink-3">overlay metrics · diff configs</p>
+      </header>
+
+      <div
+        className={cn("grid gap-4 enter enter-2", enteredClass)}
+        style={{ gridTemplateColumns: "220px 1fr" }}
+      >
+        <div className="min-w-0">
+          <RunSelector
+            runs={runs}
+            selectedRunIds={selectedRunIds}
+            onSelectionChange={setSelectedRunIds}
+          />
+        </div>
+
+        <div className="flex min-w-0 flex-col gap-4">
+          {selectedRunIds.length < 2 ? (
+            <Card>
+              <CardContent className="py-10 text-center font-mono text-[11px] text-ink-3">
+                {selectedRunIds.length === 0
+                  ? "Select 2 or more runs to begin comparing."
+                  : "Select one more run to start the comparison."}
+              </CardContent>
+            </Card>
+          ) : error ? (
+            <Card>
+              <CardContent className="py-6 text-center font-mono text-[11px] text-[color:var(--danger)]">
+                Failed to load comparison data:{" "}
+                {error instanceof Error ? error.message : "Unknown error"}
+              </CardContent>
+            </Card>
+          ) : isLoading ? (
+            <Card>
+              <CardContent className="py-10 text-center font-mono text-[11px] text-ink-3">
+                Loading comparison…
+              </CardContent>
+            </Card>
+          ) : (
+            <Tabs defaultValue="metrics" className="flex flex-col gap-3">
               <TabsList>
                 <TabsTrigger value="metrics">Metrics</TabsTrigger>
                 <TabsTrigger value="config">Config Diff</TabsTrigger>
@@ -83,64 +106,56 @@ export default function ComparePage(): React.JSX.Element {
                 <TabsTrigger value="activations">Activations</TabsTrigger>
                 <TabsTrigger value="ai">AI Summary</TabsTrigger>
               </TabsList>
-            </div>
 
-            <TabsContent value="metrics" className="flex-1 p-6 space-y-6 mt-0">
-              <div className="grid grid-cols-2 gap-4">
-                {OVERLAY_METRICS.map(({ name, title }) => (
-                  <MetricOverlayChart
-                    key={name}
-                    runIds={selectedRunIds}
-                    runMetrics={runMetrics}
-                    metricName={name}
-                    title={title}
-                  />
-                ))}
-              </div>
-
-              <div>
-                <h2 className="text-sm font-medium mb-3">Final Metric Summary</h2>
+              <TabsContent value="metrics" className="mt-0 flex flex-col gap-4">
+                <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                  {OVERLAY_METRICS.map(({ name, title }) => (
+                    <MetricOverlayChart
+                      key={name}
+                      runIds={selectedRunIds}
+                      runMetrics={runMetrics}
+                      metricName={name}
+                      title={title}
+                    />
+                  ))}
+                </div>
                 <MetricComparisonTable
                   runIds={selectedRunIds}
                   metricComparison={compareData?.metricComparison ?? {}}
                 />
-              </div>
-            </TabsContent>
+              </TabsContent>
 
-            <TabsContent value="config" className="flex-1 p-6 mt-0">
-              <h2 className="text-sm font-medium mb-3">Configuration Differences</h2>
-              <ConfigDiffViewer
-                configDiff={compareData?.configDiff ?? {}}
-                runIds={selectedRunIds}
-              />
-            </TabsContent>
+              <TabsContent value="config" className="mt-0">
+                <ConfigDiffViewer
+                  configDiff={compareData?.configDiff ?? {}}
+                  runIds={selectedRunIds}
+                />
+              </TabsContent>
 
-            <TabsContent value="artifacts" className="flex-1 p-6 mt-0">
-              <h2 className="text-sm font-medium mb-3">Artifact Summary</h2>
-              <ArtifactComparisonPanel
-                runIds={selectedRunIds}
-                artifactComparison={compareData?.artifactComparison ?? {}}
-              />
-            </TabsContent>
+              <TabsContent value="artifacts" className="mt-0">
+                <ArtifactComparisonPanel
+                  runIds={selectedRunIds}
+                  artifactComparison={compareData?.artifactComparison ?? {}}
+                />
+              </TabsContent>
 
-            <TabsContent value="output" className="flex-1 p-6 mt-0">
-              <h2 className="text-sm font-medium mb-3">Evaluation Output</h2>
-              <OutputComparisonPanel
-                runIds={selectedRunIds}
-                metricComparison={compareData?.metricComparison ?? {}}
-              />
-            </TabsContent>
+              <TabsContent value="output" className="mt-0">
+                <OutputComparisonPanel
+                  runIds={selectedRunIds}
+                  metricComparison={compareData?.metricComparison ?? {}}
+                />
+              </TabsContent>
 
-            <TabsContent value="activations" className="flex-1 p-6 mt-0">
-              <h2 className="text-sm font-medium mb-3">Activation Comparison</h2>
-              <ActivationComparisonPanel runIds={selectedRunIds} />
-            </TabsContent>
+              <TabsContent value="activations" className="mt-0">
+                <ActivationComparisonPanel runIds={selectedRunIds} />
+              </TabsContent>
 
-            <TabsContent value="ai" className="flex-1 p-6 mt-0">
-              <AISummaryCard runIds={selectedRunIds} projectId={projectId} />
-            </TabsContent>
-          </Tabs>
-        )}
+              <TabsContent value="ai" className="mt-0">
+                <AISummaryCard runIds={selectedRunIds} projectId={projectId} />
+              </TabsContent>
+            </Tabs>
+          )}
+        </div>
       </div>
     </div>
   );

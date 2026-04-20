@@ -1,5 +1,6 @@
 import * as React from "react";
-import { DiffEditor } from "@monaco-editor/react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 import type { RunConfigDiff } from "@/types/run";
 
 interface ConfigDiffViewerProps {
@@ -7,107 +8,86 @@ interface ConfigDiffViewerProps {
   readonly runIds: ReadonlyArray<string>;
 }
 
-function formatConfigSide(
-  changedKeys: Record<string, Record<string, unknown>>,
-  runId: string,
-): string {
-  if (Object.keys(changedKeys).length === 0) return "# No differences";
-  return Object.entries(changedKeys)
-    .map(([key, values]) => `${key}: ${JSON.stringify(values[runId] ?? null)}`)
-    .join("\n");
-}
-
-function ConfigDiffTable({
-  changed,
-  runIds,
-}: {
-  readonly changed: Record<string, Record<string, unknown>>;
-  readonly runIds: ReadonlyArray<string>;
-}): React.JSX.Element {
-  const entries = Object.entries(changed);
-  if (entries.length === 0) {
-    return <p className="text-sm text-muted-foreground p-4">Configurations are identical.</p>;
-  }
-
-  return (
-    <div className="overflow-auto">
-      <table className="w-full text-sm border-collapse">
-        <thead>
-          <tr className="border-b bg-muted/50">
-            <th className="text-left px-3 py-2 font-medium text-muted-foreground">Config Key</th>
-            {runIds.map((id) => (
-              <th key={id} className="text-left px-3 py-2 font-medium font-mono text-xs">
-                {id.slice(0, 8)}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {entries.map(([key, values]) => (
-            <tr key={key} className="border-b hover:bg-muted/30">
-              <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{key}</td>
-              {runIds.map((id) => (
-                <td key={id} className="px-3 py-2 font-mono text-xs">
-                  {JSON.stringify(values[id] ?? "—")}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
+function formatValue(value: unknown): string {
+  if (value === null || value === undefined) return "—";
+  if (typeof value === "string") return value;
+  return JSON.stringify(value);
 }
 
 export function ConfigDiffViewer({ configDiff, runIds }: ConfigDiffViewerProps): React.JSX.Element {
   const { changed = {} } = configDiff;
+  const entries = Object.entries(changed);
 
-  if (Object.keys(changed).length === 0) {
+  if (entries.length === 0) {
     return (
-      <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">
-        Configurations are identical across selected runs.
-      </div>
+      <Card>
+        <CardHeader className="py-3">
+          <CardTitle>Config diff</CardTitle>
+        </CardHeader>
+        <CardContent className="py-6 text-center font-mono text-[11px] text-ink-3">
+          Configurations are identical across selected runs.
+        </CardContent>
+      </Card>
     );
   }
 
-  if (runIds.length !== 2) {
-    return (
-      <div className="border rounded-md overflow-hidden">
-        <div className="px-4 py-2 border-b bg-muted/50 text-xs text-muted-foreground">
-          {Object.keys(changed).length} changed key{Object.keys(changed).length !== 1 ? "s" : ""}
-        </div>
-        <ConfigDiffTable changed={changed} runIds={runIds} />
-      </div>
-    );
-  }
-
-  const [runId1, runId2] = runIds;
-  const original = formatConfigSide(changed, runId1);
-  const modified = formatConfigSide(changed, runId2);
+  const diffCellBackground = "color-mix(in oklch, var(--warn) 10%, var(--surface))";
 
   return (
-    <div className="border rounded-md overflow-hidden">
-      <div className="flex border-b text-xs text-muted-foreground bg-muted/50">
-        <div className="flex-1 px-4 py-2 font-mono">{runId1.slice(0, 8)} (original)</div>
-        <div className="w-px bg-border" />
-        <div className="flex-1 px-4 py-2 font-mono">{runId2.slice(0, 8)} (modified)</div>
-      </div>
-      <DiffEditor
-        original={original}
-        modified={modified}
-        language="yaml"
-        height={360}
-        theme="vs-dark"
-        options={{
-          readOnly: true,
-          renderSideBySide: true,
-          minimap: { enabled: false },
-          scrollBeyondLastLine: false,
-          fontSize: 12,
-          lineNumbers: "off",
-          folding: false,
-        }}
-      />
-    </div>
+    <Card>
+      <CardHeader className="py-3">
+        <CardTitle>Config diff</CardTitle>
+        <span className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3">
+          {entries.length} changed
+        </span>
+      </CardHeader>
+      <CardContent className="overflow-x-auto p-0">
+        <table className="w-full border-collapse text-[12.5px]">
+          <thead>
+            <tr>
+              <th className="border-b border-hairline bg-surface-2 px-3.5 py-2 text-left font-mono text-[10px] font-medium uppercase tracking-[0.08em] text-ink-3">
+                param
+              </th>
+              {runIds.map((runId) => (
+                <th
+                  key={runId}
+                  className="border-b border-hairline bg-surface-2 px-3.5 py-2 text-left font-mono text-[10px] font-medium uppercase tracking-[0.08em] text-ink-3"
+                >
+                  {runId.slice(0, 8)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {entries.map(([paramKey, valuesByRun]) => {
+              const baselineValue = formatValue(valuesByRun[runIds[0]] ?? null);
+              return (
+                <tr key={paramKey}>
+                  <td className="border-b border-hairline px-3.5 py-2 font-mono text-[12px] text-ink-2">
+                    {paramKey}
+                  </td>
+                  {runIds.map((runId, cellIndex) => {
+                    const raw = valuesByRun[runId] ?? null;
+                    const displayed = formatValue(raw);
+                    const isDiff = cellIndex > 0 && displayed !== baselineValue;
+                    return (
+                      <td
+                        key={runId}
+                        className={cn(
+                          "border-b border-hairline px-3.5 py-2 font-mono text-[12px] text-ink-1",
+                        )}
+                        style={isDiff ? { background: diffCellBackground } : undefined}
+                      >
+                        {displayed}
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </CardContent>
+    </Card>
   );
 }
