@@ -386,7 +386,11 @@ export default function RunsPage(): React.JSX.Element {
             </TabsContent>
 
             <TabsContent value="metrics">
-              <LiveMetricsCharts metricPoints={mergedMetrics} />
+              <LiveMetricsCharts
+                projectId={activeProjectId ?? ""}
+                runId={selectedRun.id}
+                metricPoints={mergedMetrics}
+              />
             </TabsContent>
 
             <TabsContent value="logs">
