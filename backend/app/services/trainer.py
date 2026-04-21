@@ -221,6 +221,24 @@ def _emit_model_profile(*, model: Any) -> None:
     )
 
 
+def _emit_weight_stats(*, model: Any, step: int) -> None:
+    if not _is_main_process():
+        return
+
+    stats: dict[str, dict[str, float]] = {}
+    for name, param in model.named_parameters():
+        data = param.data
+        stats[name] = {
+            "mean": float(data.mean().item()),
+            "std": float(data.std().item()) if data.numel() > 1 else 0.0,
+            "norm": float(data.norm().item()),
+            "min": float(data.min().item()),
+            "max": float(data.max().item()),
+        }
+
+    _emit({"type": "weight_stats", "step": step, "stats": stats})
+
+
 class _BestEvalTracker:
     """Tracks the lowest mid-training eval loss seen across callback evals.
 
@@ -556,6 +574,9 @@ class WorkbenchCallback(TrainerCallback):
             size_bytes=size,
             is_best_eval=is_best_eval,
         )
+        model = kwargs.get("model")
+        if model is not None:
+            _emit_weight_stats(model=model, step=step)
 
     def on_train_end(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
         if not _is_main_process():
