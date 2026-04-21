@@ -50,3 +50,7 @@ class ConfigDiffResponse(BaseModel):
 class ConfigValidationResponse(BaseModel):
     is_valid: bool
     errors: list[str]
+
+
+class ConfigValidateInlineRequest(BaseModel):
+    yaml_content: str
