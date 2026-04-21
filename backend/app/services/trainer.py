@@ -189,6 +189,38 @@ def _emit_checkpoint(
     )
 
 
+def _emit_model_profile(*, model: Any) -> None:
+    if not _is_main_process():
+        return
+
+    layers: list[dict[str, Any]] = []
+    total_params = 0
+    trainable_params = 0
+    for name, param in model.named_parameters():
+        count = int(param.numel())
+        total_params += count
+        if param.requires_grad:
+            trainable_params += count
+        layers.append(
+            {
+                "name": name,
+                "shape": list(param.shape),
+                "param_count": count,
+                "trainable": bool(param.requires_grad),
+                "dtype": str(param.dtype).replace("torch.", ""),
+            }
+        )
+
+    _emit(
+        {
+            "type": "model_profile",
+            "total_params": total_params,
+            "trainable_params": trainable_params,
+            "layers": layers,
+        }
+    )
+
+
 class _BestEvalTracker:
     """Tracks the lowest mid-training eval loss seen across callback evals.
 
@@ -1333,6 +1365,8 @@ def main() -> int:
         if _CANCEL_REQUESTED.is_set():
             _emit_complete(status="cancelled", final_metrics=final_metrics)
             return 0
+
+        _emit_model_profile(model=model)
 
         heartbeat_state["stage"] = "dataset_resolution"
         train_dataset, eval_dataset = _stage_dataset_resolution(
