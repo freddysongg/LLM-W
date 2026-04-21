@@ -27,6 +27,7 @@ class Artifact(Base):
     file_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_retained: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    is_best: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
 
     run: Mapped[Run] = relationship("Run", back_populates="artifacts")

@@ -121,7 +121,7 @@ class CheckpointRetentionConfig(BaseModel):
     keep_last_n: int = 3
     always_keep_best_eval: bool = True
     always_keep_final: bool = True
-    delete_intermediates_after_completion: bool = True
+    delete_intermediates_after_completion: bool = False
 
 
 class IntrospectionConfig(BaseModel):
