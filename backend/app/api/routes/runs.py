@@ -24,7 +24,11 @@ from app.schemas.run import (
     RunResumeResponse,
     RunStageResponse,
 )
-from app.schemas.run_observability import ConfigSnapshotResponse, MetricNamesResponse
+from app.schemas.run_observability import (
+    ConfigSnapshotResponse,
+    MetricNamesResponse,
+    RunSummaryBatchResponse,
+)
 from app.services import orchestrator, run_service
 from app.services.project_service import get_project
 from app.services.training_dispatcher import UnsupportedEnvironmentError
@@ -109,6 +113,21 @@ async def compare_runs(
             status_code=404,
             detail={"code": "RUN_NOT_FOUND", "message": str(exc), "details": {}},
         ) from exc
+
+
+# /summary must be registered before /{run_id} to avoid path conflicts
+@router.get("/{project_id}/runs/summary", response_model=RunSummaryBatchResponse)
+async def get_run_summaries(
+    project_id: str,
+    session: DbSession,
+    ids: str = Query(..., description="Comma-separated list of run IDs to summarize"),
+) -> RunSummaryBatchResponse:
+    run_ids = [rid.strip() for rid in ids.split(",") if rid.strip()]
+    return await run_service.get_run_summaries(
+        session=session,
+        project_id=project_id,
+        run_ids=run_ids,
+    )
 
 
 @router.get("/{project_id}/runs/{run_id}", response_model=RunResponse)

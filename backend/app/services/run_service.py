@@ -35,8 +35,19 @@ from app.schemas.run import (
     RunResumeResponse,
     RunStageResponse,
 )
-from app.schemas.run_observability import ConfigDiff, ConfigSnapshotResponse, MetricNamesResponse
+from app.schemas.run_observability import (
+    ConfigDiff,
+    ConfigSnapshotResponse,
+    MetricNamesResponse,
+    RunSummaryBatchResponse,
+    RunSummaryResponse,
+)
 from app.services.config_service import compute_config_diff
+from app.services.metrics_service import downsample_to_n
+
+_TRAIN_LOSS_METRIC = "train_loss"
+_EVAL_LOSS_METRIC = "eval_loss"
+_SPARKLINE_MAX_POINTS = 40
 
 _CANCELLABLE_STATUSES = frozenset({"pending", "running", "paused"})
 _PAUSABLE_STATUSES = frozenset({"running"})
@@ -462,3 +473,81 @@ def _compute_trend(values: list[float]) -> str:
     if slope > threshold:
         return "increasing"
     return "stable"
+
+
+async def get_run_summaries(
+    *,
+    session: AsyncSession,
+    project_id: str,
+    run_ids: list[str],
+) -> RunSummaryBatchResponse:
+    summaries: list[RunSummaryResponse] = []
+    for run_id in run_ids:
+        run_result = await session.execute(
+            select(Run).where(Run.id == run_id, Run.project_id == project_id)
+        )
+        run = run_result.scalar_one_or_none()
+        if run is None:
+            continue
+
+        train_points = await _fetch_metric_values(
+            session=session, run_id=run_id, metric_name=_TRAIN_LOSS_METRIC
+        )
+        eval_points = await _fetch_metric_values(
+            session=session, run_id=run_id, metric_name=_EVAL_LOSS_METRIC
+        )
+
+        final_train_loss = train_points[-1] if train_points else None
+        final_eval_loss = eval_points[-1] if eval_points else None
+        wall_clock_ms = _compute_wall_clock_ms(run=run)
+        step_count = await _fetch_max_step(session=session, run_id=run_id)
+        sparkline = downsample_to_n(points=train_points, n=_SPARKLINE_MAX_POINTS)
+
+        summaries.append(
+            RunSummaryResponse(
+                run_id=run_id,
+                status=run.status,
+                final_train_loss=final_train_loss,
+                final_eval_loss=final_eval_loss,
+                wall_clock_ms=wall_clock_ms,
+                step_count=step_count,
+                train_loss_sparkline=sparkline,
+            )
+        )
+    return RunSummaryBatchResponse(runs=summaries)
+
+
+async def _fetch_metric_values(
+    *,
+    session: AsyncSession,
+    run_id: str,
+    metric_name: str,
+) -> list[float]:
+    result = await session.execute(
+        select(MetricPoint.metric_value)
+        .where(
+            MetricPoint.run_id == run_id,
+            MetricPoint.metric_name == metric_name,
+        )
+        .order_by(MetricPoint.step)
+    )
+    return [row[0] for row in result.all()]
+
+
+async def _fetch_max_step(*, session: AsyncSession, run_id: str) -> int:
+    result = await session.execute(
+        select(func.max(MetricPoint.step)).where(
+            MetricPoint.run_id == run_id,
+            MetricPoint.metric_name == _TRAIN_LOSS_METRIC,
+        )
+    )
+    value = result.scalar_one_or_none()
+    return int(value) if value is not None else 0
+
+
+def _compute_wall_clock_ms(*, run: Run) -> int:
+    if run.started_at is None or run.completed_at is None:
+        return 0
+    start = datetime.fromisoformat(run.started_at)
+    end = datetime.fromisoformat(run.completed_at)
+    return int((end - start).total_seconds() * 1000)
