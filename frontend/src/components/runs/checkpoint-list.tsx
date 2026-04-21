@@ -52,7 +52,6 @@ export function CheckpointList({
   }
 
   const sorted = [...checkpoints].sort((left, right) => right.step - left.step);
-  const bestCheckpointId = sorted[0]?.id;
 
   return (
     <Card>
@@ -63,40 +62,43 @@ export function CheckpointList({
         </span>
       </CardHeader>
       {sorted.map((checkpoint) => {
-        const isBest = checkpoint.id === bestCheckpointId;
         const isSelected = selectedCheckpointPath === checkpoint.path;
+        const isPruned = !checkpoint.isRetained;
         return (
           <RunRow
             key={checkpoint.id}
-            className={`${CHECKPOINT_ROW_COLUMNS} px-[18px]`}
+            className={`${CHECKPOINT_ROW_COLUMNS} px-[18px] ${isPruned ? "opacity-60" : ""}`}
             selected={isSelected}
           >
-            <StatusDot status={isBest ? "success" : "pending"} />
+            <StatusDot status={checkpoint.isBest ? "success" : "pending"} />
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <span className="truncate text-[12.5px] font-medium text-ink-1">
+                <span
+                  className={`truncate text-[12.5px] font-medium text-ink-1 ${isPruned ? "line-through" : ""}`}
+                >
                   step_{checkpoint.step}.pt
                 </span>
-                {isBest ? (
+                {checkpoint.isBest ? (
                   <Badge variant="success" dot={false}>
-                    BEST
+                    BEST EVAL
                   </Badge>
                 ) : null}
-                {checkpoint.isRetained ? (
-                  <Badge variant="secondary" dot={false}>
-                    kept
+                {isPruned ? (
+                  <Badge variant="outline" dot={false}>
+                    Pruned
                   </Badge>
                 ) : null}
               </div>
               <div className="truncate font-mono text-[10.5px] text-ink-3">{checkpoint.path}</div>
             </div>
             <RunRowCell>{formatBytes(checkpoint.sizeBytes)}</RunRowCell>
-            <RunRowCell>{checkpoint.isRetained ? "retained" : "—"}</RunRowCell>
+            <RunRowCell>{isPruned ? "pruned" : "retained"}</RunRowCell>
             <RunRowCell>{formatRelative(checkpoint.createdAt)}</RunRowCell>
             <div className="flex justify-end">
               <Button
                 size="sm"
                 variant="outline"
+                disabled={isPruned}
                 onClick={(event) => {
                   event.stopPropagation();
                   onSelectCheckpoint(checkpoint);

@@ -315,6 +315,7 @@ async def list_checkpoints(
             file_size_bytes=a.file_size_bytes,
             metadata_json=a.metadata_json,
             is_retained=bool(a.is_retained),
+            is_best=bool(a.is_best),
             created_at=a.created_at,
         )
         for a in artifacts

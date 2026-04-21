@@ -100,6 +100,13 @@ export interface CheckpointSavedPayload {
   readonly step: number;
   readonly path: string;
   readonly sizeBytes: number;
+  readonly isBestEval: boolean;
+}
+
+export interface RetentionAppliedPayload {
+  readonly runId: string;
+  readonly kept: ReadonlyArray<number>;
+  readonly pruned: ReadonlyArray<number>;
 }
 
 export interface ArtifactCreatedPayload {

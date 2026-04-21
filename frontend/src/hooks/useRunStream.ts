@@ -2,6 +2,7 @@ import * as React from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { wsClient } from "@/ws/client";
 import { useRunStreamStore } from "@/stores/run-stream-store";
+import { toast } from "@/hooks/use-toast";
 import type {
   WebSocketEnvelope,
   MetricRecordedPayload,
@@ -10,6 +11,7 @@ import type {
   ResourceUpdatePayload,
   CheckpointSavedPayload,
   ProgressUpdatePayload,
+  RetentionAppliedPayload,
 } from "@/types/websocket";
 import type { MetricPoint, LogEntry, Checkpoint } from "@/types/run";
 
@@ -130,10 +132,24 @@ export function useRunStream({
             step: payload.step,
             path: payload.path,
             sizeBytes: payload.sizeBytes,
-            isRetained: false,
+            isRetained: true,
+            isBest: payload.isBestEval,
             createdAt: new Date().toISOString(),
           };
           appendCheckpoint(runId, checkpoint);
+        }
+        if (envelope.event === "retention_applied") {
+          const payload = envelope.payload as RetentionAppliedPayload;
+          if (payload.pruned.length > 0) {
+            const count = payload.pruned.length;
+            toast({
+              title: "Retention policy applied",
+              description: `Pruned ${count} checkpoint${count === 1 ? "" : "s"} per retention policy`,
+            });
+          }
+          void queryClient.invalidateQueries({
+            queryKey: ["projects", projectId, "runs", runId, "checkpoints"],
+          });
         }
       }
 

@@ -149,5 +149,6 @@ export interface Checkpoint {
   readonly path: string;
   readonly sizeBytes: number;
   readonly isRetained: boolean;
+  readonly isBest: boolean;
   readonly createdAt: string;
 }
