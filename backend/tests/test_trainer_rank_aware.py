@@ -161,6 +161,7 @@ def _build_callback(tmp_path: Path) -> tuple[trainer.WorkbenchCallback, dict[str
         run_id="run-xyz",
         project_dir=tmp_path,
         heartbeat_state=heartbeat_state,
+        best_eval_tracker=trainer._BestEvalTracker(),
     )
     return callback, heartbeat_state
 
@@ -216,6 +217,7 @@ def test_on_save_writes_complete_marker_and_emits_checkpoint_on_main_rank(
             "metrics": {},
             "done": False,
         },
+        best_eval_tracker=trainer._BestEvalTracker(),
     )
     state = _StubState(global_step=step, max_steps=10, epoch=0.4)
     callback.on_save(args=None, state=state, control=None)
@@ -270,6 +272,7 @@ def test_on_save_barrier_is_called_before_rank_zero_commit(
             "metrics": {},
             "done": False,
         },
+        best_eval_tracker=trainer._BestEvalTracker(),
     )
     state = _StubState(global_step=step, max_steps=10, epoch=0.8)
 
@@ -307,6 +310,7 @@ def test_on_save_on_non_main_rank_skips_marker_and_emits_nothing(
             "metrics": {},
             "done": False,
         },
+        best_eval_tracker=trainer._BestEvalTracker(),
     )
     state = _StubState(global_step=step, max_steps=10, epoch=0.2)
     callback.on_save(args=None, state=state, control=None)

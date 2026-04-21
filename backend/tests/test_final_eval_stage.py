@@ -71,6 +71,7 @@ def test_callback_evaluation_stage_name_still_used(
         run_id="run-final-eval-test",
         project_dir=tmp_path,
         heartbeat_state=heartbeat_state,
+        best_eval_tracker=trainer._BestEvalTracker(),
     )
     fake_state = MagicMock()
     fake_state.global_step = 50

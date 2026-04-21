@@ -117,3 +117,51 @@ async def test_apply_retention_after_checkpoint_keeps_last_n(
     assert len(retained) == 3
     assert "kept" in result
     assert "pruned" in result
+
+
+def test_trainer_best_eval_tracker_prefers_lower_loss() -> None:
+    from app.services import trainer
+
+    tracker = trainer._BestEvalTracker()
+    assert tracker.update(step=10, eval_loss=0.9) is True
+    assert tracker.update(step=20, eval_loss=1.0) is False
+    assert tracker.update(step=30, eval_loss=0.5) is True
+    assert tracker.best_step == 30
+    assert tracker.best_loss == 0.5
+
+
+def test_emit_checkpoint_with_is_best_eval_flag(capsys) -> None:
+    import json
+    from unittest.mock import patch
+
+    from app.services import trainer
+
+    with patch.object(trainer, "_is_main_process", return_value=True):
+        trainer._emit_checkpoint(
+            step=30,
+            path="/tmp/ckpt",
+            size_bytes=1024,
+            is_best_eval=True,
+        )
+
+    events = [
+        json.loads(line) for line in capsys.readouterr().out.splitlines() if line.strip()
+    ]
+    ckpt = next(e for e in events if e["type"] == "checkpoint")
+    assert ckpt["is_best_eval"] is True
+
+
+def test_emit_checkpoint_defaults_is_best_eval_false(capsys) -> None:
+    import json
+    from unittest.mock import patch
+
+    from app.services import trainer
+
+    with patch.object(trainer, "_is_main_process", return_value=True):
+        trainer._emit_checkpoint(step=30, path="/tmp/ckpt", size_bytes=1024)
+
+    events = [
+        json.loads(line) for line in capsys.readouterr().out.splitlines() if line.strip()
+    ]
+    ckpt = next(e for e in events if e["type"] == "checkpoint")
+    assert ckpt.get("is_best_eval", False) is False
