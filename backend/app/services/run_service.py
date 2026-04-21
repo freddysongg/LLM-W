@@ -19,9 +19,11 @@ from app.core.exceptions import (
 from app.models.artifact import Artifact
 from app.models.config_version import ConfigVersion
 from app.models.metric_point import MetricPoint
+from app.models.model_profile import ModelProfile
 from app.models.project import Project
 from app.models.run import Run
 from app.models.run_stage import RunStage
+from app.models.weight_snapshot import WeightSnapshot
 from app.schemas.run import (
     CheckpointResponse,
     RunArtifactCompareSummary,
@@ -41,6 +43,13 @@ from app.schemas.run_observability import (
     MetricNamesResponse,
     RunSummaryBatchResponse,
     RunSummaryResponse,
+)
+from app.schemas.weights import (
+    LayerProfile,
+    LayerWeightStats,
+    ModelProfileResponse,
+    WeightSnapshotAllResponse,
+    WeightSnapshotResponse,
 )
 from app.services.config_service import compute_config_diff
 from app.services.metrics_service import downsample_to_n
@@ -552,3 +561,84 @@ def _compute_wall_clock_ms(*, run: Run) -> int:
     start = datetime.fromisoformat(run.started_at)
     end = datetime.fromisoformat(run.completed_at)
     return int((end - start).total_seconds() * 1000)
+
+
+async def get_model_profile(
+    *,
+    session: AsyncSession,
+    project_id: str,
+    run_id: str,
+) -> ModelProfileResponse:
+    run = await get_run(session=session, run_id=run_id, project_id=project_id)
+
+    cfg_row = await session.get(ConfigVersion, run.config_version_id)
+    if cfg_row is None or not cfg_row.yaml_blob:
+        raise RunNotFoundError(f"no config for run {run_id}")
+    parsed_cfg = yaml.safe_load(cfg_row.yaml_blob)
+    model_block = parsed_cfg.get("model", {}) if isinstance(parsed_cfg, dict) else {}
+    model_id = model_block.get("model_id", "")
+
+    profile = (
+        await session.execute(
+            select(ModelProfile).where(
+                ModelProfile.project_id == project_id,
+                ModelProfile.model_id == model_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if profile is None or profile.layers_json is None:
+        raise RunNotFoundError(f"no model profile for run {run_id}")
+
+    raw_layers = json.loads(profile.layers_json)
+    return ModelProfileResponse(
+        run_id=run_id,
+        total_params=profile.parameter_count or 0,
+        trainable_params=profile.trainable_count or 0,
+        layers=[LayerProfile(**layer) for layer in raw_layers],
+    )
+
+
+async def list_weight_snapshots(
+    *,
+    session: AsyncSession,
+    project_id: str,
+    run_id: str,
+    layer_name: str | None,
+) -> WeightSnapshotResponse | WeightSnapshotAllResponse:
+    await get_run(session=session, run_id=run_id, project_id=project_id)
+    query = select(WeightSnapshot).where(WeightSnapshot.run_id == run_id)
+    if layer_name is not None:
+        query = query.where(WeightSnapshot.layer_name == layer_name)
+    query = query.order_by(WeightSnapshot.step)
+    rows = (await session.execute(query)).scalars().all()
+
+    if layer_name is not None:
+        return WeightSnapshotResponse(
+            run_id=run_id,
+            layer_name=layer_name,
+            points=[
+                LayerWeightStats(
+                    step=row.step,
+                    mean=row.mean,
+                    std=row.std,
+                    norm=row.norm,
+                    min_val=row.min_val,
+                    max_val=row.max_val,
+                )
+                for row in rows
+            ],
+        )
+
+    by_layer: dict[str, list[LayerWeightStats]] = {}
+    for row in rows:
+        by_layer.setdefault(row.layer_name, []).append(
+            LayerWeightStats(
+                step=row.step,
+                mean=row.mean,
+                std=row.std,
+                norm=row.norm,
+                min_val=row.min_val,
+                max_val=row.max_val,
+            )
+        )
+    return WeightSnapshotAllResponse(run_id=run_id, snapshots_by_layer=by_layer)

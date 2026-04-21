@@ -29,6 +29,11 @@ from app.schemas.run_observability import (
     MetricNamesResponse,
     RunSummaryBatchResponse,
 )
+from app.schemas.weights import (
+    ModelProfileResponse,
+    WeightSnapshotAllResponse,
+    WeightSnapshotResponse,
+)
 from app.services import orchestrator, run_service
 from app.services.project_service import get_project
 from app.services.training_dispatcher import UnsupportedEnvironmentError
@@ -352,6 +357,52 @@ async def get_run_config_snapshot(
             session=session,
             project_id=project_id,
             run_id=run_id,
+        )
+    except RunNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "RUN_NOT_FOUND", "message": str(exc), "details": {}},
+        ) from exc
+
+
+@router.get(
+    "/{project_id}/runs/{run_id}/model-profile",
+    response_model=ModelProfileResponse,
+)
+async def get_run_model_profile(
+    project_id: str,
+    run_id: str,
+    session: DbSession,
+) -> ModelProfileResponse:
+    try:
+        return await run_service.get_model_profile(
+            session=session,
+            project_id=project_id,
+            run_id=run_id,
+        )
+    except RunNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "RUN_NOT_FOUND", "message": str(exc), "details": {}},
+        ) from exc
+
+
+@router.get(
+    "/{project_id}/runs/{run_id}/weight-snapshots",
+    response_model=WeightSnapshotAllResponse | WeightSnapshotResponse,
+)
+async def get_run_weight_snapshots(
+    project_id: str,
+    run_id: str,
+    session: DbSession,
+    layer: str | None = Query(default=None),
+) -> WeightSnapshotAllResponse | WeightSnapshotResponse:
+    try:
+        return await run_service.list_weight_snapshots(
+            session=session,
+            project_id=project_id,
+            run_id=run_id,
+            layer_name=layer,
         )
     except RunNotFoundError as exc:
         raise HTTPException(
