@@ -1,21 +1,23 @@
 import * as React from "react";
 import { RotateCcw } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import type { MetricPoint, Run, RunStatus } from "@/types/run";
+import type { Run, RunStatus } from "@/types/run";
+import type { RunSummary } from "@/types/run-summary";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { RunRow, RunRowActions, RunRowCell } from "@/components/shared/run-row";
+import { RunHistorySparkline } from "@/components/runs/run-history-sparkline";
 import { StatusDot } from "@/components/shared/status-dot";
 import type { RunStatus as DotStatus } from "@/components/shared/status-dot";
 
 interface TrainingHistoryTabProps {
   readonly runs: ReadonlyArray<Run>;
-  readonly metricsByRun: Readonly<Record<string, ReadonlyArray<MetricPoint>>>;
+  readonly summariesByRun: ReadonlyMap<string, RunSummary>;
   readonly onRerun: (run: Run) => void;
 }
 
-const HISTORY_ROW_COLUMNS = "grid-cols-[16px_1fr_110px_120px_80px_100px]";
+const HISTORY_ROW_COLUMNS = "grid-cols-[16px_1fr_110px_1fr_80px_100px]";
 
 function mapStatus(status: RunStatus): DotStatus {
   switch (status) {
@@ -37,16 +39,6 @@ function mapStatus(status: RunStatus): DotStatus {
   }
 }
 
-function latestLoss(points: ReadonlyArray<MetricPoint>): number | null {
-  if (!points) return null;
-  let best: MetricPoint | null = null;
-  for (const point of points) {
-    if (point.metricName !== "train_loss") continue;
-    if (best === null || point.step > best.step) best = point;
-  }
-  return best?.metricValue ?? null;
-}
-
 function formatRelative(iso: string | null): string {
   if (!iso) return "—";
   const delta = Date.now() - new Date(iso).getTime();
@@ -61,7 +53,7 @@ function formatRelative(iso: string | null): string {
 
 export function TrainingHistoryTab({
   runs,
-  metricsByRun,
+  summariesByRun,
   onRerun,
 }: TrainingHistoryTabProps): React.JSX.Element {
   const navigate = useNavigate();
@@ -87,7 +79,7 @@ export function TrainingHistoryTab({
         <span />
       </RunRow>
       {runs.map((run) => {
-        const loss = latestLoss(metricsByRun[run.id] ?? []);
+        const summary = summariesByRun.get(run.id);
         return (
           <RunRow
             key={run.id}
@@ -110,7 +102,9 @@ export function TrainingHistoryTab({
               {run.currentStep.toLocaleString()}
               {run.totalSteps ? ` / ${run.totalSteps.toLocaleString()}` : ""}
             </RunRowCell>
-            <RunRowCell>{loss !== null ? `loss ${loss.toFixed(4)}` : "—"}</RunRowCell>
+            <RunRowCell>
+              {summary !== undefined ? <RunHistorySparkline summary={summary} /> : "—"}
+            </RunRowCell>
             <RunRowCell align="end">{formatRelative(run.startedAt ?? run.createdAt)}</RunRowCell>
             <RunRowActions>
               <Button

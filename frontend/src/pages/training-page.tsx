@@ -4,6 +4,7 @@ import { Download, FileText, Play } from "lucide-react";
 import { useAppStore } from "@/stores/app-store";
 import { useActiveConfig, useSaveConfig } from "@/hooks/useConfigs";
 import { useCreateRun, useRuns } from "@/hooks/useRuns";
+import { useRunSummaries } from "@/hooks/useRunSummaries";
 import { useModelProfile } from "@/hooks/useModelProfile";
 import { useDatasetProfile } from "@/hooks/useDatasetProfile";
 import { Button } from "@/components/ui/button";
@@ -12,7 +13,8 @@ import { NoProjectSelected } from "@/components/shared/no-project-selected";
 import { CopyForAI } from "@/components/shared/copy-for-ai";
 import { buildTrainingPrompt } from "@/lib/ai-copy-prompts";
 import { denormalizeYamlConfig, normalizeYamlConfig } from "@/lib/yaml-config";
-import type { MetricPoint, Run } from "@/types/run";
+import type { Run } from "@/types/run";
+import type { RunSummary } from "@/types/run-summary";
 import type { TrainingConfig, WorkbenchConfig } from "@/types/config";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -116,9 +118,16 @@ export default function TrainingPage(): React.JSX.Element {
     );
   }, [runs]);
 
-  const metricsByRun = React.useMemo<Readonly<Record<string, ReadonlyArray<MetricPoint>>>>(() => {
-    return {};
-  }, []);
+  const runIds = React.useMemo<ReadonlyArray<string>>(
+    () => trainingHistory.map((run) => run.id),
+    [trainingHistory],
+  );
+  const { data: summaries } = useRunSummaries({ projectId, runIds });
+  const summariesByRun = React.useMemo<ReadonlyMap<string, RunSummary>>(() => {
+    const entries = new Map<string, RunSummary>();
+    (summaries ?? []).forEach((summary) => entries.set(summary.runId, summary));
+    return entries;
+  }, [summaries]);
 
   const yamlPreview = React.useMemo<string>(() => {
     if (!parsedConfig || !slice) return "";
@@ -278,7 +287,7 @@ export default function TrainingPage(): React.JSX.Element {
           <TabsContent value="history">
             <TrainingHistoryTab
               runs={trainingHistory}
-              metricsByRun={metricsByRun}
+              summariesByRun={summariesByRun}
               onRerun={() => setIsLaunchDialogOpen(true)}
             />
           </TabsContent>
