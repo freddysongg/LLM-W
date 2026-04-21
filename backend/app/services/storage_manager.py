@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -10,6 +11,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.exceptions import ArtifactFileNotFoundError, ArtifactNotFoundError
 from app.models.artifact import Artifact
 from app.models.config_version import ConfigVersion
@@ -133,7 +135,7 @@ async def run_project_cleanup(*, session: AsyncSession, project_id: str) -> Arti
     retained_count = 0
 
     for run in completed_runs:
-        result = await _apply_retention_for_run(
+        result = await apply_retention_for_run(
             session=session,
             run=run,
             project_directory=project.directory_path if project else None,
@@ -162,7 +164,7 @@ async def run_artifact_cleanup(
     return await run_project_cleanup(session=session, project_id=project_id)
 
 
-async def _apply_retention_for_run(
+async def apply_retention_for_run(
     *,
     session: AsyncSession,
     run: Run,
@@ -199,7 +201,7 @@ async def _apply_retention_for_run(
             select(Artifact).where(
                 Artifact.run_id == run.id,
                 Artifact.artifact_type == "checkpoint",
-                Artifact.is_retained == 1,
+                Artifact.is_best == 1,
             )
         )
         for ckpt in best_eval_result.scalars().all():
@@ -249,6 +251,70 @@ async def _apply_retention_for_run(
                             pass
 
     return {"deleted": deleted, "freed_bytes": freed_bytes, "retained": retained}
+
+
+async def apply_retention_after_checkpoint(
+    *,
+    session: AsyncSession,
+    run_id: str,
+) -> dict[str, list[int]]:
+    """Evaluate retention policy immediately after a checkpoint save.
+
+    Returns {"kept": [steps], "pruned": [steps]} describing which
+    checkpoint step numbers remain retained and which transitioned from
+    retained to pruned on this call.
+    """
+    run = (await session.execute(select(Run).where(Run.id == run_id))).scalar_one_or_none()
+    if run is None:
+        return {"kept": [], "pruned": []}
+
+    cfg_row = await session.get(ConfigVersion, run.config_version_id)
+    if cfg_row is None:
+        return {"kept": [], "pruned": []}
+
+    parsed = yaml.safe_load(cfg_row.yaml_blob) if cfg_row.yaml_blob else {}
+    retention = parsed.get("checkpoint_retention", {}) if isinstance(parsed, dict) else {}
+    if not isinstance(retention, dict):
+        retention = {}
+    project_directory = str(Path(settings.projects_dir) / run.project_id)
+
+    before = set(await _retained_checkpoint_steps(session=session, run_id=run_id))
+    await apply_retention_for_run(
+        session=session,
+        run=run,
+        project_directory=project_directory,
+        keep_last_n=int(retention.get("keep_last_n", 3)),
+        always_keep_best_eval=bool(retention.get("always_keep_best_eval", True)),
+        always_keep_final=bool(retention.get("always_keep_final", True)),
+        delete_intermediates=False,
+    )
+    after = set(await _retained_checkpoint_steps(session=session, run_id=run_id))
+    return {
+        "kept": sorted(after),
+        "pruned": sorted(before - after),
+    }
+
+
+async def _retained_checkpoint_steps(*, session: AsyncSession, run_id: str) -> list[int]:
+    rows = (
+        (
+            await session.execute(
+                select(Artifact).where(
+                    Artifact.run_id == run_id,
+                    Artifact.artifact_type == "checkpoint",
+                    Artifact.is_retained == 1,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    steps: list[int] = []
+    for row in rows:
+        match = re.search(r"checkpoint-(\d+)", row.file_path)
+        if match:
+            steps.append(int(match.group(1)))
+    return steps
 
 
 async def _compute_storage_breakdown(
