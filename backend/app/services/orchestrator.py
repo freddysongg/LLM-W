@@ -33,6 +33,10 @@ from app.schemas.run import RunCreate, RunResponse
 from app.schemas.workbench_config import ExecutionConfig
 from app.services import suggestion_service
 from app.services.config_service import serialize_config_yaml_snapshot
+from app.services.storage_manager import (
+    apply_retention_after_checkpoint,
+    run_project_cleanup,
+)
 from app.services.training_dispatcher import (
     TrainingProcess,
     UnsupportedEnvironmentError,
@@ -364,7 +368,13 @@ async def _mark_pending_stages_skipped(*, run_id: str) -> None:
 
 
 async def _record_artifact(
-    *, run_id: str, project_id: str, artifact_type: str, file_path: str, size_bytes: int
+    *,
+    run_id: str,
+    project_id: str,
+    artifact_type: str,
+    file_path: str,
+    size_bytes: int,
+    is_best: int = 0,
 ) -> None:
     async with async_session_factory() as session:
         now = datetime.now(UTC).isoformat()
@@ -376,10 +386,21 @@ async def _record_artifact(
             file_path=file_path,
             file_size_bytes=size_bytes,
             is_retained=1,
+            is_best=is_best,
             created_at=now,
         )
         session.add(artifact)
         await session.commit()
+
+
+async def _run_final_retention_sweep(
+    *,
+    session: AsyncSession,
+    project_id: str,
+) -> None:
+    """On run termination, invoke the project-level cleanup which honors
+    delete_intermediates_after_completion per config."""
+    await run_project_cleanup(session=session, project_id=project_id)
 
 
 async def _write_config_snapshot(
@@ -568,6 +589,7 @@ async def _process_trainer_event(
         step = event["step"]
         path = event["path"]
         size_bytes = event.get("size_bytes", 0)
+        is_best_eval = bool(event.get("is_best_eval", False))
         await _update_run_status(run_id=run_id, status="running", last_checkpoint_path=path)
         await _record_artifact(
             run_id=run_id,
@@ -575,7 +597,13 @@ async def _process_trainer_event(
             artifact_type="checkpoint",
             file_path=path,
             size_bytes=size_bytes,
+            is_best=1 if is_best_eval else 0,
         )
+        async with async_session_factory() as session:
+            retention_result = await apply_retention_after_checkpoint(
+                session=session,
+                run_id=run_id,
+            )
         await event_bus.publish(
             event_type=f"project.{project_id}.ws",
             payload={
@@ -588,6 +616,21 @@ async def _process_trainer_event(
                     "step": step,
                     "path": path,
                     "sizeBytes": size_bytes,
+                    "isBestEval": is_best_eval,
+                },
+            },
+        )
+        await event_bus.publish(
+            event_type=f"project.{project_id}.ws",
+            payload={
+                "channel": "system",
+                "event": "retention_applied",
+                "runId": run_id,
+                "timestamp": timestamp,
+                "payload": {
+                    "runId": run_id,
+                    "kept": retention_result["kept"],
+                    "pruned": retention_result["pruned"],
                 },
             },
         )
@@ -816,6 +859,8 @@ async def _run_trainer_subprocess(
         if terminal_status == "completed":
             await _mark_pending_stages_skipped(run_id=run_id)
             await _update_run_status(run_id=run_id, status="completed")
+            async with async_session_factory() as session:
+                await _run_final_retention_sweep(session=session, project_id=project_id)
             await event_bus.publish(
                 event_type=f"project.{project_id}.ws",
                 payload={
@@ -834,6 +879,8 @@ async def _run_trainer_subprocess(
         elif terminal_status == "cancelled":
             await _mark_pending_stages_skipped(run_id=run_id)
             await _update_run_status(run_id=run_id, status="cancelled")
+            async with async_session_factory() as session:
+                await _run_final_retention_sweep(session=session, project_id=project_id)
             await event_bus.publish(
                 event_type=f"project.{project_id}.ws",
                 payload={
@@ -852,6 +899,8 @@ async def _run_trainer_subprocess(
                 failure_reason=captured_failure_reason,
                 failure_stage=captured_failure_stage or None,
             )
+            async with async_session_factory() as session:
+                await _run_final_retention_sweep(session=session, project_id=project_id)
             await event_bus.publish(
                 event_type=f"project.{project_id}.ws",
                 payload={
@@ -877,6 +926,8 @@ async def _run_trainer_subprocess(
             status="failed",
             failure_reason=str(exc),
         )
+        async with async_session_factory() as session:
+            await _run_final_retention_sweep(session=session, project_id=project_id)
 
 
 async def cancel_run(*, session: AsyncSession, run_id: str) -> Run:

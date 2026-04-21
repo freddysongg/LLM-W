@@ -144,9 +144,7 @@ def test_emit_checkpoint_with_is_best_eval_flag(capsys) -> None:
             is_best_eval=True,
         )
 
-    events = [
-        json.loads(line) for line in capsys.readouterr().out.splitlines() if line.strip()
-    ]
+    events = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line.strip()]
     ckpt = next(e for e in events if e["type"] == "checkpoint")
     assert ckpt["is_best_eval"] is True
 
@@ -160,8 +158,57 @@ def test_emit_checkpoint_defaults_is_best_eval_false(capsys) -> None:
     with patch.object(trainer, "_is_main_process", return_value=True):
         trainer._emit_checkpoint(step=30, path="/tmp/ckpt", size_bytes=1024)
 
-    events = [
-        json.loads(line) for line in capsys.readouterr().out.splitlines() if line.strip()
-    ]
+    events = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line.strip()]
     ckpt = next(e for e in events if e["type"] == "checkpoint")
     assert ckpt.get("is_best_eval", False) is False
+
+
+async def test_checkpoint_event_with_is_best_eval_sets_artifact_flag(
+    client: AsyncClient,
+    db_session,
+    tmp_path: Path,
+) -> None:
+    from sqlalchemy import select
+
+    from app.models.artifact import Artifact
+    from app.services import orchestrator
+
+    project = (await client.post("/api/v1/projects", json={"name": "be", "description": ""})).json()
+    run = (
+        await client.post(
+            f"/api/v1/projects/{project['id']}/runs",
+            json={"config_version_id": project["active_config_version_id"], "name": "r"},
+        )
+    ).json()
+
+    ckpt_dir = tmp_path / project["id"] / "runs" / run["id"] / "checkpoint-100"
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+
+    await orchestrator._process_trainer_event(
+        run_id=run["id"],
+        project_id=project["id"],
+        event={
+            "type": "checkpoint",
+            "step": 100,
+            "path": str(ckpt_dir),
+            "size_bytes": 2048,
+            "is_best_eval": True,
+        },
+        stage_start_times={},
+        final_metrics={},
+    )
+
+    rows = (
+        (
+            await db_session.execute(
+                select(Artifact).where(
+                    Artifact.run_id == run["id"],
+                    Artifact.artifact_type == "checkpoint",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1
+    assert rows[0].is_best == 1
