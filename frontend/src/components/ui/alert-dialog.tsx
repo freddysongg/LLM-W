@@ -32,7 +32,7 @@ const AlertDialogContent = React.forwardRef<
     <AlertDialogPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed left-1/2 top-1/2 z-50 w-full max-w-[520px] -translate-x-1/2 -translate-y-1/2",
+        "fixed left-1/2 top-1/2 z-50 w-full max-w-[520px] [translate:-50%_-50%]",
         "flex max-h-[calc(100vh-80px)] flex-col overflow-hidden",
         "rounded-lg border border-hairline bg-surface text-ink-1 shadow-token-lg",
         "animate-fade-up",
