@@ -296,6 +296,8 @@ export default function TrainingPage(): React.JSX.Element {
 
       <YamlPreviewDialog
         isOpen={isYamlDialogOpen}
+        projectId={projectId}
+        activeVersionId={configVersion?.id ?? null}
         yamlContent={yamlPreview}
         onClose={() => setIsYamlDialogOpen(false)}
       />
