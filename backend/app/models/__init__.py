@@ -17,6 +17,7 @@ from app.models.run import Run
 from app.models.run_stage import RunStage
 from app.models.storage_record import StorageRecord
 from app.models.suggestion import AISuggestion
+from app.models.weight_snapshot import WeightSnapshot
 
 __all__ = [
     "ActivationSnapshot",
@@ -36,4 +37,5 @@ __all__ = [
     "Run",
     "RunStage",
     "StorageRecord",
+    "WeightSnapshot",
 ]

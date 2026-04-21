@@ -30,6 +30,7 @@ class ModelProfile(Base):
     num_attention_heads: Mapped[int | None] = mapped_column(Integer, nullable=True)
     capabilities_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     resource_estimate_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    layers_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
 
