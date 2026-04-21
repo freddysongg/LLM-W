@@ -151,6 +151,16 @@ export function useRunStream({
             queryKey: ["projects", projectId, "runs", runId, "checkpoints"],
           });
         }
+        if (envelope.event === "model_profile_ready") {
+          void queryClient.invalidateQueries({
+            queryKey: ["projects", projectId, "runs", runId, "model-profile"],
+          });
+        }
+        if (envelope.event === "weight_stats_recorded") {
+          void queryClient.invalidateQueries({
+            queryKey: ["projects", projectId, "runs", runId, "weight-snapshots"],
+          });
+        }
       }
 
       if (envelope.channel === "run_state") {
