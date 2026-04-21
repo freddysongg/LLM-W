@@ -26,9 +26,11 @@ from app.core.exceptions import (
 from app.models.artifact import Artifact
 from app.models.config_version import ConfigVersion
 from app.models.metric_point import MetricPoint
+from app.models.model_profile import ModelProfile
 from app.models.project import Project
 from app.models.run import Run
 from app.models.run_stage import RunStage
+from app.models.weight_snapshot import WeightSnapshot
 from app.schemas.run import RunCreate, RunResponse
 from app.schemas.workbench_config import ExecutionConfig
 from app.services import suggestion_service
@@ -393,6 +395,108 @@ async def _record_artifact(
         await session.commit()
 
 
+async def _extract_model_identity(
+    *, session: AsyncSession, run: Run
+) -> tuple[str, str, str]:
+    """Derive (model_id, source, family) from the run's ConfigVersion YAML.
+
+    The Run table has no direct model columns, so identity is sourced from the
+    immutable config snapshot that was used to launch the run.
+    """
+    config_version = await session.get(ConfigVersion, run.config_version_id)
+    if config_version is None or not config_version.yaml_blob:
+        return ("", "", "")
+    parsed: object = yaml.safe_load(config_version.yaml_blob)
+    if not isinstance(parsed, dict):
+        return ("", "", "")
+    model_block = parsed.get("model", {})
+    if not isinstance(model_block, dict):
+        return ("", "", "")
+    return (
+        str(model_block.get("model_id", "") or ""),
+        str(model_block.get("source", "") or ""),
+        str(model_block.get("family", "") or ""),
+    )
+
+
+async def _persist_model_profile(
+    *,
+    run_id: str,
+    project_id: str,
+    total_params: int,
+    trainable_params: int,
+    layers: list[dict[str, Any]],
+) -> None:
+    async with async_session_factory() as session:
+        run = await session.get(Run, run_id)
+        if run is None:
+            return
+
+        model_id, model_source, model_family = await _extract_model_identity(
+            session=session, run=run
+        )
+
+        existing = (
+            await session.execute(
+                select(ModelProfile).where(
+                    ModelProfile.project_id == project_id,
+                    ModelProfile.model_id == model_id,
+                )
+            )
+        ).scalar_one_or_none()
+
+        now = datetime.now(UTC).isoformat()
+        if existing is None:
+            session.add(
+                ModelProfile(
+                    id=str(uuid.uuid4()),
+                    project_id=project_id,
+                    source=model_source,
+                    model_id=model_id,
+                    family=model_family,
+                    parameter_count=total_params,
+                    trainable_count=trainable_params,
+                    layers_json=json.dumps(layers),
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+        elif existing.layers_json is None:
+            existing.layers_json = json.dumps(layers)
+            existing.parameter_count = existing.parameter_count or total_params
+            existing.trainable_count = existing.trainable_count or trainable_params
+            existing.updated_at = now
+
+        await session.commit()
+
+
+async def _persist_weight_stats(
+    *,
+    run_id: str,
+    step: int,
+    stats: dict[str, dict[str, float]],
+) -> None:
+    async with async_session_factory() as session:
+        now = datetime.now(UTC).isoformat()
+        session.add_all(
+            [
+                WeightSnapshot(
+                    run_id=run_id,
+                    step=step,
+                    layer_name=layer_name,
+                    mean=values["mean"],
+                    std=values["std"],
+                    norm=values["norm"],
+                    min_val=values["min"],
+                    max_val=values["max"],
+                    created_at=now,
+                )
+                for layer_name, values in stats.items()
+            ]
+        )
+        await session.commit()
+
+
 async def _run_final_retention_sweep(
     *,
     session: AsyncSession,
@@ -654,6 +758,51 @@ async def _process_trainer_event(
                 "runId": run_id,
                 "timestamp": timestamp,
                 "payload": {"runId": run_id, "artifactType": artifact_type, "path": path},
+            },
+        )
+
+    elif event_type == "model_profile":
+        await _persist_model_profile(
+            run_id=run_id,
+            project_id=project_id,
+            total_params=event["total_params"],
+            trainable_params=event["trainable_params"],
+            layers=event["layers"],
+        )
+        await event_bus.publish(
+            event_type=f"project.{project_id}.ws",
+            payload={
+                "channel": "system",
+                "event": "model_profile_ready",
+                "runId": run_id,
+                "timestamp": timestamp,
+                "payload": {
+                    "runId": run_id,
+                    "layerCount": len(event["layers"]),
+                    "totalParams": event["total_params"],
+                    "trainableParams": event["trainable_params"],
+                },
+            },
+        )
+
+    elif event_type == "weight_stats":
+        await _persist_weight_stats(
+            run_id=run_id,
+            step=event["step"],
+            stats=event["stats"],
+        )
+        await event_bus.publish(
+            event_type=f"project.{project_id}.ws",
+            payload={
+                "channel": "system",
+                "event": "weight_stats_recorded",
+                "runId": run_id,
+                "timestamp": timestamp,
+                "payload": {
+                    "runId": run_id,
+                    "step": event["step"],
+                    "layerCount": len(event["stats"]),
+                },
             },
         )
 
