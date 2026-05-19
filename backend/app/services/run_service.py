@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
-from sqlalchemy import distinct, func, select
+from sqlalchemy import delete, distinct, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import (
@@ -16,13 +16,16 @@ from app.core.exceptions import (
     RunNotFoundError,
     RunStateError,
 )
+from app.models.activation_snapshot import ActivationSnapshot
 from app.models.artifact import Artifact
 from app.models.config_version import ConfigVersion
+from app.models.eval_run import EvalRun
 from app.models.metric_point import MetricPoint
 from app.models.model_profile import ModelProfile
 from app.models.project import Project
 from app.models.run import Run
 from app.models.run_stage import RunStage
+from app.models.suggestion import AISuggestion
 from app.models.weight_snapshot import WeightSnapshot
 from app.schemas.run import (
     CheckpointResponse,
@@ -161,6 +164,26 @@ async def delete_run(*, session: AsyncSession, run_id: str, project_id: str) -> 
     run = await get_run(session=session, run_id=run_id, project_id=project_id)
     if run.status not in _DELETABLE_STATUSES:
         raise RunStateError(run_id=run_id, action="delete", current_status=run.status)
+
+    # Sever soft references: these children are archival and should survive
+    # the parent run rather than disappear with it.
+    await session.execute(
+        update(EvalRun).where(EvalRun.training_run_id == run_id).values(training_run_id=None)
+    )
+    await session.execute(
+        update(AISuggestion).where(AISuggestion.source_run_id == run_id).values(source_run_id=None)
+    )
+    await session.execute(
+        update(Run).where(Run.parent_run_id == run_id).values(parent_run_id=None)
+    )
+
+    # Hard-delete children that only exist as observability of the parent —
+    # the ORM has no relationship declared for these tables, so they would
+    # otherwise become orphans (SQLite FK is off) or block the delete (if
+    # FK is ever enabled).
+    await session.execute(delete(WeightSnapshot).where(WeightSnapshot.run_id == run_id))
+    await session.execute(delete(ActivationSnapshot).where(ActivationSnapshot.run_id == run_id))
+
     await session.delete(run)
     await session.commit()
 
