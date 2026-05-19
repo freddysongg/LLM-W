@@ -92,6 +92,24 @@ _active_processes: dict[str, TrainingProcess] = {}
 # in "pending" with no pid and no trainer ever launched.
 _active_tasks: dict[str, asyncio.Task[None]] = {}
 
+# Post-completion analysis tasks fanned out from terminal-state transitions.
+# Same weak-ref hazard as `_active_tasks` — without a strong reference here
+# the auto-analyze call can disappear before it runs.
+_active_analysis_tasks: set[asyncio.Task[None]] = set()
+
+
+def _log_background_task_exception(task: asyncio.Task[None]) -> None:
+    """Surface unhandled exceptions from background tasks.
+
+    Without this, an exception escapes as a GC-time `Task exception was
+    never retrieved` warning, with no stack trace tied to the failing run.
+    """
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.error("background task %s raised", task.get_name(), exc_info=exc)
+
 
 async def list_runs(*, session: AsyncSession, project_id: str) -> list[Run]:
     result = await session.execute(
@@ -260,7 +278,12 @@ async def create_run(
         name=f"trainer-orchestration-{run_id}",
     )
     _active_tasks[run_id] = task
-    task.add_done_callback(lambda completed: _active_tasks.pop(run_id, None))
+
+    def _on_task_done(completed: asyncio.Task[None]) -> None:
+        _active_tasks.pop(run_id, None)
+        _log_background_task_exception(completed)
+
+    task.add_done_callback(_on_task_done)
 
     return run
 
@@ -1033,7 +1056,13 @@ async def _run_trainer_subprocess(
                     },
                 },
             )
-            asyncio.create_task(_auto_analyze_if_enabled(run_id=run_id, project_id=project_id))
+            analysis_task = asyncio.create_task(
+                _auto_analyze_if_enabled(run_id=run_id, project_id=project_id),
+                name=f"auto-analyze-{run_id}",
+            )
+            _active_analysis_tasks.add(analysis_task)
+            analysis_task.add_done_callback(_active_analysis_tasks.discard)
+            analysis_task.add_done_callback(_log_background_task_exception)
         elif terminal_status == "cancelled":
             await _mark_pending_stages_skipped(run_id=run_id)
             await _update_run_status(run_id=run_id, status="cancelled")

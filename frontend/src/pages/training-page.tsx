@@ -17,7 +17,7 @@ import type { Run } from "@/types/run";
 import type { RunSummary } from "@/types/run-summary";
 import type { TrainingConfig, WorkbenchConfig } from "@/types/config";
 import { useToast } from "@/hooks/use-toast";
-import { ApiError } from "@/api/client";
+import { describeApiError } from "@/lib/api-error";
 import {
   TrainingForm,
   type TrainingFormSlice,
@@ -170,18 +170,14 @@ export default function TrainingPage(): React.JSX.Element {
     );
   };
 
-  const describeLaunchError = (cause: unknown): string => {
-    if (cause instanceof ApiError && cause.message) return cause.message;
-    if (cause instanceof Error && cause.message) return cause.message;
-    return "Unable to start training run.";
-  };
-
   const launchWithConfigVersion = ({
     configVersionId,
     runName,
+    savedNewVersion,
   }: {
     readonly configVersionId: string;
     readonly runName: string;
+    readonly savedNewVersion: boolean;
   }): void => {
     createRun.mutate(
       { projectId, configVersionId },
@@ -194,9 +190,12 @@ export default function TrainingPage(): React.JSX.Element {
           });
         },
         onError: (cause) => {
+          const fallback = savedNewVersion
+            ? "Config saved as a new version, but the run failed to start."
+            : "Unable to start training run.";
           toast({
             title: "Launch failed",
-            description: describeLaunchError(cause),
+            description: describeApiError({ cause, fallback }),
             variant: "destructive",
           });
         },
@@ -210,7 +209,11 @@ export default function TrainingPage(): React.JSX.Element {
     const composedYaml = stringifyYaml(denormalizeYamlConfig(composed));
 
     if (composedYaml === configVersion.yamlBlob) {
-      launchWithConfigVersion({ configVersionId: configVersion.id, runName });
+      launchWithConfigVersion({
+        configVersionId: configVersion.id,
+        runName,
+        savedNewVersion: false,
+      });
       return;
     }
 
@@ -224,12 +227,19 @@ export default function TrainingPage(): React.JSX.Element {
       },
       {
         onSuccess: (newVersion) => {
-          launchWithConfigVersion({ configVersionId: newVersion.id, runName });
+          launchWithConfigVersion({
+            configVersionId: newVersion.id,
+            runName,
+            savedNewVersion: true,
+          });
         },
         onError: (cause) => {
           toast({
             title: "Launch failed",
-            description: `Could not save config before launch: ${describeLaunchError(cause)}`,
+            description: describeApiError({
+              cause,
+              fallback: "Could not save config before launch.",
+            }),
             variant: "destructive",
           });
         },

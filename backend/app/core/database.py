@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncGenerator
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from alembic.config import Config as AlembicConfig
 from alembic.runtime.migration import MigrationContext
@@ -94,15 +95,20 @@ def _alembic_config() -> AlembicConfig:
     return config
 
 
-def _inspect_database_state(sync_connection: Connection) -> tuple[str | None, bool, bool]:
-    """Return (current_alembic_revision, has_alembic_version_table, has_schema)."""
+class _DatabaseState(NamedTuple):
+    current_revision: str | None
+    has_alembic_version: bool
+    has_schema: bool
+
+
+def _inspect_database_state(sync_connection: Connection) -> _DatabaseState:
     inspector = inspect(sync_connection)
     has_alembic_version = inspector.has_table("alembic_version")
     has_schema = inspector.has_table("projects")
     if has_alembic_version:
         context = MigrationContext.configure(sync_connection)
-        return context.get_current_revision(), True, has_schema
-    return None, False, has_schema
+        return _DatabaseState(context.get_current_revision(), True, has_schema)
+    return _DatabaseState(None, False, has_schema)
 
 
 async def create_tables() -> None:
@@ -113,22 +119,26 @@ async def create_tables() -> None:
     ended up with an `artifacts` table that lacked the `is_best` column
     introduced in migration 0004. Running migrations on startup keeps
     the DB in lockstep with the code.
+
+    Alembic's command API is synchronous and opens its own sync engine
+    against the same SQLite file. Running it on a worker thread keeps
+    the asyncio event loop responsive while migrations execute.
     """
     config = _alembic_config()
     head_revision = ScriptDirectory.from_config(config).get_current_head()
 
     async with engine.connect() as conn:
-        current_revision, has_alembic_version, has_schema = await conn.run_sync(
-            _inspect_database_state
-        )
+        state = await conn.run_sync(_inspect_database_state)
 
-    if current_revision == head_revision and has_alembic_version:
+    if state.current_revision == head_revision and state.has_alembic_version:
         return
 
-    if not has_alembic_version and has_schema:
+    if not state.has_alembic_version and state.has_schema:
         logger.info("Legacy database detected — stamping to alembic head %s", head_revision)
-        alembic_command.stamp(config, "head")
+        await asyncio.to_thread(alembic_command.stamp, config, "head")
         return
 
-    logger.info("Running alembic upgrade: %s -> %s", current_revision or "base", head_revision)
-    alembic_command.upgrade(config, "head")
+    logger.info(
+        "Running alembic upgrade: %s -> %s", state.current_revision or "base", head_revision
+    )
+    await asyncio.to_thread(alembic_command.upgrade, config, "head")

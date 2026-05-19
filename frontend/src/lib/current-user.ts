@@ -6,6 +6,9 @@ export interface CurrentUser {
   readonly avatarColor: string;
 }
 
+// TODO(auth): replace this hard-coded identity with a real session lookup —
+// remove when the backend ships an authenticated /api/me endpoint and a
+// session hook wraps the app shell.
 export const CURRENT_USER: CurrentUser = {
   id: "freddy",
   name: "freddy",

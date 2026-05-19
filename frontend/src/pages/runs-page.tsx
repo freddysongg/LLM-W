@@ -18,7 +18,7 @@ import { useActiveConfig } from "@/hooks/useConfigs";
 import { useSettings } from "@/hooks/useSettings";
 import { useRunStream } from "@/hooks/useRunStream";
 import { useToast } from "@/hooks/use-toast";
-import { ApiError } from "@/api/client";
+import { describeApiError } from "@/lib/api-error";
 import { ActiveRunBanner } from "@/components/runs/active-run-banner";
 import { CheckpointList } from "@/components/runs/checkpoint-list";
 import { ConfigSnapshotTab } from "@/components/runs/config-snapshot-tab";
@@ -86,12 +86,6 @@ function countByStatus(runs: ReadonlyArray<Run>, predicate: (run: Run) => boolea
   let total = 0;
   for (const run of runs) if (predicate(run)) total += 1;
   return total;
-}
-
-function describeApiError(cause: unknown): string {
-  if (cause instanceof ApiError && cause.message) return cause.message;
-  if (cause instanceof Error && cause.message) return cause.message;
-  return "Unknown error.";
 }
 
 export default function RunsPage(): React.JSX.Element {
@@ -215,7 +209,7 @@ export default function RunsPage(): React.JSX.Element {
         onError: (cause) => {
           toast({
             title: "Launch failed",
-            description: describeApiError(cause),
+            description: describeApiError({ cause, fallback: "Unknown error." }),
             variant: "destructive",
           });
         },
@@ -241,7 +235,7 @@ export default function RunsPage(): React.JSX.Element {
         onError: (cause) => {
           toast({
             title: "Delete failed",
-            description: describeApiError(cause),
+            description: describeApiError({ cause, fallback: "Unknown error." }),
             variant: "destructive",
           });
         },

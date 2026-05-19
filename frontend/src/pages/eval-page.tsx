@@ -12,6 +12,8 @@ import { EvalCaseTable } from "@/components/eval/eval-case-table";
 import { EvalCaseDetailDrawer } from "@/components/eval/eval-case-detail-drawer";
 import { EvalExportButton } from "@/components/eval/eval-export-button";
 import { CostWarningBanner } from "@/components/eval/cost-warning-banner";
+import { useToast } from "@/hooks/use-toast";
+import { describeApiError } from "@/lib/api-error";
 import { cn } from "@/lib/utils";
 
 function buildCallsByCaseId(
@@ -32,6 +34,7 @@ function buildCallsByCaseId(
 export default function EvalPage(): React.JSX.Element {
   const { activeProjectId } = useAppStore();
   const isAnimationLocked = useLockEntered();
+  const { toast } = useToast();
 
   const [selectedEvalRunId, setSelectedEvalRunId] = React.useState<string | null>(null);
   const [selectedTrainingRunId, setSelectedTrainingRunId] = React.useState<string | null>(null);
@@ -73,9 +76,19 @@ export default function EvalPage(): React.JSX.Element {
           setSelectedEvalRunId(createdRun.id);
           setSelectedCaseId(null);
         },
+        onError: (cause) => {
+          toast({
+            title: "Eval failed to start",
+            description: describeApiError({
+              cause,
+              fallback: "Unable to start evaluation run.",
+            }),
+            variant: "destructive",
+          });
+        },
       },
     );
-  }, [createEvalRunMutation, selectedTrainingRunId, selectedVersionIds, maxCostUsd]);
+  }, [createEvalRunMutation, selectedTrainingRunId, selectedVersionIds, maxCostUsd, toast]);
 
   const handleSelectEvalRun = React.useCallback((evalRunId: string): void => {
     setSelectedEvalRunId(evalRunId);
