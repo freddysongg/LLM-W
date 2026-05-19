@@ -18,6 +18,7 @@ from app.core.config import settings
 from app.core.database import async_session_factory
 from app.models.decision_log import DecisionLog
 from app.models.run import Run
+from app.models.run_stage import RunStage
 
 logger = logging.getLogger(__name__)
 
@@ -257,13 +258,40 @@ async def _mark_run_failed(
     logger.info("marked run %s as failed: %s", run.id, failure_reason)
 
 
-async def recover_stale_runs() -> None:
-    """Called on app startup to recover runs that died while the app was down."""
-    async with async_session_factory() as session:
-        result = await session.execute(select(Run).where(Run.status == "running"))
-        running_runs = list(result.scalars().all())
+async def _skip_pending_stages(*, session: AsyncSession, run_id: str) -> None:
+    result = await session.execute(
+        select(RunStage).where(RunStage.run_id == run_id, RunStage.status == "pending")
+    )
+    pending_stages = list(result.scalars().all())
+    for stage_row in pending_stages:
+        stage_row.status = "skipped"
+    if pending_stages:
+        await session.commit()
 
-    for run in running_runs:
+
+_ORPHAN_PENDING_REASON = (
+    "Trainer subprocess never launched before backend restart — "
+    "the orchestration task was lost. Re-submit the run."
+)
+
+
+async def recover_stale_runs() -> None:
+    """Called on app startup to recover runs that died while the app was down.
+
+    Handles two classes of orphan:
+    - `running` rows whose process is gone or whose heartbeat has stalled.
+    - `pending` rows that never progressed past orchestrator.create_run —
+      this happens when the backend restarts between the DB insert and the
+      trainer subprocess actually being spawned. Without this sweep, such
+      runs remain visible in the UI as forever-pending phantoms.
+    """
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(Run).where(Run.status.in_(("running", "pending")))
+        )
+        stale_runs = list(result.scalars().all())
+
+    for run in stale_runs:
         async with async_session_factory() as session:
             refreshed = await session.get(Run, run.id)
             if refreshed is None:
@@ -272,6 +300,29 @@ async def recover_stale_runs() -> None:
             project_result = await session.execute(select(Run).where(Run.id == run.id))
             target_run = project_result.scalar_one_or_none()
             if target_run is None:
+                continue
+
+            if target_run.status == "pending":
+                await _mark_run_failed(
+                    session=session,
+                    run=target_run,
+                    failure_reason=_ORPHAN_PENDING_REASON,
+                    failure_stage="config_validation",
+                    last_checkpoint_path=None,
+                )
+                await _skip_pending_stages(session=session, run_id=target_run.id)
+                decision = DecisionLog(
+                    id=str(uuid.uuid4()),
+                    project_id=target_run.project_id,
+                    action_type="run_cancelled",
+                    actor="system",
+                    target_type="run",
+                    target_id=target_run.id,
+                    notes=f"watchdog recovery: {_ORPHAN_PENDING_REASON}",
+                    created_at=datetime.now(UTC).isoformat(),
+                )
+                session.add(decision)
+                await session.commit()
                 continue
 
             heartbeat: dict[str, object] | None = None

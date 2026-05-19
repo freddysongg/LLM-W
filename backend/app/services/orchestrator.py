@@ -86,6 +86,12 @@ _IS_UNIX = sys.platform != "win32"
 # Maps run_id → TrainingProcess handle
 _active_processes: dict[str, TrainingProcess] = {}
 
+# Strong references to the orchestration tasks spawned by create_run. Without
+# these, Python's event loop only holds weak refs (see asyncio.create_task
+# docs) and the GC can silently drop a task mid-flight, leaving a run stuck
+# in "pending" with no pid and no trainer ever launched.
+_active_tasks: dict[str, asyncio.Task[None]] = {}
+
 
 async def list_runs(*, session: AsyncSession, project_id: str) -> list[Run]:
     result = await session.execute(
@@ -243,15 +249,18 @@ async def create_run(
 
     config_path = _resolve_config_path(config_version=config_version, project_dir=project_dir)
 
-    asyncio.create_task(
+    task = asyncio.create_task(
         _run_trainer_subprocess(
             run_id=run_id,
             project_id=project_id,
             config_path=config_path,
             project_dir=project_dir,
             resume_from_checkpoint=resume_checkpoint,
-        )
+        ),
+        name=f"trainer-orchestration-{run_id}",
     )
+    _active_tasks[run_id] = task
+    task.add_done_callback(lambda completed: _active_tasks.pop(run_id, None))
 
     return run
 
