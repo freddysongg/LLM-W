@@ -17,6 +17,8 @@ import {
 import { useActiveConfig } from "@/hooks/useConfigs";
 import { useSettings } from "@/hooks/useSettings";
 import { useRunStream } from "@/hooks/useRunStream";
+import { useToast } from "@/hooks/use-toast";
+import { ApiError } from "@/api/client";
 import { ActiveRunBanner } from "@/components/runs/active-run-banner";
 import { CheckpointList } from "@/components/runs/checkpoint-list";
 import { ConfigSnapshotTab } from "@/components/runs/config-snapshot-tab";
@@ -86,8 +88,15 @@ function countByStatus(runs: ReadonlyArray<Run>, predicate: (run: Run) => boolea
   return total;
 }
 
+function describeApiError(cause: unknown): string {
+  if (cause instanceof ApiError && cause.message) return cause.message;
+  if (cause instanceof Error && cause.message) return cause.message;
+  return "Unknown error.";
+}
+
 export default function RunsPage(): React.JSX.Element {
   const navigate = useNavigate();
+  const { toast } = useToast();
   const { activeProjectId } = useAppStore();
   const [selectedRunId, setSelectedRunId] = React.useState<string | null>(null);
   const [selectedStageId, setSelectedStageId] = React.useState<string | null>(null);
@@ -194,7 +203,23 @@ export default function RunsPage(): React.JSX.Element {
     if (!activeProjectId || !activeConfig) return;
     createRunMutation.mutate(
       { projectId: activeProjectId, configVersionId: activeConfig.id },
-      { onSuccess: (newRun) => setSelectedRunId(newRun.id) },
+      {
+        onSuccess: (newRun) => {
+          setSelectedRunId(newRun.id);
+          setSelectedStageId(null);
+          toast({
+            title: "Run launched",
+            description: `Started run ${newRun.id.slice(0, 6)}.`,
+          });
+        },
+        onError: (cause) => {
+          toast({
+            title: "Launch failed",
+            description: describeApiError(cause),
+            variant: "destructive",
+          });
+        },
+      },
     );
   };
 
@@ -208,6 +233,17 @@ export default function RunsPage(): React.JSX.Element {
             setSelectedRunId(null);
             setSelectedStageId(null);
           }
+          toast({
+            title: "Run deleted",
+            description: `Deleted run ${runId.slice(0, 6)}.`,
+          });
+        },
+        onError: (cause) => {
+          toast({
+            title: "Delete failed",
+            description: describeApiError(cause),
+            variant: "destructive",
+          });
         },
       },
     );

@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Play, Sparkles } from "lucide-react";
+import { Play } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -9,7 +9,6 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Callout } from "@/components/shared/callout";
 import type { TrainingFormSlice, TrainingMethod } from "@/components/training/training-form";
 
 interface LaunchRunDialogProps {
@@ -21,13 +20,6 @@ interface LaunchRunDialogProps {
   readonly isLaunching: boolean;
   readonly onLaunch: (params: { readonly runName: string }) => void;
   readonly onClose: () => void;
-}
-
-const ESTIMATED_HOURS_PER_EPOCH = 14.2;
-const ESTIMATED_COST_PER_HOUR_USD = 2.1;
-
-function formatCost({ hours, rate }: { readonly hours: number; readonly rate: number }): string {
-  return `$${(hours * rate).toFixed(2)}`;
 }
 
 export function LaunchRunDialog({
@@ -50,8 +42,6 @@ export function LaunchRunDialog({
   }, [isOpen, method]);
 
   const { training, execution } = slice;
-  const estimatedHours = training.epochs * ESTIMATED_HOURS_PER_EPOCH;
-  const estimatedCost = formatCost({ hours: estimatedHours, rate: ESTIMATED_COST_PER_HOUR_USD });
   const target =
     execution.environment === "modal" && execution.modalGpuType
       ? `modal · ${execution.modalGpuType}`
@@ -92,12 +82,6 @@ export function LaunchRunDialog({
             <ReadoutRow label="Epochs" value={String(training.epochs)} />
             <ReadoutRow label="Target" value={target} />
           </div>
-          <Callout tone="iris" icon={<Sparkles className="size-3.5" aria-hidden="true" />}>
-            <span>
-              Estimated cost: <strong>{estimatedCost}</strong> · ~{estimatedHours.toFixed(1)}h on{" "}
-              {target}
-            </span>
-          </Callout>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={isLaunching}>

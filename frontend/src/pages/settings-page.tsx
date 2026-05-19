@@ -1,6 +1,6 @@
 import * as React from "react";
 import { useState } from "react";
-import { Copy, MoreHorizontal, Plus, Cpu, Cloud } from "lucide-react";
+import { Copy, Plus, Cpu, Cloud } from "lucide-react";
 import {
   useSettings,
   useUpdateSettings,
@@ -14,16 +14,9 @@ import { DefaultRetentionPolicy } from "@/components/settings/default-retention-
 import { ExperimentRetentionDays } from "@/components/settings/experiment-retention-days";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   AlertDialog,
@@ -44,20 +37,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { BigMetric } from "@/components/shared/big-metric";
-import { KVList } from "@/components/shared/kv-list";
 import { RunRow, RunRowCell } from "@/components/shared/run-row";
+import { CURRENT_USER } from "@/lib/current-user";
 import { cn } from "@/lib/utils";
 import type { UpdateSettingsRequest, ApiKeySaveResult } from "@/types/settings";
 
-type SettingsTab = "workspace" | "compute" | "keys" | "billing" | "members";
-type MemberRole = "owner" | "admin" | "member" | "viewer";
+type SettingsTab = "workspace" | "compute" | "keys" | "members";
 
 interface TestResult {
   readonly success: boolean;
@@ -79,25 +64,6 @@ interface ApiKeyEntry {
   readonly lastUsed: string;
 }
 
-interface MemberEntry {
-  readonly id: string;
-  readonly name: string;
-  readonly email: string;
-  readonly role: MemberRole;
-  readonly initials: string;
-  readonly color: string;
-}
-
-interface BillingBreakdownEntry {
-  readonly key: string;
-  readonly value: string;
-}
-
-interface DailySpendEntry {
-  readonly day: number;
-  readonly amount: number;
-}
-
 interface ModalTokenCredentials {
   readonly tokenId: string;
   readonly tokenSecret: string;
@@ -106,10 +72,6 @@ interface ModalTokenCredentials {
 interface ComputeRowProps {
   readonly entry: ComputeEntry;
   readonly onAction: (label: string) => void;
-}
-
-interface DailySpendChartProps {
-  readonly entries: ReadonlyArray<DailySpendEntry>;
 }
 
 interface WorkspaceTabProps {
@@ -177,65 +139,6 @@ const API_KEY_STUB: ReadonlyArray<ApiKeyEntry> = [
   },
 ];
 
-// TODO(P8): member list is stubbed until a members endpoint is wired -- remove when available
-const MEMBER_STUB: ReadonlyArray<MemberEntry> = [
-  {
-    id: "priya",
-    name: "Priya R.",
-    email: "priya@acme.ai",
-    role: "owner",
-    initials: "PR",
-    color: "oklch(0.82 0.13 310)",
-  },
-  {
-    id: "marcus",
-    name: "Marcus K.",
-    email: "marcus@acme.ai",
-    role: "admin",
-    initials: "MK",
-    color: "oklch(0.80 0.14 260)",
-  },
-  {
-    id: "yuki",
-    name: "Yuki T.",
-    email: "yuki@acme.ai",
-    role: "member",
-    initials: "YT",
-    color: "oklch(0.88 0.14 150)",
-  },
-  {
-    id: "dani",
-    name: "Daniela S.",
-    email: "dani@acme.ai",
-    role: "member",
-    initials: "DS",
-    color: "oklch(0.86 0.11 200)",
-  },
-  {
-    id: "ben",
-    name: "Ben F.",
-    email: "ben@acme.ai",
-    role: "viewer",
-    initials: "BF",
-    color: "oklch(0.84 0.12 80)",
-  },
-];
-
-// TODO(P8): billing numbers are stubbed until a billing endpoint is wired -- remove when available
-const BILLING_BREAKDOWN: ReadonlyArray<BillingBreakdownEntry> = [
-  { key: "GPU hours (a100)", value: "142.4h · $213.60" },
-  { key: "GPU hours (a10g)", value: "38.1h · $38.10" },
-  { key: "Storage", value: "48.2 GB · $14.42" },
-  { key: "Egress", value: "120 GB · $18.00" },
-];
-
-const DAILY_SPEND_STUB: ReadonlyArray<DailySpendEntry> = Array.from({ length: 24 }, (_, index) => ({
-  day: index + 1,
-  amount: 30 + Math.sin(index / 3) * 30 + ((index * 7) % 50),
-}));
-
-const ROLE_OPTIONS: ReadonlyArray<MemberRole> = ["owner", "admin", "member", "viewer"];
-
 function ComputeRow({ entry, onAction }: ComputeRowProps): React.JSX.Element {
   const Icon = entry.icon === "cloud" ? Cloud : Cpu;
   return (
@@ -262,30 +165,6 @@ function ComputeRow({ entry, onAction }: ComputeRowProps): React.JSX.Element {
         {entry.status === "connected" ? "Configure" : "Connect"}
       </Button>
     </RunRow>
-  );
-}
-
-function DailySpendChart({ entries }: DailySpendChartProps): React.JSX.Element {
-  const maxAmount = Math.max(...entries.map((entry) => entry.amount), 1);
-  return (
-    <svg viewBox="0 0 480 200" width="100%" height={200} aria-label="Daily spending chart">
-      {entries.map((entry, index) => {
-        const heightPx = (entry.amount / maxAmount) * 150;
-        return (
-          <rect
-            key={entry.day}
-            x={20 + index * 18}
-            y={180 - heightPx}
-            width={12}
-            height={heightPx}
-            rx={2}
-            fill="var(--iris-3)"
-            opacity={0.5 + index / 48}
-          />
-        );
-      })}
-      <line x1={20} x2={460} y1={180} y2={180} stroke="var(--hairline)" strokeWidth={1} />
-    </svg>
   );
 }
 
@@ -343,14 +222,6 @@ export default function SettingsPage(): React.JSX.Element {
   const [apiKeySaveResult, setApiKeySaveResult] = useState<ApiKeySaveResult | null>(null);
   const [modalTokenSaveResult, setModalTokenSaveResult] = useState<ApiKeySaveResult | null>(null);
   const [modalTestResult, setModalTestResult] = useState<TestResult | null>(null);
-  const [memberRoles, setMemberRoles] = useState<Record<string, MemberRole>>(() =>
-    MEMBER_STUB.reduce<Record<string, MemberRole>>((accumulator, entry) => {
-      accumulator[entry.id] = entry.role;
-      return accumulator;
-    }, {}),
-  );
-  const [isInviteOpen, setIsInviteOpen] = useState<boolean>(false);
-  const [inviteEmail, setInviteEmail] = useState<string>("");
   const [isNewKeyOpen, setIsNewKeyOpen] = useState<boolean>(false);
   const [newKeyName, setNewKeyName] = useState<string>("");
 
@@ -449,21 +320,6 @@ export default function SettingsPage(): React.JSX.Element {
     }
   };
 
-  const handleRoleChange = (memberId: string, nextRole: MemberRole): void => {
-    setMemberRoles((previous) => ({ ...previous, [memberId]: nextRole }));
-    toast({ title: "Role updated", description: `Role updated (not yet persisted).` });
-  };
-
-  const handleInviteConfirm = (): void => {
-    if (!inviteEmail.trim()) return;
-    toast({
-      title: "Invite sent",
-      description: `Invitation sent to ${inviteEmail.trim()} (stub).`,
-    });
-    setInviteEmail("");
-    setIsInviteOpen(false);
-  };
-
   const handleCreateNewKey = (): void => {
     if (!newKeyName.trim()) return;
     toast({
@@ -484,7 +340,7 @@ export default function SettingsPage(): React.JSX.Element {
             Settings
           </h1>
           <p className="mt-1 font-mono text-[11px] text-ink-3">
-            workspace · compute · keys · billing · members
+            workspace · compute · keys · members
           </p>
         </div>
       </header>
@@ -504,7 +360,6 @@ export default function SettingsPage(): React.JSX.Element {
           <TabsTrigger value="workspace">Workspace</TabsTrigger>
           <TabsTrigger value="compute">Compute</TabsTrigger>
           <TabsTrigger value="keys">API keys</TabsTrigger>
-          <TabsTrigger value="billing">Billing</TabsTrigger>
           <TabsTrigger value="members">Members</TabsTrigger>
         </TabsList>
 
@@ -639,142 +494,37 @@ export default function SettingsPage(): React.JSX.Element {
           </Card>
         </TabsContent>
 
-        <TabsContent value="billing" className="mt-0">
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <Card>
-              <CardHeader className="py-3">
-                <CardTitle>Current cycle</CardTitle>
-                <Badge variant="iris" dot={false}>
-                  team plan
-                </Badge>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-4">
-                <BigMetric value="$284" unit=".12" />
-                <div className="font-mono text-[11px] text-ink-3">
-                  Nov 1 – Nov 28 · 4 days remaining
-                </div>
-                <KVList rows={BILLING_BREAKDOWN} />
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="py-3">
-                <CardTitle>Spending by day</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <DailySpendChart entries={DAILY_SPEND_STUB} />
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-
         <TabsContent value="members" className="mt-0">
           <Card className="p-0">
             <CardHeader className="py-3">
               <CardTitle>Members</CardTitle>
-              <Button variant="primary" size="sm" onClick={() => setIsInviteOpen(true)}>
-                <Plus aria-hidden="true" />
-                Invite
-              </Button>
+              <Badge dot={false}>you</Badge>
             </CardHeader>
             <div>
-              {MEMBER_STUB.map((member) => {
-                const currentRole = memberRoles[member.id] ?? member.role;
-                return (
-                  <RunRow key={member.id} style={{ gridTemplateColumns: "32px 1fr 130px 32px" }}>
-                    <span
-                      aria-hidden="true"
-                      className="grid h-7 w-7 place-items-center rounded-full font-mono text-[10px] font-semibold"
-                      style={{ background: member.color, color: "var(--surface)" }}
-                    >
-                      {member.initials}
-                    </span>
-                    <div className="min-w-0">
-                      <div className="truncate text-[13px] font-medium text-ink-1">
-                        {member.name}
-                      </div>
-                      <div className="truncate font-mono text-[10.5px] text-ink-3">
-                        {member.email}
-                      </div>
-                    </div>
-                    <Select
-                      value={currentRole}
-                      onValueChange={(value) => handleRoleChange(member.id, value as MemberRole)}
-                    >
-                      <SelectTrigger aria-label={`Role for ${member.name}`}>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {ROLE_OPTIONS.map((role) => (
-                          <SelectItem key={role} value={role}>
-                            {role}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          aria-label={`Member actions for ${member.name}`}
-                        >
-                          <MoreHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          onClick={() =>
-                            toast({
-                              title: "Removed",
-                              description: `${member.name} removed (stub).`,
-                            })
-                          }
-                          className="text-[color:var(--danger)]"
-                        >
-                          Remove member
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </RunRow>
-                );
-              })}
+              <RunRow style={{ gridTemplateColumns: "32px 1fr 130px" }}>
+                <span
+                  aria-hidden="true"
+                  className="grid h-7 w-7 place-items-center rounded-full font-mono text-[10px] font-semibold"
+                  style={{ background: CURRENT_USER.avatarColor, color: "var(--surface)" }}
+                >
+                  {CURRENT_USER.initials}
+                </span>
+                <div className="min-w-0">
+                  <div className="truncate text-[13px] font-medium text-ink-1">
+                    {CURRENT_USER.name}
+                  </div>
+                  <div className="truncate font-mono text-[10.5px] text-ink-3">
+                    {CURRENT_USER.email}
+                  </div>
+                </div>
+                <Badge variant="iris" dot={false}>
+                  owner
+                </Badge>
+              </RunRow>
             </div>
           </Card>
         </TabsContent>
       </Tabs>
-
-      <Dialog open={isInviteOpen} onOpenChange={setIsInviteOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <div className="flex flex-col gap-1.5">
-              <DialogTitle>Invite member</DialogTitle>
-              <DialogDescription>Send a team invitation to an email address.</DialogDescription>
-            </div>
-          </DialogHeader>
-          <div className="flex flex-col gap-3 px-6 py-4">
-            <Label htmlFor="invite-email" className="text-[11px] text-ink-3">
-              Email
-            </Label>
-            <Input
-              id="invite-email"
-              type="email"
-              placeholder="new@acme.ai"
-              value={inviteEmail}
-              onChange={(event) => setInviteEmail(event.target.value)}
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsInviteOpen(false)}>
-              Cancel
-            </Button>
-            <Button variant="primary" onClick={handleInviteConfirm} disabled={!inviteEmail.trim()}>
-              Send invite
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <Dialog open={isNewKeyOpen} onOpenChange={setIsNewKeyOpen}>
         <DialogContent className="sm:max-w-md">

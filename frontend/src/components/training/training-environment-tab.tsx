@@ -22,7 +22,6 @@ interface TrainingEnvironmentTabProps {
 }
 
 type ProviderOption = TrainingEnvironment | "replicate" | "runpod";
-type GpuCount = 1 | 2 | 4 | 8;
 
 const PROVIDER_OPTIONS: ReadonlyArray<{
   readonly value: ProviderOption;
@@ -45,8 +44,6 @@ const GPU_TYPE_OPTIONS: ReadonlyArray<{
   { value: "a10", label: "a10g" },
   { value: "t4", label: "t4" },
 ];
-
-const GPU_COUNT_OPTIONS: ReadonlyArray<GpuCount> = [1, 2, 4, 8];
 
 interface IntegrationRow {
   readonly name: string;
@@ -71,10 +68,10 @@ export function TrainingEnvironmentTab({
 }: TrainingEnvironmentTabProps): React.JSX.Element {
   const { execution } = slice;
   const provider: ProviderOption = execution.environment;
+  const isModal = provider === "modal";
 
   const [envVars, setEnvVars] = React.useState<ReadonlyArray<string>>(INITIAL_ENV_VARS);
   const [draftEnvVar, setDraftEnvVar] = React.useState<string>("");
-  const [gpuCount, setGpuCount] = React.useState<GpuCount>(1);
   const [integrationToggles, setIntegrationToggles] = React.useState<Record<string, boolean>>({});
 
   const handleProviderSelect = (nextProvider: ProviderOption): void => {
@@ -134,55 +131,34 @@ export function TrainingEnvironmentTab({
             </div>
           </div>
 
-          <div className="space-y-2">
-            <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-ink-3">
-              GPU type
-            </span>
-            <Select
-              value={execution.modalGpuType ?? "a100-40gb"}
-              onValueChange={(value) =>
-                onChange({ execution: { modalGpuType: value as ModalGpuType } })
-              }
-            >
-              <SelectTrigger className="w-60">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {GPU_TYPE_OPTIONS.map(({ value, label }) => (
-                  <SelectItem key={value} value={value}>
-                    {label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-ink-3">
-              GPU count
-            </span>
-            <div className="inline-flex rounded-md border border-hairline bg-surface-2 p-0.5">
-              {GPU_COUNT_OPTIONS.map((count) => {
-                const isActive = gpuCount === count;
-                return (
-                  <button
-                    key={count}
-                    type="button"
-                    onClick={() => setGpuCount(count)}
-                    className={cn(
-                      "rounded-sm px-3 py-1.5 font-mono text-[11px]",
-                      "transition-colors duration-[var(--dur-1)]",
-                      isActive
-                        ? "bg-ink-1 text-[color:var(--surface)]"
-                        : "text-ink-2 hover:bg-surface",
-                    )}
-                  >
-                    {count}×
-                  </button>
-                );
-              })}
+          {isModal ? (
+            <div className="space-y-2">
+              <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-ink-3">
+                GPU type
+              </span>
+              <Select
+                value={execution.modalGpuType ?? "a100-40gb"}
+                onValueChange={(value) =>
+                  onChange({ execution: { modalGpuType: value as ModalGpuType } })
+                }
+              >
+                <SelectTrigger className="w-60">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {GPU_TYPE_OPTIONS.map(({ value, label }) => (
+                    <SelectItem key={value} value={value}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-          </div>
+          ) : (
+            <div className="font-mono text-[10.5px] text-ink-3">
+              Local runs use this machine&apos;s device (cuda · mps · cpu, auto-detected).
+            </div>
+          )}
 
           <div className="space-y-2">
             <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-ink-3">

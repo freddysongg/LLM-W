@@ -17,6 +17,7 @@ import type { Run } from "@/types/run";
 import type { RunSummary } from "@/types/run-summary";
 import type { TrainingConfig, WorkbenchConfig } from "@/types/config";
 import { useToast } from "@/hooks/use-toast";
+import { ApiError } from "@/api/client";
 import {
   TrainingForm,
   type TrainingFormSlice,
@@ -169,10 +170,21 @@ export default function TrainingPage(): React.JSX.Element {
     );
   };
 
-  const handleLaunch = ({ runName }: { readonly runName: string }): void => {
-    if (!configVersion) return;
+  const describeLaunchError = (cause: unknown): string => {
+    if (cause instanceof ApiError && cause.message) return cause.message;
+    if (cause instanceof Error && cause.message) return cause.message;
+    return "Unable to start training run.";
+  };
+
+  const launchWithConfigVersion = ({
+    configVersionId,
+    runName,
+  }: {
+    readonly configVersionId: string;
+    readonly runName: string;
+  }): void => {
     createRun.mutate(
-      { projectId, configVersionId: configVersion.id },
+      { projectId, configVersionId },
       {
         onSuccess: () => {
           setIsLaunchDialogOpen(false);
@@ -181,10 +193,43 @@ export default function TrainingPage(): React.JSX.Element {
             description: `Started ${runName}.`,
           });
         },
-        onError: () => {
+        onError: (cause) => {
           toast({
             title: "Launch failed",
-            description: "Unable to start training run.",
+            description: describeLaunchError(cause),
+            variant: "destructive",
+          });
+        },
+      },
+    );
+  };
+
+  const handleLaunch = ({ runName }: { readonly runName: string }): void => {
+    if (!configVersion || !parsedConfig || !slice) return;
+    const composed = composeFullConfig({ base: parsedConfig, slice });
+    const composedYaml = stringifyYaml(denormalizeYamlConfig(composed));
+
+    if (composedYaml === configVersion.yamlBlob) {
+      launchWithConfigVersion({ configVersionId: configVersion.id, runName });
+      return;
+    }
+
+    saveConfig.mutate(
+      {
+        request: {
+          projectId,
+          yamlContent: composedYaml,
+          sourceTag: "user",
+        },
+      },
+      {
+        onSuccess: (newVersion) => {
+          launchWithConfigVersion({ configVersionId: newVersion.id, runName });
+        },
+        onError: (cause) => {
+          toast({
+            title: "Launch failed",
+            description: `Could not save config before launch: ${describeLaunchError(cause)}`,
             variant: "destructive",
           });
         },
@@ -245,7 +290,7 @@ export default function TrainingPage(): React.JSX.Element {
             variant="primary"
             size="sm"
             onClick={() => setIsLaunchDialogOpen(true)}
-            disabled={!configVersion || createRun.isPending}
+            disabled={!configVersion || createRun.isPending || saveConfig.isPending}
           >
             <Play aria-hidden="true" />
             {createRun.isPending ? "Launching…" : "Launch run"}
@@ -308,7 +353,7 @@ export default function TrainingPage(): React.JSX.Element {
           method={resolveMethod(slice)}
           modelId={modelProfile?.model_id ?? null}
           datasetId={datasetProfile?.datasetId ?? null}
-          isLaunching={createRun.isPending}
+          isLaunching={createRun.isPending || saveConfig.isPending}
           onLaunch={handleLaunch}
           onClose={() => setIsLaunchDialogOpen(false)}
         />
