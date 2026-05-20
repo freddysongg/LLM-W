@@ -297,3 +297,48 @@ def test_get_sanitize_status_reports_existing_artifact_with_hash_and_timestamp(
     assert status.content_hash == "a" * 64
     assert status.sanitized_at is not None
     assert status.sanitized_at.endswith("+00:00")
+
+
+def test_run_pipeline_content_hash_reflects_persisted_rows_when_normalize_true() -> None:
+    """The artifact's content_hash must change when normalization rewrites the rows.
+
+    The Modal upload-skip check at `_remote_sanitized_hash_matches` keys on this
+    hash. If the hash were computed over the pre-normalized rows, a remote
+    artifact written from a prior `normalize=true` run would be silently reused
+    after the local rows changed shape — leaving the trainer reading the wrong
+    schema. Pin: normalize=true must hash the normalized rows.
+    """
+    from app.schemas.dataset_sanitizer import SanitizeDatasetRequest, SplitRatios
+    from app.services.dataset_sanitizer import _compute_content_hash, run_sanitization_pipeline
+
+    rows = [{"prompt": "hi", "response": "hello"}]
+    request = SanitizeDatasetRequest(
+        source_format="default",
+        normalize=True,
+        split_ratios=SplitRatios(train=1.0, val=0.0, test=0.0),
+    )
+
+    response = run_sanitization_pipeline(rows=rows, request=request)
+    expected_hash = _compute_content_hash(response.sanitized_rows)
+    assert response.content_hash == expected_hash
+    # And to make sure the pre-normalization hash would differ, sanity-check
+    # the raw shape against the normalized one.
+    raw_hash = _compute_content_hash(rows)
+    assert response.content_hash != raw_hash
+
+
+def test_run_pipeline_content_hash_unchanged_when_normalize_false() -> None:
+    """normalize=false → hash matches sanitize_rows' hash (no second pass needed)."""
+    from app.schemas.dataset_sanitizer import SanitizeDatasetRequest, SplitRatios
+    from app.services.dataset_sanitizer import run_sanitization_pipeline
+
+    rows = [{"text": "hi"}]
+    request = SanitizeDatasetRequest(
+        source_format="default",
+        normalize=False,
+        split_ratios=SplitRatios(train=1.0, val=0.0, test=0.0),
+    )
+
+    response = run_sanitization_pipeline(rows=rows, request=request)
+    sanitized = sanitize_rows(rows=rows, rules=default_sanitization_rules())
+    assert response.content_hash == sanitized.content_hash

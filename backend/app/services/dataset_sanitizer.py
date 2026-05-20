@@ -299,8 +299,14 @@ def run_sanitization_pipeline(
             normalize_to_openai_messages(row=row, source_format=request.source_format)
             for row in sanitized.sanitized_rows
         ]
+        # Recompute the hash over the rows that actually get persisted —
+        # otherwise the Modal upload-skip check would treat a normalized
+        # artifact and its pre-normalized counterpart as identical and reuse
+        # a stale remote file when only the row shape changed.
+        artifact_content_hash = _compute_content_hash(normalized_rows)
     else:
         normalized_rows = sanitized.sanitized_rows
+        artifact_content_hash = sanitized.content_hash
 
     splits = compute_deterministic_splits(rows=normalized_rows, ratios=request.split_ratios)
 
@@ -309,7 +315,7 @@ def run_sanitization_pipeline(
         sanitized_rows=normalized_rows,
         manifest=sanitized.manifest,
         splits=splits,
-        content_hash=sanitized.content_hash,
+        content_hash=artifact_content_hash,
         source_format=request.source_format,
         normalized=request.normalize,
     )
