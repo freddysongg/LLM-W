@@ -144,6 +144,11 @@ async def _store_suggestion(
         expected_effect=create.expected_effect,
         tradeoffs=create.tradeoffs,
         confidence=create.confidence,
+        confidence_per_action_json=(
+            json.dumps(create.confidence_per_action)
+            if create.confidence_per_action is not None
+            else None
+        ),
         risk_level=create.risk_level,
         status="pending",
         applied_config_version_id=None,

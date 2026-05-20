@@ -14,6 +14,7 @@ class AISuggestionCreate:
     tradeoffs: str | None = None
     confidence: float | None = None
     risk_level: str | None = None
+    confidence_per_action: list[float] | None = None
 
 
 def _group_by_metric(

@@ -18,8 +18,21 @@ interface SuggestionDetailProps {
 }
 
 const OPT_LABELS = ["A", "B", "C", "D"] as const;
-// TODO(P8): action-impact bars use a static curve until a confidence field per action is returned -- remove when API exposes it
-const DEFAULT_IMPACTS: ReadonlyArray<number> = [0.82, 0.64, 0.48, 0.38];
+const FALLBACK_IMPACTS: ReadonlyArray<number> = [0.82, 0.64, 0.48, 0.38];
+const FALLBACK_TAIL_IMPACT = 0.4;
+
+function impactFor({
+  confidencePerAction,
+  index,
+}: {
+  confidencePerAction: ReadonlyArray<number> | null;
+  index: number;
+}): number {
+  if (confidencePerAction && index < confidencePerAction.length) {
+    return confidencePerAction[index];
+  }
+  return FALLBACK_IMPACTS[index] ?? FALLBACK_TAIL_IMPACT;
+}
 
 const SEVERITY_COLOR: Record<RiskLevel | "default", string> = {
   high: "var(--danger)",
@@ -74,8 +87,17 @@ export function SuggestionDetail({
   onReject,
 }: SuggestionDetailProps): React.JSX.Element {
   const { toast } = useToast();
-  const { id, status, rationale, expectedEffect, tradeoffs, riskLevel, configDiff, evidence } =
-    suggestion;
+  const {
+    id,
+    status,
+    rationale,
+    expectedEffect,
+    tradeoffs,
+    riskLevel,
+    configDiff,
+    evidence,
+    confidencePerAction,
+  } = suggestion;
 
   const canAct = status === "pending";
   const variant = severityVariant(riskLevel);
@@ -85,11 +107,11 @@ export function SuggestionDetail({
     return Object.entries(configDiff).map(([key, change], index) => ({
       key,
       optLabel: OPT_LABELS[index] ?? "·",
-      impact: DEFAULT_IMPACTS[index] ?? 0.4,
+      impact: impactFor({ confidencePerAction, index }),
       label: key,
       patch: formatPatch(key, change.suggested),
     }));
-  }, [configDiff]);
+  }, [configDiff, confidencePerAction]);
 
   const handlePreview = (actionKey: string): void => {
     toast({ title: "Previewed", description: `Previewing change to ${actionKey}.` });

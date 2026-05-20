@@ -17,11 +17,29 @@ interface RawSuggestion {
   readonly expected_effect: string | null;
   readonly tradeoffs: string | null;
   readonly confidence: number | null;
+  readonly confidence_per_action_json: string | null;
   readonly risk_level: string | null;
   readonly status: string;
   readonly applied_config_version_id: string | null;
   readonly created_at: string;
   readonly resolved_at: string | null;
+}
+
+function parseConfidencePerAction(raw: string | null): ReadonlyArray<number> | null {
+  if (raw === null) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(parsed)) return null;
+  const values: number[] = [];
+  for (const entry of parsed) {
+    if (typeof entry !== "number" || !Number.isFinite(entry)) return null;
+    values.push(entry);
+  }
+  return values;
 }
 
 interface RawSuggestionListResponse {
@@ -57,6 +75,7 @@ function parseSuggestion(raw: RawSuggestion): AISuggestion {
     expectedEffect: raw.expected_effect,
     tradeoffs: raw.tradeoffs,
     confidence: raw.confidence,
+    confidencePerAction: parseConfidencePerAction(raw.confidence_per_action_json),
     riskLevel: raw.risk_level as AISuggestion["riskLevel"],
     status: raw.status as AISuggestion["status"],
     appliedConfigVersionId: raw.applied_config_version_id,

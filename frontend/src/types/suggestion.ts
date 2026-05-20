@@ -27,6 +27,7 @@ export interface AISuggestion {
   readonly expectedEffect: string | null;
   readonly tradeoffs: string | null;
   readonly confidence: number | null;
+  readonly confidencePerAction: ReadonlyArray<number> | null;
   readonly riskLevel: RiskLevel | null;
   readonly status: SuggestionStatus;
   readonly appliedConfigVersionId: string | null;

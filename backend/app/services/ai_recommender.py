@@ -114,6 +114,7 @@ def _build_prompt(
                 "expected_effect": "string",
                 "tradeoffs": "string",
                 "confidence": 0.75,
+                "confidence_per_action": [0.75],
                 "risk_level": "low",
             },
             indent=2,
@@ -122,6 +123,11 @@ def _build_prompt(
         "config_diff keys must be dot-notation paths (e.g. 'training.learning_rate').",
         "risk_level must be one of: low, medium, high.",
         "confidence must be a float between 0 and 1.",
+        (
+            "confidence_per_action must be an array of floats between 0 and 1, "
+            "one entry per config_diff key in the same insertion order. "
+            "Omit the field if you cannot estimate per-action confidence."
+        ),
     ]
 
     return "\n".join(sections)
@@ -169,6 +175,11 @@ def _parse_llm_response(*, raw: str, provider: str) -> AISuggestionCreate:
         except (TypeError, ValueError):
             confidence = None
 
+    confidence_per_action = _coerce_confidence_per_action(
+        raw=data.get("confidence_per_action"),
+        expected_length=len(config_diff),
+    )
+
     return AISuggestionCreate(
         config_diff=config_diff,
         rationale=str(data.get("rationale") or ""),
@@ -178,7 +189,26 @@ def _parse_llm_response(*, raw: str, provider: str) -> AISuggestionCreate:
         tradeoffs=str(data["tradeoffs"]) if data.get("tradeoffs") else None,
         confidence=confidence,
         risk_level=risk_level,
+        confidence_per_action=confidence_per_action,
     )
+
+
+def _coerce_confidence_per_action(
+    *, raw: object, expected_length: int
+) -> list[float] | None:
+    """Validate confidence_per_action: list of floats in [0,1], one per config_diff key."""
+    if raw is None or not isinstance(raw, list) or expected_length == 0:
+        return None
+    if len(raw) != expected_length:
+        return None
+    coerced: list[float] = []
+    for entry in raw:
+        try:
+            value = float(entry)
+        except (TypeError, ValueError):
+            return None
+        coerced.append(max(0.0, min(1.0, value)))
+    return coerced
 
 
 class CloudLLMEngine(RecommendationEngine):
