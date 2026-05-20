@@ -496,6 +496,42 @@ def test_voice_service_create_session_locks_active_id(
         voice_service.create_session(payload=payload)
 
 
+def test_voice_service_evicts_stale_pending_session_on_next_create(
+    populated_credentials: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pending session whose WS never opened must release the lock after TTL."""
+    from app.core import config as cfg_module
+
+    monkeypatch.setattr(cfg_module.settings, "data_dir", tmp_path)
+
+    payload = VoiceSessionCreateRequest(
+        system_prompt="You are helpful.",
+        cartesia_voice_id="v1",
+    )
+
+    fake_now = [1000.0]
+
+    def _fake_monotonic() -> float:
+        return fake_now[0]
+
+    monkeypatch.setattr(voice_service.time, "monotonic", _fake_monotonic)
+
+    first = voice_service.create_session(payload=payload)
+    assert first.status == "pending"
+
+    # Within the TTL: second create still blocks.
+    fake_now[0] += voice_service._PENDING_SESSION_TTL_SECONDS - 1.0
+    with pytest.raises(VoiceSessionAlreadyActiveError):
+        voice_service.create_session(payload=payload)
+
+    # Past the TTL with no WS ever connecting: the stale pending is evicted
+    # and a fresh create succeeds.
+    fake_now[0] += 2.0
+    second = voice_service.create_session(payload=payload)
+    assert second.session_id != first.session_id
+    assert voice_service.get_active_session_id() == second.session_id
+
+
 async def test_start_voice_session_raises_when_pipecat_missing(
     populated_credentials: None,
     monkeypatch: pytest.MonkeyPatch,

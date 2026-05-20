@@ -322,3 +322,46 @@ async def test_post_fallback_accept_missing_gpu_type_returns_400(
     body = response.json()
     assert response.status_code == 400, body
     assert body["error"]["code"] == "MISSING_GPU_TYPE"
+
+
+async def test_post_fallback_accept_wrong_project_returns_404(
+    client: AsyncClient,
+    db_engine_factory: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Calling the fallback endpoint via a different project's URL must 404."""
+    from app.core import config as cfg_module
+
+    monkeypatch.setattr(cfg_module.settings, "projects_dir", tmp_path)
+
+    await _seed_pending_run(factory=db_engine_factory, tmp_path=tmp_path)
+
+    response = await client.post(
+        "/api/v1/projects/some-other-project/runs/r1/fallback",
+        json={"action": "accept", "gpu_type": "a100-40gb"},
+    )
+    body = response.json()
+    assert response.status_code == 404, body
+    assert body["error"]["code"] == "RUN_NOT_FOUND"
+
+
+async def test_post_fallback_cancel_wrong_project_returns_404(
+    client: AsyncClient,
+    db_engine_factory: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.core import config as cfg_module
+
+    monkeypatch.setattr(cfg_module.settings, "projects_dir", tmp_path)
+
+    await _seed_pending_run(factory=db_engine_factory, tmp_path=tmp_path)
+
+    response = await client.post(
+        "/api/v1/projects/some-other-project/runs/r1/fallback",
+        json={"action": "cancel"},
+    )
+    body = response.json()
+    assert response.status_code == 404, body
+    assert body["error"]["code"] == "RUN_NOT_FOUND"

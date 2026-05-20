@@ -120,12 +120,12 @@ function mergeToolResult({
   });
 }
 
-interface AppendTranscriptResult {
+export interface AppendTranscriptResult {
   readonly transcript: ReadonlyArray<TranscriptEntry>;
   readonly cursorDelta: number;
 }
 
-function appendTranscriptEntry({
+export function appendTranscriptEntry({
   transcript,
   entry,
 }: {
@@ -133,11 +133,12 @@ function appendTranscriptEntry({
   entry: TranscriptEntry;
 }): AppendTranscriptResult {
   const trailing = transcript.length > 0 ? transcript[transcript.length - 1] : null;
+  // Streaming STT emits a chain of interim frames followed by one finalized
+  // frame for the same utterance. Both incoming interim and finalized entries
+  // should overwrite a same-role trailing interim so the UI shows the latest
+  // partial (or the final) text — not every intermediate partial in a column.
   const shouldReplaceTrailing =
-    !entry.isInterim &&
-    trailing !== null &&
-    trailing.role === entry.role &&
-    trailing.isInterim === true;
+    trailing !== null && trailing.role === entry.role && trailing.isInterim === true;
   if (shouldReplaceTrailing && trailing !== null) {
     const swapped: TranscriptEntry = { ...entry, index: trailing.index };
     const next = transcript.slice(0, -1).concat(swapped);

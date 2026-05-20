@@ -125,6 +125,18 @@ def _log_background_task_exception(task: asyncio.Task[None]) -> None:
         logger.error("background task %s raised", task.get_name(), exc_info=exc)
 
 
+def _evict_completed_trainer_task(*, run_id: str, completed: asyncio.Task[None]) -> None:
+    """Drop the trainer task handle iff it is still the registered one.
+
+    An OOM auto-fallback respawns the trainer under the same `run_id` while
+    the prior task is still in flight. When the prior task finishes, its
+    `add_done_callback` must not blindly evict whatever sits in `_active_tasks`
+    — the identity check below guarantees only the matching task is removed.
+    """
+    if _active_tasks.get(run_id) is completed:
+        _active_tasks.pop(run_id, None)
+
+
 async def list_runs(*, session: AsyncSession, project_id: str) -> list[Run]:
     result = await session.execute(
         select(Run).where(Run.project_id == project_id).order_by(Run.created_at.desc())
@@ -323,7 +335,7 @@ async def create_run(
     _active_tasks[run_id] = task
 
     def _on_task_done(completed: asyncio.Task[None]) -> None:
-        _active_tasks.pop(run_id, None)
+        _evict_completed_trainer_task(run_id=run_id, completed=completed)
         _log_background_task_exception(completed)
 
     task.add_done_callback(_on_task_done)
@@ -1112,6 +1124,7 @@ async def _run_trainer_subprocess(
     config_path: Path,
     project_dir: Path,
     resume_from_checkpoint: str | None,
+    gpu_type_override: str | None = None,
 ) -> None:
     await _update_run_status(run_id=run_id, status="running")
 
@@ -1120,8 +1133,13 @@ async def _run_trainer_subprocess(
     log_file_path = log_dir / f"{run_id}.log"
 
     # Read execution config up front so terminal cost accounting still works
-    # even if the YAML on disk is later mutated by an unrelated edit.
+    # even if the YAML on disk is later mutated by an unrelated edit. On a
+    # fallback respawn the on-disk YAML still names the original GPU; an
+    # override here keeps the persisted cost and downstream dispatch in sync
+    # with the GPU the operator actually accepted.
     execution_cfg = _load_execution_config(config_path=config_path)
+    if gpu_type_override is not None:
+        execution_cfg = execution_cfg.model_copy(update={"modal_gpu_type": gpu_type_override})
 
     try:
         proc = await dispatch_training(
@@ -1129,6 +1147,7 @@ async def _run_trainer_subprocess(
             config_path=config_path,
             project_dir=project_dir,
             resume_from_checkpoint=resume_from_checkpoint,
+            gpu_type_override=gpu_type_override,
         )
         _active_processes[run_id] = proc
 
@@ -1535,11 +1554,15 @@ async def _transition_to_fallback_pending(*, run_id: str) -> bool:
     return True
 
 
-async def _auto_accept_first_candidate(*, run_id: str, gpu_type: str) -> None:
+async def _auto_accept_first_candidate(
+    *, run_id: str, project_id: str, gpu_type: str
+) -> None:
     if not await _transition_to_fallback_pending(run_id=run_id):
         return
     async with async_session_factory() as session:
-        await accept_fallback(session=session, run_id=run_id, gpu_type=gpu_type)
+        await accept_fallback(
+            session=session, run_id=run_id, project_id=project_id, gpu_type=gpu_type
+        )
 
 
 async def _publish_fallback_proposed(
@@ -1615,11 +1638,15 @@ async def _handle_trainer_oom(
     attempt = await _close_failed_attempt(run_id=run_id, execution=execution)
 
     if strategy == "disabled":
+        # Disabled strategy is still a terminal failure — the WS clients need
+        # the `run_failed` envelope so the UI stops showing the run as active.
+        # The original False here also forced the caller's generic publisher
+        # to skip, leaving clients without any failure notification.
         await _fail_run_with_oom_reason(
             run_id=run_id,
             project_id=project_id,
             failure_reason="oom",
-            publish_run_failed=False,
+            publish_run_failed=True,
         )
         return True
 
@@ -1641,6 +1668,7 @@ async def _handle_trainer_oom(
         chosen = candidates[0]
         await _auto_accept_first_candidate(
             run_id=run_id,
+            project_id=project_id,
             gpu_type=str(getattr(chosen, "gpu_type", "")),
         )
         return True
@@ -1702,6 +1730,7 @@ def _spawn_trainer_task(
     project_dir: Path,
     resume_from_checkpoint: str | None,
     task_name: str,
+    gpu_type_override: str | None = None,
 ) -> None:
     task = asyncio.create_task(
         _run_trainer_subprocess(
@@ -1710,19 +1739,26 @@ def _spawn_trainer_task(
             config_path=config_path,
             project_dir=project_dir,
             resume_from_checkpoint=resume_from_checkpoint,
+            gpu_type_override=gpu_type_override,
         ),
         name=task_name,
     )
     _active_tasks[run_id] = task
 
     def _on_task_done(completed: asyncio.Task[None]) -> None:
-        _active_tasks.pop(run_id, None)
+        _evict_completed_trainer_task(run_id=run_id, completed=completed)
         _log_background_task_exception(completed)
 
     task.add_done_callback(_on_task_done)
 
 
-async def accept_fallback(*, session: AsyncSession, run_id: str, gpu_type: str) -> Run:
+async def accept_fallback(
+    *,
+    session: AsyncSession,
+    run_id: str,
+    project_id: str,
+    gpu_type: str,
+) -> Run:
     """Promote a fallback_pending run to running with a new GPU choice.
 
     Re-runs the cost-cap gate against the new GPU so the operator cannot escape
@@ -1730,6 +1766,10 @@ async def accept_fallback(*, session: AsyncSession, run_id: str, gpu_type: str) 
     again via the same orchestration task path as create_run.
     """
     run = await get_run(session=session, run_id=run_id)
+    if run.project_id != project_id:
+        # Treat cross-project access as a 404 so the route does not leak the
+        # existence of runs in other projects.
+        raise RunNotFoundError(run_id)
     if run.status != "fallback_pending":
         raise RunStateError(run_id=run_id, action="accept_fallback", current_status=run.status)
 
@@ -1781,15 +1821,18 @@ async def accept_fallback(*, session: AsyncSession, run_id: str, gpu_type: str) 
         project_dir=project_dir,
         resume_from_checkpoint=run.last_checkpoint_path,
         task_name=f"trainer-fallback-{run_id}",
+        gpu_type_override=gpu_type,
     )
 
     await session.refresh(run)
     return run
 
 
-async def cancel_fallback(*, session: AsyncSession, run_id: str) -> Run:
+async def cancel_fallback(*, session: AsyncSession, run_id: str, project_id: str) -> Run:
     """Abort a fallback_pending run when the user declines further retries."""
     run = await get_run(session=session, run_id=run_id)
+    if run.project_id != project_id:
+        raise RunNotFoundError(run_id)
     if run.status != "fallback_pending":
         raise RunStateError(run_id=run_id, action="cancel_fallback", current_status=run.status)
 

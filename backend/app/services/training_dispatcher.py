@@ -202,6 +202,7 @@ async def dispatch_training(
     config_path: Path,
     project_dir: Path,
     resume_from_checkpoint: str | None,
+    gpu_type_override: str | None = None,
 ) -> TrainingProcess:
     """Dispatch a training job and return a handle for event streaming and cancellation.
 
@@ -209,6 +210,10 @@ async def dispatch_training(
     'local' spawns a subprocess using the existing trainer module.
     'modal' provisions a Modal sandbox via ModalTrainingAdapter and bridges its
     JSON-line event stream into a TrainingProcess-shaped handle.
+
+    `gpu_type_override` lets the orchestrator route a Modal retry to a larger
+    GPU after an OOM fallback acceptance without rewriting the user's YAML.
+    The override only applies when `execution.environment == "modal"`.
     """
     raw_config: dict[str, object] = yaml.safe_load(config_path.read_text()) or {}
     execution_raw = raw_config.get("execution", {})
@@ -216,6 +221,8 @@ async def dispatch_training(
     execution = ExecutionConfig.model_validate(execution_dict)
 
     if execution.environment == "modal":
+        if gpu_type_override is not None:
+            execution = execution.model_copy(update={"modal_gpu_type": gpu_type_override})
         return await _spawn_modal_process(
             run_id=run_id,
             config_path=config_path,

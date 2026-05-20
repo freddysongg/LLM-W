@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -12,7 +13,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.core import events as events_module
 from app.core.database import Base
 from app.core.events import EventBus
-from app.core.exceptions import RunStateError
+from app.core.exceptions import RunNotFoundError, RunStateError
 from app.models.config_version import ConfigVersion
 from app.models.project import Project
 from app.models.run import Run
@@ -299,7 +300,7 @@ async def test_accept_fallback_creates_attempt_n_plus_one(
 
     async with patched_session_factory() as session:
         updated = await orchestrator.accept_fallback(
-            session=session, run_id="r1", gpu_type="a100-40gb"
+            session=session, run_id="r1", project_id="p1", gpu_type="a100-40gb"
         )
 
     assert updated.status == "running"
@@ -370,7 +371,7 @@ async def test_accept_fallback_rejects_over_cap_gpu(
     async with patched_session_factory() as session:
         with pytest.raises(UnsupportedEnvironmentError, match="hard cap"):
             await orchestrator.accept_fallback(
-                session=session, run_id="r1", gpu_type="h100"
+                session=session, run_id="r1", project_id="p1", gpu_type="h100"
             )
 
 
@@ -418,7 +419,9 @@ async def test_cancel_fallback_marks_failed_with_user_cancelled_reason(
         await session.commit()
 
     async with patched_session_factory() as session:
-        cancelled = await orchestrator.cancel_fallback(session=session, run_id="r1")
+        cancelled = await orchestrator.cancel_fallback(
+            session=session, run_id="r1", project_id="p1"
+        )
 
     assert cancelled.status == "failed"
     assert cancelled.failure_reason == "oom_user_cancelled"
@@ -613,6 +616,11 @@ async def test_strategy_disabled_fails_immediately(
     proposed = [e for e in captured_events if e.get("event") == "fallback_proposed"]
     assert proposed == []
 
+    failed = [e for e in captured_events if e.get("event") == "run_failed"]
+    assert len(failed) == 1
+    assert failed[0]["runId"] == "r1"
+    assert failed[0]["payload"]["failureReason"] == "oom"
+
     async with patched_session_factory() as session:
         run = await session.get(Run, "r1")
         assert run is not None
@@ -704,7 +712,7 @@ async def test_accept_fallback_rejects_when_not_pending(
     async with patched_session_factory() as session:
         with pytest.raises(RunStateError):
             await orchestrator.accept_fallback(
-                session=session, run_id="r1", gpu_type="a100-40gb"
+                session=session, run_id="r1", project_id="p1", gpu_type="a100-40gb"
             )
 
 
@@ -740,5 +748,157 @@ async def test_accept_fallback_rejects_same_gpu_type(
     async with patched_session_factory() as session:
         with pytest.raises(UnsupportedEnvironmentError, match="same as the GPU"):
             await orchestrator.accept_fallback(
-                session=session, run_id="r1", gpu_type="l40s"
+                session=session, run_id="r1", project_id="p1", gpu_type="l40s"
             )
+
+
+async def test_accept_fallback_dispatches_with_new_gpu_type_override(
+    patched_session_factory: async_sessionmaker[Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The respawned trainer must run on the accepted GPU, not the YAML's."""
+    from app.core import config as cfg_module
+
+    monkeypatch.setattr(cfg_module.settings, "projects_dir", tmp_path)
+    settings_service._overrides["modal_token_id"] = "ak"
+    settings_service._overrides["modal_token_secret"] = "as"
+
+    project_dir = tmp_path / "p1"
+    project_dir.mkdir()
+    yaml_blob = _yaml_for_modal_run(gpu_type="l40s", strategy="ask")
+    await _setup_project_and_config(
+        factory=patched_session_factory,
+        project_dir=project_dir,
+        yaml_blob=yaml_blob,
+    )
+
+    captured_kwargs: list[dict[str, Any]] = []
+
+    async def _capturing_dispatch(**kwargs: Any) -> None:
+        captured_kwargs.append(kwargs)
+        return None
+
+    monkeypatch.setattr(orchestrator, "dispatch_training", _capturing_dispatch)
+
+    now = "2026-05-19T12:00:00+00:00"
+    async with patched_session_factory() as session:
+        session.add(
+            Run(
+                id="r1",
+                project_id="p1",
+                config_version_id="cv1",
+                status="fallback_pending",
+                modal_gpu_type="l40s",
+                environment="modal",
+                device="cuda",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.add(
+            RunAttempt(
+                id="a0",
+                run_id="r1",
+                attempt_index=0,
+                gpu_type="l40s",
+                device="cuda",
+                started_at=now,
+                ended_at=now,
+                exit_reason="oom",
+                created_at=now,
+            )
+        )
+        await session.commit()
+
+    async with patched_session_factory() as session:
+        await orchestrator.accept_fallback(
+            session=session, run_id="r1", project_id="p1", gpu_type="a100-40gb"
+        )
+
+    spawned = orchestrator._active_tasks.get("r1")
+    if spawned is not None:
+        await asyncio.gather(spawned, return_exceptions=True)
+
+    assert len(captured_kwargs) == 1
+    assert captured_kwargs[0].get("gpu_type_override") == "a100-40gb"
+
+
+async def test_accept_fallback_rejects_cross_project_access(
+    patched_session_factory: async_sessionmaker[Any],
+    tmp_path: Path,
+) -> None:
+    """A run from project A must not be mutable via project B's URL."""
+    now = "2026-05-19T12:00:00+00:00"
+    async with patched_session_factory() as session:
+        session.add(
+            Run(
+                id="r1",
+                project_id="real-project",
+                config_version_id="cv1",
+                status="fallback_pending",
+                modal_gpu_type="l40s",
+                environment="modal",
+                device="cuda",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        await session.commit()
+
+    async with patched_session_factory() as session:
+        with pytest.raises(RunNotFoundError):
+            await orchestrator.accept_fallback(
+                session=session,
+                run_id="r1",
+                project_id="other-project",
+                gpu_type="a100-40gb",
+            )
+
+
+async def test_cancel_fallback_rejects_cross_project_access(
+    patched_session_factory: async_sessionmaker[Any],
+) -> None:
+    now = "2026-05-19T12:00:00+00:00"
+    async with patched_session_factory() as session:
+        session.add(
+            Run(
+                id="r1",
+                project_id="real-project",
+                config_version_id="cv1",
+                status="fallback_pending",
+                modal_gpu_type="l40s",
+                environment="modal",
+                device="cuda",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        await session.commit()
+
+    async with patched_session_factory() as session:
+        with pytest.raises(RunNotFoundError):
+            await orchestrator.cancel_fallback(
+                session=session, run_id="r1", project_id="other-project"
+            )
+
+
+async def test_evict_completed_trainer_task_preserves_newer_registered_task() -> None:
+    """The done callback for an old task must not evict the newer fallback task."""
+
+    async def _noop() -> None:
+        return None
+
+    task_a = asyncio.create_task(_noop(), name="trainer-a")
+    task_b = asyncio.create_task(_noop(), name="trainer-b")
+    await asyncio.gather(task_a, task_b)
+
+    orchestrator._active_tasks["r1"] = task_b
+    try:
+        orchestrator._evict_completed_trainer_task(run_id="r1", completed=task_a)
+        assert orchestrator._active_tasks.get("r1") is task_b
+
+        orchestrator._evict_completed_trainer_task(run_id="r1", completed=task_b)
+        assert "r1" not in orchestrator._active_tasks
+    finally:
+        orchestrator._active_tasks.pop("r1", None)

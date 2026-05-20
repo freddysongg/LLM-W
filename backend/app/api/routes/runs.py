@@ -229,10 +229,17 @@ async def post_run_fallback(
                     },
                 )
             run = await orchestrator.accept_fallback(
-                session=session, run_id=run_id, gpu_type=payload.gpu_type
+                session=session,
+                run_id=run_id,
+                project_id=project_id,
+                gpu_type=payload.gpu_type,
             )
         else:
-            run = await orchestrator.cancel_fallback(session=session, run_id=run_id)
+            run = await orchestrator.cancel_fallback(
+                session=session,
+                run_id=run_id,
+                project_id=project_id,
+            )
     except RunNotFoundError as exc:
         raise HTTPException(
             status_code=404,
