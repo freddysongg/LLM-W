@@ -15,6 +15,9 @@ import type {
   StageName,
   RunStatus,
   StageStatus,
+  TrainingEnvironment,
+  ModalGpuType,
+  DeviceType,
 } from "@/types/run";
 import { fetchApi } from "./client";
 
@@ -34,6 +37,9 @@ interface RawRun {
   readonly failure_stage: string | null;
   readonly last_checkpoint_path: string | null;
   readonly pid: number | null;
+  readonly environment: string | null;
+  readonly modal_gpu_type: string | null;
+  readonly device: string | null;
   readonly created_at: string;
   readonly updated_at: string;
 }
@@ -142,6 +148,9 @@ function normalizeRun(raw: RawRun): Run {
     // heartbeat_path is not included in RunResponse — backend gap
     heartbeatPath: null,
     pid: raw.pid,
+    environment: raw.environment as TrainingEnvironment | null,
+    modalGpuType: raw.modal_gpu_type as ModalGpuType | null,
+    device: raw.device as DeviceType | null,
     createdAt: raw.created_at,
     updatedAt: raw.updated_at,
   };

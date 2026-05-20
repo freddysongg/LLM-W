@@ -712,7 +712,7 @@ async def test_create_run_persists_modal_execution_metadata_to_run_row(
     from app.core import config as cfg_module
     from app.models.config_version import ConfigVersion
     from app.models.project import Project
-    from app.schemas.run import RunCreate
+    from app.schemas.run import RunCreate, RunResponse
 
     monkeypatch.setattr(cfg_module.settings, "projects_dir", tmp_path)
     settings_service._overrides["modal_token_id"] = "ak-test"
@@ -772,6 +772,11 @@ async def test_create_run_persists_modal_execution_metadata_to_run_row(
         assert persisted.environment == "modal"
         assert persisted.modal_gpu_type == "l40s"
         assert persisted.device == "cuda"
+
+        response = RunResponse.model_validate(persisted)
+        assert response.environment == "modal"
+        assert response.modal_gpu_type == "l40s"
+        assert response.device == "cuda"
 
 
 async def test_create_run_local_environment_leaves_modal_gpu_type_null(

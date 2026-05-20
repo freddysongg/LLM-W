@@ -25,6 +25,8 @@ class RunResponse(BaseModel):
     last_checkpoint_path: str | None
     pid: int | None
     run_type: str = "training"
+    environment: str | None = None
+    modal_gpu_type: str | None = None
     device: str | None = None
     tokens_per_sec: float | None = None
     time_to_first_checkpoint_s: float | None = None

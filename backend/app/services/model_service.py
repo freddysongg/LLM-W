@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -75,14 +76,12 @@ def _resolve_model_sync(*, project_id: str, request: ModelResolveRequest) -> Mod
         total_parameters = 0
         trainable_parameters = 0
 
-    try:
+    with contextlib.suppress(Exception):
+        # Non-fatal: architecture will be built lazily from the loaded model on first request
         _architecture_cache[project_id] = build_architecture_from_config(
             hf_config=hf_config,
             model_id=request.model_id,
         )
-    except Exception:
-        # Non-fatal: architecture will be built lazily from the loaded model on first request
-        pass
 
     architecture_name = type(hf_config).__name__.replace("Config", "ForCausalLM")
     torch_dtype = getattr(hf_config, "torch_dtype", None)

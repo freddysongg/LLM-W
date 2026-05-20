@@ -1,12 +1,12 @@
 """Pipecat pipeline construction and session lifecycle for the voice demo.
 
 The single WebSocket multiplexes binary PCM audio (mic + TTS) and JSON control
-frames (transcripts, tool calls, errors). This matches Pipecat's
-`FastAPIWebsocketTransport` default frame serializer — see Q1 in
-`.context/designs/pipecat-voice-demo.md` for the rationale on staying with one
-channel rather than splitting WS-for-audio + SSE-for-control. If the transport
-rejects mixed frame types at runtime the fallback is a separate SSE endpoint;
-no fallback was needed for the unit tests here because we stub the transport.
+frames (transcripts, tool calls, errors). The wire format is the raw shape the
+frontend already produces — 16 kHz PCM16 mono uplink, 24 kHz PCM16 mono
+downlink, JSON envelopes for control. `_build_raw_pcm_json_serializer` glues
+that to Pipecat's `FrameSerializer` contract; we do not use
+`ProtobufFrameSerializer` because the browser client speaks raw PCM, not the
+Pipecat protobuf schema.
 
 `pipecat-ai` is an optional extra. Every `pipecat.*` import lives inside a
 function body so this module is importable on base/local installs. See
@@ -17,6 +17,7 @@ for the contract.
 from __future__ import annotations
 
 import contextlib
+import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -29,6 +30,10 @@ from app.services.voice.shopping_tools import (
     register_shopping_handlers,
 )
 from app.services.voice.transcript_writer import TranscriptWriter
+
+_AUDIO_IN_SAMPLE_RATE = 16_000
+_AUDIO_OUT_SAMPLE_RATE = 24_000
+_CONTROL_TYPE_SESSION_END = "session_end"
 
 if TYPE_CHECKING:
     from fastapi import WebSocket
@@ -122,6 +127,14 @@ def _import_pipecat_modules() -> dict[str, Any]:
     """
     try:
         from pipecat.audio.vad.silero import SileroVADAnalyzer
+        from pipecat.frames.frames import (
+            EndFrame,
+            ErrorFrame,
+            InputAudioRawFrame,
+            InterimTranscriptionFrame,
+            OutputAudioRawFrame,
+            TranscriptionFrame,
+        )
         from pipecat.pipeline.pipeline import Pipeline
         from pipecat.pipeline.runner import PipelineRunner
         from pipecat.pipeline.task import PipelineTask
@@ -129,7 +142,7 @@ def _import_pipecat_modules() -> dict[str, Any]:
             LLMContext,
             LLMContextAggregatorPair,
         )
-        from pipecat.serializers.protobuf import ProtobufFrameSerializer
+        from pipecat.serializers.base_serializer import FrameSerializer
         from pipecat.services.cartesia.tts import CartesiaTTSService
         from pipecat.services.deepgram.stt import DeepgramSTTService
         from pipecat.services.openai.llm import OpenAILLMService
@@ -147,13 +160,91 @@ def _import_pipecat_modules() -> dict[str, Any]:
         "PipelineTask": PipelineTask,
         "LLMContext": LLMContext,
         "LLMContextAggregatorPair": LLMContextAggregatorPair,
-        "ProtobufFrameSerializer": ProtobufFrameSerializer,
+        "FrameSerializer": FrameSerializer,
         "CartesiaTTSService": CartesiaTTSService,
         "DeepgramSTTService": DeepgramSTTService,
         "OpenAILLMService": OpenAILLMService,
         "FastAPIWebsocketParams": FastAPIWebsocketParams,
         "FastAPIWebsocketTransport": FastAPIWebsocketTransport,
+        "EndFrame": EndFrame,
+        "ErrorFrame": ErrorFrame,
+        "InputAudioRawFrame": InputAudioRawFrame,
+        "InterimTranscriptionFrame": InterimTranscriptionFrame,
+        "OutputAudioRawFrame": OutputAudioRawFrame,
+        "TranscriptionFrame": TranscriptionFrame,
     }
+
+
+def _build_raw_pcm_json_serializer(*, modules: dict[str, Any]) -> Any:
+    """Build the wire serializer that matches the browser client's wire format.
+
+    Outgoing: `OutputAudioRawFrame` → raw PCM16 bytes; transcript / error frames
+    → JSON envelopes with `type` + `payload`. Incoming: bytes → InputAudioRawFrame
+    at the uplink sample rate, JSON text → `EndFrame` for `session_end` envelopes.
+    Other frames are dropped so the transport stays silent on unrelated traffic.
+    """
+    frame_serializer_cls = modules["FrameSerializer"]
+    output_audio_cls = modules["OutputAudioRawFrame"]
+    input_audio_cls = modules["InputAudioRawFrame"]
+    transcription_cls = modules["TranscriptionFrame"]
+    interim_transcription_cls = modules["InterimTranscriptionFrame"]
+    error_cls = modules["ErrorFrame"]
+    end_cls = modules["EndFrame"]
+
+    def _transcript_payload(frame: Any, *, is_interim: bool) -> dict[str, Any]:
+        timestamp = getattr(frame, "timestamp", "") or ""
+        return {
+            "role": "user",
+            "text": getattr(frame, "text", "") or "",
+            "started_at": timestamp,
+            "ended_at": None if is_interim else timestamp,
+            "is_interim": is_interim,
+        }
+
+    class RawPcmJsonSerializer(frame_serializer_cls):
+        async def serialize(self, frame: Any) -> str | bytes | None:
+            if isinstance(frame, output_audio_cls):
+                audio = getattr(frame, "audio", b"")
+                return audio if audio else None
+            if isinstance(frame, interim_transcription_cls):
+                return json.dumps(
+                    {
+                        "type": "transcript",
+                        "payload": _transcript_payload(frame, is_interim=True),
+                    }
+                )
+            if isinstance(frame, transcription_cls):
+                return json.dumps(
+                    {
+                        "type": "transcript",
+                        "payload": _transcript_payload(frame, is_interim=False),
+                    }
+                )
+            if isinstance(frame, error_cls):
+                message = getattr(frame, "error", "") or "Pipeline error"
+                return json.dumps({"type": "error", "payload": {"message": message}})
+            return None
+
+        async def deserialize(self, data: str | bytes) -> Any | None:
+            if isinstance(data, (bytes, bytearray)):
+                if not data:
+                    return None
+                return input_audio_cls(
+                    audio=bytes(data),
+                    sample_rate=_AUDIO_IN_SAMPLE_RATE,
+                    num_channels=1,
+                )
+            try:
+                envelope = json.loads(data)
+            except (ValueError, TypeError):
+                return None
+            if not isinstance(envelope, dict):
+                return None
+            if envelope.get("type") == _CONTROL_TYPE_SESSION_END:
+                return end_cls()
+            return None
+
+    return RawPcmJsonSerializer()
 
 
 def _build_transport(
@@ -163,10 +254,12 @@ def _build_transport(
 ) -> Any:
     transport_params = modules["FastAPIWebsocketParams"](
         audio_in_enabled=True,
+        audio_in_sample_rate=_AUDIO_IN_SAMPLE_RATE,
         audio_out_enabled=True,
+        audio_out_sample_rate=_AUDIO_OUT_SAMPLE_RATE,
         add_wav_header=False,
         vad_analyzer=modules["SileroVADAnalyzer"](),
-        serializer=modules["ProtobufFrameSerializer"](),
+        serializer=_build_raw_pcm_json_serializer(modules=modules),
     )
     return modules["FastAPIWebsocketTransport"](
         websocket=websocket,

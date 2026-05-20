@@ -1,13 +1,21 @@
 import * as React from "react";
-import { Check, Download, Eye, Pencil, Plus } from "lucide-react";
+import { Check, Download, Eye, Pencil, Plus, ShieldCheck } from "lucide-react";
 import { useAppStore } from "@/stores/app-store";
-import { useDatasetProfile, useResolveDataset } from "@/hooks/useDatasetProfile";
+import {
+  useDatasetProfile,
+  useResolveDataset,
+  useSanitizeProjectDataset,
+} from "@/hooks/useDatasetProfile";
 import { useDatasetSamples, usePreviewTransform } from "@/hooks/useDatasetSamples";
 import { useToast } from "@/hooks/use-toast";
+import { describeApiError } from "@/lib/api-error";
 import type {
   DatasetProfile,
   DatasetResolveRequest,
   PreviewTransformResponse,
+  SanitizeDatasetRequest,
+  SanitizeSourceFormat,
+  SanitizeSplitRatios,
 } from "@/types/dataset";
 import type { DatasetFormat, DatasetSource } from "@/types/config";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -248,6 +256,51 @@ function normalizeTrain({ train, current }: ApplyTrainRatioParams): SplitDraft {
   return { ...current, train: clampedTrain, val: nextVal, test: nextTest };
 }
 
+const SANITIZE_FALLBACK_SPLIT_RATIOS: SanitizeSplitRatios = {
+  train: 0.8,
+  val: 0.1,
+  test: 0.1,
+};
+
+interface ToSanitizeSplitParams {
+  readonly trainPercent: number | null;
+  readonly valPercent: number | null;
+  readonly testPercent: number | null;
+}
+
+function toSanitizeSplitRatios({
+  trainPercent,
+  valPercent,
+  testPercent,
+}: ToSanitizeSplitParams): SanitizeSplitRatios {
+  const train = trainPercent ?? 0;
+  const val = valPercent ?? 0;
+  const test = testPercent ?? 0;
+  const total = train + val + test;
+  if (total <= 0) return SANITIZE_FALLBACK_SPLIT_RATIOS;
+  return {
+    train: train / total,
+    val: val / total,
+    test: test / total,
+  };
+}
+
+function toSanitizeSourceFormat(format: DatasetFormat): SanitizeSourceFormat {
+  switch (format) {
+    case "default":
+    case "openai":
+    case "sharegpt":
+    case "alpaca":
+      return format;
+    case "custom":
+      return "default";
+    default: {
+      const exhaustiveCheck: never = format;
+      return exhaustiveCheck;
+    }
+  }
+}
+
 export default function DatasetsPage(): React.JSX.Element {
   const { activeProjectId, datasetForm, setDatasetForm } = useAppStore();
   const { toast } = useToast();
@@ -275,6 +328,7 @@ export default function DatasetsPage(): React.JSX.Element {
   });
 
   const previewTransform = usePreviewTransform({ projectId });
+  const sanitizeDataset = useSanitizeProjectDataset({ projectId });
 
   React.useEffect(() => {
     if (profile && !datasetForm.datasetId) {
@@ -325,6 +379,39 @@ export default function DatasetsPage(): React.JSX.Element {
       },
       { onSuccess: (response) => setPreviewResponse(response) },
     );
+  };
+
+  const handleSanitize = (): void => {
+    if (!profile) return;
+    const request: SanitizeDatasetRequest = {
+      splitRatios: toSanitizeSplitRatios({
+        trainPercent: datasetForm.trainRatio,
+        valPercent: datasetForm.valRatio,
+        testPercent: datasetForm.testRatio,
+      }),
+      sourceFormat: toSanitizeSourceFormat(datasetForm.format),
+      normalize: true,
+      persist: true,
+    };
+    sanitizeDataset.mutate(request, {
+      onSuccess: ({ totalRows, sanitizedRows, manifest }) => {
+        const droppedRows = Math.max(0, totalRows - sanitizedRows.length);
+        toast({
+          title: "Dataset sanitized",
+          description: `Sanitized ${sanitizedRows.length.toLocaleString()} rows, dropped ${droppedRows.toLocaleString()} · ${manifest.totalRedactions.toLocaleString()} redactions.`,
+        });
+      },
+      onError: (cause) => {
+        toast({
+          title: "Sanitize failed",
+          description: describeApiError({
+            cause,
+            fallback: "Could not sanitize dataset for cloud upload.",
+          }),
+          variant: "destructive",
+        });
+      },
+    });
   };
 
   const handleIngestSubmit = (): void => {
@@ -418,6 +505,15 @@ export default function DatasetsPage(): React.JSX.Element {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleSanitize}
+            disabled={!profile || sanitizeDataset.isPending}
+          >
+            <ShieldCheck className="size-3" aria-hidden="true" />
+            {sanitizeDataset.isPending ? "Sanitizing…" : "Sanitize for cloud"}
+          </Button>
           <Button variant="outline" size="sm" onClick={() => setActiveDialog("inspect")}>
             <Eye className="size-3" aria-hidden="true" />
             Inspect

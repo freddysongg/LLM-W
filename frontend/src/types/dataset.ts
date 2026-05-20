@@ -72,3 +72,39 @@ export interface PreviewTransformResponse {
   readonly formatApplied: string;
   readonly truncated: boolean;
 }
+
+export type SanitizeSourceFormat = "openai" | "sharegpt" | "alpaca" | "default";
+export type SanitizeSplitName = "train" | "val" | "test";
+
+export interface SanitizeSplitRatios {
+  readonly train: number;
+  readonly val: number;
+  readonly test: number;
+}
+
+export interface SanitizeRedactionManifest {
+  readonly perPattern: Record<string, number>;
+  readonly totalRedactions: number;
+}
+
+export interface SanitizeSplitAssignment {
+  readonly assignments: Record<number, SanitizeSplitName>;
+  readonly counts: Record<string, number>;
+}
+
+export interface SanitizeDatasetRequest {
+  readonly splitRatios: SanitizeSplitRatios;
+  readonly sourceFormat: SanitizeSourceFormat;
+  readonly normalize: boolean;
+  readonly persist: boolean;
+}
+
+export interface SanitizeDatasetResponse {
+  readonly totalRows: number;
+  readonly sanitizedRows: ReadonlyArray<Record<string, unknown>>;
+  readonly manifest: SanitizeRedactionManifest;
+  readonly splits: SanitizeSplitAssignment;
+  readonly contentHash: string;
+  readonly sourceFormat: SanitizeSourceFormat;
+  readonly normalized: boolean;
+}

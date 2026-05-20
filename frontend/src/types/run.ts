@@ -1,7 +1,7 @@
 export type RunStatus = "pending" | "running" | "completed" | "failed" | "cancelled" | "paused";
 
-import type { TrainingEnvironment, ModalGpuType } from "./config";
-export type { TrainingEnvironment, ModalGpuType } from "./config";
+import type { DeviceType, TrainingEnvironment, ModalGpuType } from "./config";
+export type { DeviceType, TrainingEnvironment, ModalGpuType } from "./config";
 
 export type StageStatus = "pending" | "running" | "completed" | "failed" | "skipped";
 
@@ -51,8 +51,9 @@ export interface Run {
   readonly pid: number | null;
   readonly createdAt: string;
   readonly updatedAt: string;
-  readonly environment?: TrainingEnvironment;
-  readonly modalGpuType?: ModalGpuType | null;
+  readonly environment: TrainingEnvironment | null;
+  readonly modalGpuType: ModalGpuType | null;
+  readonly device: DeviceType | null;
 }
 
 export interface RunStage {

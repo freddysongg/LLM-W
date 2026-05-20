@@ -305,7 +305,9 @@ export function SettingsForm({
                 <Input
                   id="modal-token-secret"
                   type="password"
-                  placeholder={settings.isModalTokenSet ? "••••••••••••••••" : "Token Secret (as-...)"}
+                  placeholder={
+                    settings.isModalTokenSet ? "••••••••••••••••" : "Token Secret (as-...)"
+                  }
                   value={modalTokenSecret}
                   onChange={(e) => setModalTokenSecret(e.target.value)}
                   autoComplete="off"

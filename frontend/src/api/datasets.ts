@@ -5,6 +5,12 @@ import type {
   TokenStats,
   PreviewTransformRequest,
   PreviewTransformResponse,
+  SanitizeDatasetRequest,
+  SanitizeDatasetResponse,
+  SanitizeRedactionManifest,
+  SanitizeSourceFormat,
+  SanitizeSplitAssignment,
+  SanitizeSplitName,
 } from "@/types/dataset";
 import { fetchApi } from "./client";
 
@@ -123,6 +129,74 @@ export async function fetchTokenStats({ projectId }: { projectId: string }): Pro
   return fetchApi<TokenStats>({
     path: `/projects/${projectId}/datasets/token-stats`,
   });
+}
+
+interface RawSanitizeDatasetResponse {
+  readonly total_rows: number;
+  readonly sanitized_rows: ReadonlyArray<Record<string, unknown>>;
+  readonly manifest: {
+    readonly per_pattern: Record<string, number>;
+    readonly total_redactions: number;
+  };
+  readonly splits: {
+    readonly assignments: Record<string, SanitizeSplitName>;
+    readonly counts: Record<string, number>;
+  };
+  readonly content_hash: string;
+  readonly source_format: SanitizeSourceFormat;
+  readonly normalized: boolean;
+}
+
+function normalizeManifest(raw: RawSanitizeDatasetResponse["manifest"]): SanitizeRedactionManifest {
+  return {
+    perPattern: raw.per_pattern,
+    totalRedactions: raw.total_redactions,
+  };
+}
+
+function normalizeSplitAssignment(
+  raw: RawSanitizeDatasetResponse["splits"],
+): SanitizeSplitAssignment {
+  const assignments: Record<number, SanitizeSplitName> = {};
+  for (const [rawIndex, splitName] of Object.entries(raw.assignments)) {
+    const parsedIndex = Number.parseInt(rawIndex, 10);
+    if (Number.isFinite(parsedIndex)) {
+      assignments[parsedIndex] = splitName;
+    }
+  }
+  return { assignments, counts: raw.counts };
+}
+
+export async function sanitizeProjectDataset({
+  projectId,
+  request,
+}: {
+  projectId: string;
+  request: SanitizeDatasetRequest;
+}): Promise<SanitizeDatasetResponse> {
+  const raw = await fetchApi<RawSanitizeDatasetResponse>({
+    path: `/projects/${projectId}/datasets/sanitize`,
+    method: "POST",
+    body: {
+      split_ratios: {
+        train: request.splitRatios.train,
+        val: request.splitRatios.val,
+        test: request.splitRatios.test,
+      },
+      source_format: request.sourceFormat,
+      normalize: request.normalize,
+      persist: request.persist,
+    },
+  });
+  return {
+    totalRows: raw.total_rows,
+    sanitizedRows: raw.sanitized_rows,
+    manifest: normalizeManifest(raw.manifest),
+    splits: normalizeSplitAssignment(raw.splits),
+    contentHash: raw.content_hash,
+    sourceFormat: raw.source_format,
+    normalized: raw.normalized,
+  };
 }
 
 export async function previewTransform({

@@ -87,10 +87,14 @@ def test_voice_module_imports_with_pipecat_blocked() -> None:
         "pipecat.audio",
         "pipecat.audio.vad",
         "pipecat.audio.vad.silero",
+        "pipecat.frames",
+        "pipecat.frames.frames",
         "pipecat.pipeline",
         "pipecat.pipeline.pipeline",
         "pipecat.pipeline.runner",
         "pipecat.pipeline.task",
+        "pipecat.serializers",
+        "pipecat.serializers.base_serializer",
         "pipecat.services",
         "pipecat.services.cartesia",
         "pipecat.services.cartesia.tts",
@@ -135,9 +139,7 @@ def test_voice_route_is_registered() -> None:
 
 def test_search_products_returns_shoe_results() -> None:
     cart = shopping_tools.CartState()
-    result = shopping_tools.search_products(
-        query="running shoes", max_price_usd=None, cart=cart
-    )
+    result = shopping_tools.search_products(query="running shoes", max_price_usd=None, cart=cart)
     assert "results" in result
     assert len(result["results"]) >= 2
     for entry in result["results"]:
@@ -146,9 +148,7 @@ def test_search_products_returns_shoe_results() -> None:
 
 def test_search_products_applies_price_filter() -> None:
     cart = shopping_tools.CartState()
-    result = shopping_tools.search_products(
-        query="running shoes", max_price_usd=50.0, cart=cart
-    )
+    result = shopping_tools.search_products(query="running shoes", max_price_usd=50.0, cart=cart)
     for entry in result["results"]:
         assert entry["price_usd"] <= 50.0
 
@@ -197,8 +197,9 @@ def test_build_shopping_tools_schema_includes_all_four_tools(
     captured: dict[str, list[Any]] = {}
 
     class _FakeFunctionSchema:
-        def __init__(self, *, name: str, description: str, properties: dict[str, object],
-                     required: list[str]) -> None:
+        def __init__(
+            self, *, name: str, description: str, properties: dict[str, object], required: list[str]
+        ) -> None:
             self.name = name
             self.description = description
             self.properties = properties
@@ -216,9 +217,7 @@ def test_build_shopping_tools_schema_includes_all_four_tools(
     monkeypatch.setitem(
         sys.modules, "pipecat.adapters.schemas.function_schema", fake_function_module
     )
-    monkeypatch.setitem(
-        sys.modules, "pipecat.adapters.schemas.tools_schema", fake_tools_module
-    )
+    monkeypatch.setitem(sys.modules, "pipecat.adapters.schemas.tools_schema", fake_tools_module)
 
     schema = shopping_tools.build_shopping_tools_schema()
     names = [tool.name for tool in schema.standard_tools]
@@ -543,9 +542,36 @@ async def test_start_voice_session_constructs_pipeline_when_pipecat_available(
         def __init__(self, **kwargs: Any) -> None:
             self.kwargs = kwargs
 
-    class _FakeSerializer:
-        def __init__(self, **kwargs: Any) -> None:
+    class _FakeFrameSerializer:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            self.args = args
             self.kwargs = kwargs
+
+    class _FakeOutputAudioFrame:
+        def __init__(self, *, audio: bytes, **_: Any) -> None:
+            self.audio = audio
+
+    class _FakeInputAudioFrame:
+        def __init__(self, *, audio: bytes, sample_rate: int, num_channels: int) -> None:
+            self.audio = audio
+            self.sample_rate = sample_rate
+            self.num_channels = num_channels
+
+    class _FakeTranscriptionFrame:
+        def __init__(self, *, text: str = "", **_: Any) -> None:
+            self.text = text
+
+    class _FakeInterimTranscriptionFrame:
+        def __init__(self, *, text: str = "", **_: Any) -> None:
+            self.text = text
+
+    class _FakeErrorFrame:
+        def __init__(self, *, error: str = "", **_: Any) -> None:
+            self.error = error
+
+    class _FakeEndFrame:
+        def __init__(self) -> None:
+            pass
 
     class _FakeSilero:
         def __init__(self, **kwargs: Any) -> None:
@@ -603,8 +629,9 @@ async def test_start_voice_session_constructs_pipeline_when_pipecat_available(
             self.cancel = AsyncMock()
 
     class _StubFunctionSchema:
-        def __init__(self, *, name: str, description: str, properties: dict[str, object],
-                     required: list[str]) -> None:
+        def __init__(
+            self, *, name: str, description: str, properties: dict[str, object], required: list[str]
+        ) -> None:
             self.name = name
             self.description = description
             self.properties = properties
@@ -639,7 +666,16 @@ async def test_start_voice_session_constructs_pipeline_when_pipecat_available(
             LLMContextAggregatorPair=_FakeAggregatorPair,
         ),
         "pipecat.serializers": MagicMock(),
-        "pipecat.serializers.protobuf": MagicMock(ProtobufFrameSerializer=_FakeSerializer),
+        "pipecat.serializers.base_serializer": MagicMock(FrameSerializer=_FakeFrameSerializer),
+        "pipecat.frames": MagicMock(),
+        "pipecat.frames.frames": MagicMock(
+            EndFrame=_FakeEndFrame,
+            ErrorFrame=_FakeErrorFrame,
+            InputAudioRawFrame=_FakeInputAudioFrame,
+            InterimTranscriptionFrame=_FakeInterimTranscriptionFrame,
+            OutputAudioRawFrame=_FakeOutputAudioFrame,
+            TranscriptionFrame=_FakeTranscriptionFrame,
+        ),
         "pipecat.services": MagicMock(),
         "pipecat.services.cartesia": MagicMock(),
         "pipecat.services.cartesia.tts": MagicMock(CartesiaTTSService=_FakeCartesia),
@@ -1020,3 +1056,169 @@ async def test_voice_service_run_session_uses_registered_handle(
 
     await voice_service.run_session(session_id=created.session_id, websocket=websocket)
     assert started_call.is_set()
+
+
+def _serializer_fakes() -> dict[str, Any]:
+    """Build a fakes dict shaped like `_import_pipecat_modules` output.
+
+    Only the symbols the wire serializer touches are included. The fakes are
+    plain Python classes so `isinstance` works as a dispatch primitive in the
+    serializer body, mirroring the real pipecat frame hierarchy.
+    """
+
+    class _FakeFrameSerializer:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+    class _FakeOutputAudioRawFrame:
+        def __init__(
+            self, *, audio: bytes, sample_rate: int = 24_000, num_channels: int = 1
+        ) -> None:
+            self.audio = audio
+            self.sample_rate = sample_rate
+            self.num_channels = num_channels
+
+    class _FakeInputAudioRawFrame:
+        def __init__(self, *, audio: bytes, sample_rate: int, num_channels: int) -> None:
+            self.audio = audio
+            self.sample_rate = sample_rate
+            self.num_channels = num_channels
+
+    class _FakeTranscriptionFrame:
+        def __init__(self, *, text: str, user_id: str = "", timestamp: str = "") -> None:
+            self.text = text
+            self.user_id = user_id
+            self.timestamp = timestamp
+
+    class _FakeInterimTranscriptionFrame:
+        def __init__(self, *, text: str, user_id: str = "", timestamp: str = "") -> None:
+            self.text = text
+            self.user_id = user_id
+            self.timestamp = timestamp
+
+    class _FakeErrorFrame:
+        def __init__(self, *, error: str = "", fatal: bool = False) -> None:
+            self.error = error
+            self.fatal = fatal
+
+    class _FakeEndFrame:
+        def __init__(self) -> None:
+            pass
+
+    return {
+        "FrameSerializer": _FakeFrameSerializer,
+        "OutputAudioRawFrame": _FakeOutputAudioRawFrame,
+        "InputAudioRawFrame": _FakeInputAudioRawFrame,
+        "TranscriptionFrame": _FakeTranscriptionFrame,
+        "InterimTranscriptionFrame": _FakeInterimTranscriptionFrame,
+        "ErrorFrame": _FakeErrorFrame,
+        "EndFrame": _FakeEndFrame,
+    }
+
+
+async def test_serializer_serialize_audio_returns_raw_bytes() -> None:
+    modules = _serializer_fakes()
+    serializer = pipecat_session._build_raw_pcm_json_serializer(modules=modules)
+    frame = modules["OutputAudioRawFrame"](audio=b"\x01\x02\x03\x04")
+    result = await serializer.serialize(frame)
+    assert result == b"\x01\x02\x03\x04"
+
+
+async def test_serializer_serialize_transcription_returns_json_envelope() -> None:
+    modules = _serializer_fakes()
+    serializer = pipecat_session._build_raw_pcm_json_serializer(modules=modules)
+    frame = modules["TranscriptionFrame"](text="hello", user_id="user-1")
+    result = await serializer.serialize(frame)
+    assert isinstance(result, str)
+    body = json.loads(result)
+    assert body["type"] == "transcript"
+    assert body["payload"]["role"] == "user"
+    assert body["payload"]["text"] == "hello"
+    assert body["payload"]["is_interim"] is False
+
+
+async def test_serializer_serialize_interim_transcription_marks_is_interim() -> None:
+    modules = _serializer_fakes()
+    serializer = pipecat_session._build_raw_pcm_json_serializer(modules=modules)
+    frame = modules["InterimTranscriptionFrame"](text="partial", user_id="user-1")
+    body = json.loads(await serializer.serialize(frame))
+    assert body["type"] == "transcript"
+    assert body["payload"]["is_interim"] is True
+    assert body["payload"]["text"] == "partial"
+
+
+async def test_serializer_serialize_error_returns_error_envelope() -> None:
+    modules = _serializer_fakes()
+    serializer = pipecat_session._build_raw_pcm_json_serializer(modules=modules)
+    frame = modules["ErrorFrame"](error="things broke")
+    body = json.loads(await serializer.serialize(frame))
+    assert body["type"] == "error"
+    assert body["payload"]["message"] == "things broke"
+
+
+async def test_serializer_serialize_unknown_frame_type_returns_none() -> None:
+    modules = _serializer_fakes()
+    serializer = pipecat_session._build_raw_pcm_json_serializer(modules=modules)
+
+    class _UnrelatedFrame:
+        pass
+
+    result = await serializer.serialize(_UnrelatedFrame())
+    assert result is None
+
+
+async def test_serializer_serialize_end_frame_returns_none() -> None:
+    """EndFrame is consumed by the transport lifecycle, not forwarded on the wire."""
+    modules = _serializer_fakes()
+    serializer = pipecat_session._build_raw_pcm_json_serializer(modules=modules)
+    result = await serializer.serialize(modules["EndFrame"]())
+    assert result is None
+
+
+async def test_serializer_deserialize_bytes_returns_input_audio_frame() -> None:
+    modules = _serializer_fakes()
+    serializer = pipecat_session._build_raw_pcm_json_serializer(modules=modules)
+    frame = await serializer.deserialize(b"\x00\x01\x02\x03")
+    assert isinstance(frame, modules["InputAudioRawFrame"])
+    assert frame.audio == b"\x00\x01\x02\x03"
+    assert frame.sample_rate == 16_000
+    assert frame.num_channels == 1
+
+
+async def test_serializer_deserialize_empty_bytes_returns_none() -> None:
+    """An empty audio chunk would otherwise yield a zero-length PCM frame."""
+    modules = _serializer_fakes()
+    serializer = pipecat_session._build_raw_pcm_json_serializer(modules=modules)
+    frame = await serializer.deserialize(b"")
+    assert frame is None
+
+
+async def test_serializer_deserialize_session_end_returns_end_frame() -> None:
+    modules = _serializer_fakes()
+    serializer = pipecat_session._build_raw_pcm_json_serializer(modules=modules)
+    payload = json.dumps({"type": "session_end", "payload": {}})
+    frame = await serializer.deserialize(payload)
+    assert isinstance(frame, modules["EndFrame"])
+
+
+async def test_serializer_deserialize_unknown_envelope_type_returns_none() -> None:
+    modules = _serializer_fakes()
+    serializer = pipecat_session._build_raw_pcm_json_serializer(modules=modules)
+    payload = json.dumps({"type": "bogus_type", "payload": {}})
+    frame = await serializer.deserialize(payload)
+    assert frame is None
+
+
+async def test_serializer_deserialize_malformed_text_returns_none() -> None:
+    modules = _serializer_fakes()
+    serializer = pipecat_session._build_raw_pcm_json_serializer(modules=modules)
+    frame = await serializer.deserialize("not json")
+    assert frame is None
+
+
+async def test_serializer_deserialize_non_object_json_returns_none() -> None:
+    """JSON arrays or scalars are not valid control envelopes."""
+    modules = _serializer_fakes()
+    serializer = pipecat_session._build_raw_pcm_json_serializer(modules=modules)
+    frame = await serializer.deserialize(json.dumps([1, 2, 3]))
+    assert frame is None
