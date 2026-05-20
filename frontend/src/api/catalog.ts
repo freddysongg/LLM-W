@@ -1,6 +1,7 @@
 import type { ModalGpuOption } from "@/types/catalog";
 import type { ModalGpuType } from "@/types/config";
 import type { LlmCatalogProvider, LlmModelOption } from "@/types/llm-catalog";
+import type { ModelRegistryEntry } from "@/types/model-registry";
 import { ApiError, fetchApi } from "./client";
 
 interface RawModalGpuOption {
@@ -87,4 +88,33 @@ export async function fetchModalGpus(): Promise<ReadonlyArray<ModalGpuOption>> {
 export async function fetchLlmModels(): Promise<ReadonlyArray<LlmModelOption>> {
   const raw = await fetchApi<RawLlmCatalogResponse>({ path: "/catalog/llm-models" });
   return raw.options.map(normalizeLlmOption);
+}
+
+interface RawModelRegistryEntry {
+  readonly name: string;
+  readonly params: string;
+  readonly context: string;
+  readonly license: string;
+  readonly source: string;
+  readonly is_pinned: boolean;
+}
+
+interface RawModelRegistryResponse {
+  readonly entries: ReadonlyArray<RawModelRegistryEntry>;
+}
+
+function normalizeRegistryEntry(raw: RawModelRegistryEntry): ModelRegistryEntry {
+  return {
+    name: raw.name,
+    params: raw.params,
+    context: raw.context,
+    license: raw.license,
+    source: raw.source,
+    isPinned: raw.is_pinned,
+  };
+}
+
+export async function fetchModelRegistry(): Promise<ReadonlyArray<ModelRegistryEntry>> {
+  const raw = await fetchApi<RawModelRegistryResponse>({ path: "/catalog/model-registry" });
+  return raw.entries.map(normalizeRegistryEntry);
 }

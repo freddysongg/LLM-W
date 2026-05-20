@@ -3,7 +3,9 @@ import { useNavigate } from "react-router-dom";
 import { Download, ExternalLink, Layers, Plus, Star, Brain } from "lucide-react";
 import { useAppStore } from "@/stores/app-store";
 import { useModelProfile, useModelArchitecture, useResolveModel } from "@/hooks/useModelProfile";
+import { useModelRegistry } from "@/hooks/useCatalog";
 import type { ModelArchitectureResponse, ModelProfile } from "@/types/model";
+import type { ModelRegistryEntry } from "@/types/model-registry";
 import { ModelSourceSelector } from "@/components/model/model-source-selector";
 import { ModelIdInput } from "@/components/model/model-id-input";
 import { ModelResolveButton } from "@/components/model/model-resolve-button";
@@ -24,15 +26,6 @@ import { cn } from "@/lib/utils";
 
 type ModelsTab = "active" | "registry" | "merged";
 
-interface RegistryEntry {
-  readonly name: string;
-  readonly params: string;
-  readonly context: string;
-  readonly license: string;
-  readonly source: string;
-  readonly isPinned: boolean;
-}
-
 interface MergedEntry {
   readonly name: string;
   readonly base: string;
@@ -40,65 +33,6 @@ interface MergedEntry {
   readonly size: string;
   readonly when: string;
 }
-
-const REGISTRY_STUB: ReadonlyArray<RegistryEntry> = [
-  {
-    name: "qwen2.5-1.5b",
-    params: "1.54B",
-    context: "32k",
-    license: "Apache-2.0",
-    source: "HF",
-    isPinned: true,
-  },
-  {
-    name: "qwen2.5-7b",
-    params: "7.61B",
-    context: "32k",
-    license: "Apache-2.0",
-    source: "HF",
-    isPinned: false,
-  },
-  {
-    name: "mistral-7b-v0.3",
-    params: "7.25B",
-    context: "32k",
-    license: "Apache-2.0",
-    source: "HF",
-    isPinned: false,
-  },
-  {
-    name: "llama-3-8b",
-    params: "8.03B",
-    context: "8k",
-    license: "Meta-Community",
-    source: "HF",
-    isPinned: false,
-  },
-  {
-    name: "tinyllama-1.1b",
-    params: "1.10B",
-    context: "2k",
-    license: "Apache-2.0",
-    source: "HF",
-    isPinned: false,
-  },
-  {
-    name: "phi-3-mini-4k",
-    params: "3.82B",
-    context: "4k",
-    license: "MIT",
-    source: "HF",
-    isPinned: false,
-  },
-  {
-    name: "gemma-2b",
-    params: "2.51B",
-    context: "8k",
-    license: "Gemma",
-    source: "HF",
-    isPinned: false,
-  },
-];
 
 const MERGED_STUB: ReadonlyArray<MergedEntry> = [
   {
@@ -183,6 +117,8 @@ export default function ModelsPage(): React.JSX.Element {
   const projectId = activeProjectId ?? "";
   const { data: profile, isLoading: isLoadingProfile } = useModelProfile({ projectId });
   const { data: architecture } = useModelArchitecture({ projectId });
+  const { data: registryEntries, isLoading: isLoadingRegistry } = useModelRegistry();
+  const registry: ReadonlyArray<ModelRegistryEntry> = registryEntries ?? [];
   const resolveModel = useResolveModel();
 
   React.useEffect(() => {
@@ -295,7 +231,7 @@ export default function ModelsPage(): React.JSX.Element {
                 <TabsTrigger value="registry">
                   Registry
                   <span className="ml-1 rounded-full bg-surface-2 px-1.5 font-mono text-[9px] text-ink-3">
-                    {REGISTRY_STUB.length}
+                    {registry.length}
                   </span>
                 </TabsTrigger>
                 <TabsTrigger value="merged">
@@ -400,56 +336,66 @@ export default function ModelsPage(): React.JSX.Element {
                     <span>Src</span>
                     <span className="text-right">Actions</span>
                   </RunRow>
-                  {REGISTRY_STUB.map((model) => (
-                    <RunRow
-                      key={model.name}
-                      style={REGISTRY_HEADER_STYLE}
-                      onClick={() => toast({ title: `Activated ${model.name}` })}
-                    >
-                      <span
-                        aria-hidden="true"
-                        className={cn(
-                          "inline-grid place-items-center",
-                          model.isPinned ? "text-[color:var(--warn)]" : "text-ink-4",
-                        )}
+                  {isLoadingRegistry ? (
+                    <div className="p-3 font-mono text-[11px] text-ink-3">Loading registry…</div>
+                  ) : registry.length === 0 ? (
+                    <div className="p-3 font-mono text-[11px] text-ink-3">
+                      No models registered.
+                    </div>
+                  ) : (
+                    registry.map((model) => (
+                      <RunRow
+                        key={model.name}
+                        style={REGISTRY_HEADER_STYLE}
+                        onClick={() => toast({ title: `Activated ${model.name}` })}
                       >
-                        {model.isPinned ? (
-                          <Star className="size-3.5" />
-                        ) : (
-                          <Brain className="size-3.5" />
-                        )}
-                      </span>
-                      <div className="truncate font-mono text-[12px] text-ink-1">{model.name}</div>
-                      <RunRowCell>{model.params}</RunRowCell>
-                      <RunRowCell>{model.context}</RunRowCell>
-                      <RunRowCell>{model.license}</RunRowCell>
-                      <RunRowCell>{model.source}</RunRowCell>
-                      <div className="flex items-center justify-end gap-1">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            toast({ title: `Activated ${model.name}` });
-                          }}
+                        <span
+                          aria-hidden="true"
+                          className={cn(
+                            "inline-grid place-items-center",
+                            model.isPinned ? "text-[color:var(--warn)]" : "text-ink-4",
+                          )}
                         >
-                          Use
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-7"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            toast({ title: "Opened HF page" });
-                          }}
-                          aria-label="Open HF page"
-                        >
-                          <ExternalLink className="size-3" aria-hidden="true" />
-                        </Button>
-                      </div>
-                    </RunRow>
-                  ))}
+                          {model.isPinned ? (
+                            <Star className="size-3.5" />
+                          ) : (
+                            <Brain className="size-3.5" />
+                          )}
+                        </span>
+                        <div className="truncate font-mono text-[12px] text-ink-1">
+                          {model.name}
+                        </div>
+                        <RunRowCell>{model.params}</RunRowCell>
+                        <RunRowCell>{model.context}</RunRowCell>
+                        <RunRowCell>{model.license}</RunRowCell>
+                        <RunRowCell>{model.source}</RunRowCell>
+                        <div className="flex items-center justify-end gap-1">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              toast({ title: `Activated ${model.name}` });
+                            }}
+                          >
+                            Use
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="size-7"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              toast({ title: "Opened HF page" });
+                            }}
+                            aria-label="Open HF page"
+                          >
+                            <ExternalLink className="size-3" aria-hidden="true" />
+                          </Button>
+                        </div>
+                      </RunRow>
+                    ))
+                  )}
                 </Card>
               </TabsContent>
 
