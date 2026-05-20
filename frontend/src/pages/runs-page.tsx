@@ -1,11 +1,11 @@
 import * as React from "react";
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { GitCompare, Play } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAppStore } from "@/stores/app-store";
 import { useRunStreamStore } from "@/stores/run-stream-store";
-import { normalizeYamlConfig } from "@/lib/yaml-config";
-import type { WorkbenchConfig } from "@/types/config";
+import { denormalizeYamlConfig, normalizeYamlConfig } from "@/lib/yaml-config";
+import type { SaveConfigRequest, WorkbenchConfig } from "@/types/config";
 import {
   useCancelRun,
   useCheckpoints,
@@ -18,7 +18,7 @@ import {
   useRunStages,
   useRuns,
 } from "@/hooks/useRuns";
-import { useActiveConfig } from "@/hooks/useConfigs";
+import { useActiveConfig, useSaveConfig } from "@/hooks/useConfigs";
 import { useSettings } from "@/hooks/useSettings";
 import { useRunStream } from "@/hooks/useRunStream";
 import { useToast } from "@/hooks/use-toast";
@@ -92,6 +92,52 @@ function countByStatus(runs: ReadonlyArray<Run>, predicate: (run: Run) => boolea
   let total = 0;
   for (const run of runs) if (predicate(run)) total += 1;
   return total;
+}
+
+interface MaybeCreateOverrideParams {
+  readonly projectId: string;
+  readonly activeConfig: { readonly id: string; readonly yamlBlob: string };
+  readonly environment: TrainingEnvironment;
+  readonly modalGpuType: ModalGpuType | null;
+  readonly saveConfig: (params: {
+    readonly request: SaveConfigRequest;
+  }) => Promise<{ readonly id: string }>;
+}
+
+export async function maybeCreateOverrideConfig({
+  projectId,
+  activeConfig,
+  environment,
+  modalGpuType,
+  saveConfig,
+}: MaybeCreateOverrideParams): Promise<string | null> {
+  const parsed = normalizeYamlConfig<WorkbenchConfig>(parseYaml(activeConfig.yamlBlob));
+  const currentEnv = parsed.execution.environment;
+  const currentGpu = parsed.execution.modalGpuType;
+  const targetGpu = environment === "modal" ? modalGpuType : null;
+  const envChanged = currentEnv !== environment;
+  const gpuChanged = currentGpu !== targetGpu;
+  if (!envChanged && !gpuChanged) {
+    return null;
+  }
+  const patched: WorkbenchConfig = {
+    ...parsed,
+    execution: {
+      ...parsed.execution,
+      environment,
+      modalGpuType: targetGpu,
+    },
+  };
+  const patchedYaml = stringifyYaml(denormalizeYamlConfig(patched));
+  const newVersion = await saveConfig({
+    request: {
+      projectId,
+      yamlContent: patchedYaml,
+      sourceTag: "user",
+      sourceDetail: "runs-page environment override",
+    },
+  });
+  return newVersion.id;
 }
 
 export default function RunsPage(): React.JSX.Element {
@@ -176,6 +222,7 @@ export default function RunsPage(): React.JSX.Element {
   const createRunMutation = useCreateRun();
 
   const { data: activeConfig } = useActiveConfig({ projectId: activeProjectId ?? "" });
+  const saveConfig = useSaveConfig({ projectId: activeProjectId ?? "" });
 
   const { fallbackProposal, clearFallbackProposal } = useRunStreamStore((state) => ({
     fallbackProposal: selectedRunId ? (state.fallbackProposals[selectedRunId] ?? null) : null,
@@ -214,10 +261,40 @@ export default function RunsPage(): React.JSX.Element {
   const streamingCount = countByStatus(runs, (run) => run.status === "running");
   const pausedCount = countByStatus(runs, (run) => run.status === "paused");
 
-  const handleStartRun = (): void => {
+  const handleStartRun = async (): Promise<void> => {
     if (!activeProjectId || !activeConfig) return;
+    if (environment === "modal" && modalGpuType === null) {
+      toast({
+        title: "Pick a GPU first",
+        description: "Modal runs require a GPU tier.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    let configVersionId = activeConfig.id;
+    try {
+      const overrideId = await maybeCreateOverrideConfig({
+        projectId: activeProjectId,
+        activeConfig,
+        environment,
+        modalGpuType,
+        saveConfig: saveConfig.mutateAsync,
+      });
+      if (overrideId !== null) {
+        configVersionId = overrideId;
+      }
+    } catch (cause) {
+      toast({
+        title: "Could not prepare config override",
+        description: describeApiError({ cause, fallback: "Failed to save config override." }),
+        variant: "destructive",
+      });
+      return;
+    }
+
     createRunMutation.mutate(
-      { projectId: activeProjectId, configVersionId: activeConfig.id },
+      { projectId: activeProjectId, configVersionId },
       {
         onSuccess: (newRun) => {
           setSelectedRunId(newRun.id);
@@ -329,7 +406,9 @@ export default function RunsPage(): React.JSX.Element {
           <Button
             variant="primary"
             size="sm"
-            onClick={handleStartRun}
+            onClick={() => {
+              void handleStartRun();
+            }}
             disabled={!canStartRun || createRunMutation.isPending}
           >
             <Play aria-hidden="true" />
@@ -398,7 +477,9 @@ export default function RunsPage(): React.JSX.Element {
             isDeletingRunId={
               deleteRunMutation.isPending ? (deleteRunMutation.variables?.runId ?? null) : null
             }
-            onStartRun={handleStartRun}
+            onStartRun={() => {
+              void handleStartRun();
+            }}
             isStartingRun={createRunMutation.isPending}
             canStartRun={canStartRun}
           />
