@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
+import os
 import sys
 import time
 import uuid
@@ -16,6 +18,50 @@ _EXIT_TIMEOUT = 2
 
 _DEFAULT_SMOKE_CONFIG = Path(__file__).resolve().parents[2] / "configs" / "modal_smoke.yaml"
 _DEFAULT_TIMEOUT_SECONDS = 600
+
+_SEED_SANITIZED_ROW = {
+    "messages": [
+        {"role": "user", "content": "modal smoke check"},
+        {"role": "assistant", "content": "ok"},
+    ]
+}
+
+
+def _seed_sanitized_artifact(*, project_dir: Path) -> None:
+    """Write a minimal sanitized.jsonl + manifest under project_dir/datasets/.
+
+    `build_modal_upload_plan` requires `datasets/sanitized.jsonl` to exist, so
+    a freshly-generated tmp `project_dir` for the smoke command has nothing to
+    upload otherwise. The manifest mirrors the shape produced by
+    `dataset_sanitizer.persist_sanitized_artifact` so the upload-skip path
+    (content-hash comparison) keeps working.
+    """
+    datasets_dir = project_dir / "datasets"
+    datasets_dir.mkdir(parents=True, exist_ok=True)
+    artifact_path = datasets_dir / "sanitized.jsonl"
+    manifest_path = datasets_dir / "sanitized.meta.json"
+
+    artifact_payload = json.dumps(_SEED_SANITIZED_ROW, ensure_ascii=False) + "\n"
+    content_hash = hashlib.sha256(
+        json.dumps([_SEED_SANITIZED_ROW], sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()
+
+    tmp_artifact = artifact_path.with_suffix(".jsonl.tmp")
+    tmp_artifact.write_text(artifact_payload, encoding="utf-8")
+    os.replace(tmp_artifact, artifact_path)
+
+    manifest_payload = {
+        "content_hash": content_hash,
+        "total_rows": 1,
+        "source_format": "default",
+        "normalized": True,
+        "redaction_counts": {},
+        "total_redactions": 0,
+        "split_counts": {"train": 1, "val": 0, "test": 0},
+    }
+    tmp_manifest = manifest_path.with_suffix(".json.tmp")
+    tmp_manifest.write_text(json.dumps(manifest_payload, indent=2), encoding="utf-8")
+    os.replace(tmp_manifest, manifest_path)
 
 
 def register_subcommand(*, subparsers: argparse._SubParsersAction) -> None:
@@ -74,12 +120,15 @@ async def run(*, args: argparse.Namespace) -> int:
         )
         return _EXIT_ERROR
 
+    is_default_project_dir = args.project_dir is None
     project_dir: Path = (
         args.project_dir
         if args.project_dir is not None
         else Path(f"/tmp/modal-smoke-{uuid.uuid4().hex[:8]}")
     )
     project_dir.mkdir(parents=True, exist_ok=True)
+    if is_default_project_dir:
+        _seed_sanitized_artifact(project_dir=project_dir)
 
     run_id = f"smoke-{uuid.uuid4().hex[:8]}"
     modal_token_id, modal_token_secret = credentials
