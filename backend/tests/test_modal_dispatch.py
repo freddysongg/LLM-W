@@ -437,6 +437,57 @@ def test_rewrite_preserves_original_format_when_normalized_key_absent(tmp_path: 
     assert dataset["format"] == "sharegpt"
 
 
+def test_rewrite_preserves_train_eval_split_and_ratios(tmp_path: Path) -> None:
+    """Split selectors and ratios must survive the rewrite.
+
+    The trainer's local_jsonl loader applies these as-is. A future refactor
+    that strips them on the assumption "local_jsonl ignores splits" would
+    silently change the dataset partition — pin the behavior with a test.
+    """
+    import yaml as _yaml
+
+    from app.services.cloud.modal_adapter import build_modal_upload_plan
+
+    project_dir = tmp_path / "p1"
+    datasets_dir = project_dir / "datasets"
+    datasets_dir.mkdir(parents=True)
+    (datasets_dir / "sanitized.jsonl").write_text('{"messages":[]}\n', encoding="utf-8")
+    (datasets_dir / "sanitized.meta.json").write_text(
+        '{"content_hash": "abc", "normalized": true}', encoding="utf-8"
+    )
+
+    configs_dir = project_dir / "configs"
+    configs_dir.mkdir(parents=True)
+    config_path = configs_dir / "run.yaml"
+    config_path.write_text(
+        _yaml.safe_dump(
+            {
+                "dataset": {
+                    "source": "huggingface",
+                    "dataset_id": "HuggingFaceH4/ultrachat_200k",
+                    "format": "sharegpt",
+                    "train_split": "train",
+                    "eval_split": "validation",
+                    "train_ratio": 0.8,
+                    "val_ratio": 0.1,
+                    "test_ratio": 0.1,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    plan = build_modal_upload_plan(project_dir=project_dir, config_path=config_path)
+    dataset = _read_rewritten_dataset(plan_files=plan.files)
+    assert dataset["train_split"] == "train"
+    assert dataset["eval_split"] == "validation"
+    assert dataset["train_ratio"] == 0.8
+    assert dataset["val_ratio"] == 0.1
+    assert dataset["test_ratio"] == 0.1
+    assert dataset["source"] == "local_jsonl"
+    assert dataset["dataset_id"] == "/workspace/datasets/sanitized.jsonl"
+
+
 def test_validate_execution_rejects_modal_without_credentials() -> None:
     cfg = ExecutionConfig.model_validate(
         {
