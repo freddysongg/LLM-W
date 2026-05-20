@@ -1253,15 +1253,22 @@ async def _run_trainer_subprocess(
 
         now = datetime.now(UTC).isoformat()
         started_iso = await _load_run_started_iso(run_id=run_id)
-        wall_clock_s, cost_usd = (0.0, 0.0)
+        wall_clock_s = 0.0
         if started_iso is not None:
-            wall_clock_s, cost_usd = _compute_run_cost(
+            wall_clock_s, _ = _compute_run_cost(
                 execution=execution_cfg,
                 started_iso=started_iso,
                 ended_iso=now,
             )
 
         if terminal_status == "completed":
+            # Close the current attempt FIRST so its cost lands in run_attempts,
+            # then read the rolling total across all attempts. Without this,
+            # `Run.cost_usd` would drop the cost of any failed fallback attempt.
+            await _close_current_attempt(
+                run_id=run_id, execution=execution_cfg, exit_reason="completed"
+            )
+            cost_usd = await _sum_attempt_costs(run_id=run_id)
             await _mark_pending_stages_skipped(run_id=run_id)
             await _update_run_status(
                 run_id=run_id,
@@ -1295,6 +1302,10 @@ async def _run_trainer_subprocess(
             analysis_task.add_done_callback(_active_analysis_tasks.discard)
             analysis_task.add_done_callback(_log_background_task_exception)
         elif terminal_status == "cancelled":
+            await _close_current_attempt(
+                run_id=run_id, execution=execution_cfg, exit_reason="cancelled"
+            )
+            cost_usd = await _sum_attempt_costs(run_id=run_id)
             await _mark_pending_stages_skipped(run_id=run_id)
             await _update_run_status(
                 run_id=run_id,
@@ -1332,6 +1343,10 @@ async def _run_trainer_subprocess(
                 # transitioned the run to fallback_pending and emitted a WS
                 # event, or it failed the run with oom_chain_exhausted itself.
                 return
+            await _close_current_attempt(
+                run_id=run_id, execution=execution_cfg, exit_reason="failed"
+            )
+            cost_usd = await _sum_attempt_costs(run_id=run_id)
             await _mark_pending_stages_skipped(run_id=run_id)
             await _update_run_status(
                 run_id=run_id,
@@ -1461,6 +1476,34 @@ async def _close_attempt_with_reason(
         attempt.cost_estimate_usd = wall_clock_s * rate
     else:
         attempt.cost_estimate_usd = 0.0
+
+
+async def _sum_attempt_costs(*, run_id: str) -> float:
+    """Return total cost across all RunAttempt rows for a run.
+
+    Used at run completion to make `Run.cost_usd` a rolling total over attempts
+    — failed fallback attempts already have `cost_estimate_usd` persisted, and
+    the current attempt is closed (and priced) right before this is called.
+    """
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(RunAttempt.cost_estimate_usd).where(RunAttempt.run_id == run_id)
+        )
+        return sum((cost or 0.0) for cost in result.scalars().all())
+
+
+async def _close_current_attempt(
+    *, run_id: str, execution: ExecutionConfig, exit_reason: str
+) -> None:
+    """Mark the current attempt closed with the given reason if not already closed."""
+    async with async_session_factory() as session:
+        attempt = await _load_current_attempt(session=session, run_id=run_id)
+        if attempt is None or attempt.ended_at is not None:
+            return
+        await _close_attempt_with_reason(
+            session=session, attempt=attempt, execution=execution, exit_reason=exit_reason
+        )
+        await session.commit()
 
 
 async def _publish_local_oom_detected(
