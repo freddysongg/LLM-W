@@ -13,9 +13,11 @@ import {
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app-store";
 import { useToast } from "@/hooks/use-toast";
+import { useRuns } from "@/hooks/useRuns";
 import { NAV_GROUPS, SETTINGS_NAV_ITEM } from "@/lib/nav";
 import { STORAGE_KEYS, THEME_VALUES, type Theme } from "@/lib/theme-init";
 import { Kbd } from "@/components/ui/kbd";
+import type { Run } from "@/types/run";
 
 type CommandHint = "nav" | "action" | "pref";
 
@@ -38,6 +40,7 @@ interface BuildCommandsParams {
   readonly navigate: ReturnType<typeof useNavigate>;
   readonly toast: ToastFn;
   readonly openTweaks: () => void;
+  readonly activeRunId: string | null;
 }
 
 const HINT_ICON_BY_KIND: Record<CommandHint, LucideIcon> = {
@@ -53,6 +56,18 @@ const HINT_GROUP_LABEL: Record<CommandHint, string> = {
 };
 
 const HINT_ORDER: readonly CommandHint[] = ["nav", "action", "pref"];
+
+const ACTIVE_RUN_STATUSES: ReadonlySet<Run["status"]> = new Set<Run["status"]>([
+  "running",
+  "pending",
+  "fallback_pending",
+]);
+
+function findActiveRunId(runs: ReadonlyArray<Run> | undefined): string | null {
+  if (runs === undefined) return null;
+  const active = runs.find((run) => ACTIVE_RUN_STATUSES.has(run.status));
+  return active?.id ?? null;
+}
 
 function readCurrentTheme(): Theme {
   const attr = document.documentElement.getAttribute("data-theme");
@@ -86,7 +101,8 @@ function buildNavCommands({
 function buildActionCommands({
   navigate,
   toast,
-}: Pick<BuildCommandsParams, "navigate" | "toast">): readonly CommandDefinition[] {
+  activeRunId,
+}: Pick<BuildCommandsParams, "navigate" | "toast" | "activeRunId">): readonly CommandDefinition[] {
   const navigateWithToast = ({ path, toastTitle }: NavigateWithToastParams): void => {
     navigate(path);
     toast({ title: toastTitle, variant: "info" });
@@ -115,7 +131,11 @@ function buildActionCommands({
       hint: "action",
       icon: HINT_ICON_BY_KIND.action,
       run: (): void => {
-        toast({ title: "Paused run_8f2a", variant: "warn" });
+        if (activeRunId === null) {
+          toast({ title: "No active run to pause", variant: "warn" });
+          return;
+        }
+        toast({ title: `Paused ${activeRunId}`, variant: "warn" });
       },
     },
     {
@@ -124,7 +144,11 @@ function buildActionCommands({
       hint: "action",
       icon: HINT_ICON_BY_KIND.action,
       run: (): void => {
-        toast({ title: "Stopped run_8f2a", variant: "danger" });
+        if (activeRunId === null) {
+          toast({ title: "No active run to stop", variant: "warn" });
+          return;
+        }
+        toast({ title: `Stopped ${activeRunId}`, variant: "danger" });
       },
     },
     {
@@ -170,10 +194,11 @@ function buildCommands({
   navigate,
   toast,
   openTweaks,
+  activeRunId,
 }: BuildCommandsParams): readonly CommandDefinition[] {
   return [
     ...buildNavCommands({ navigate }),
-    ...buildActionCommands({ navigate, toast }),
+    ...buildActionCommands({ navigate, toast, activeRunId }),
     ...buildPrefCommands({ toast, openTweaks }),
   ];
 }
@@ -237,8 +262,11 @@ export function CommandPalette(): React.JSX.Element {
   const isOpen = useAppStore((state) => state.isCommandPaletteOpen);
   const setCommandPaletteOpen = useAppStore((state) => state.setCommandPaletteOpen);
   const setTweaksPanelOpen = useAppStore((state) => state.setTweaksPanelOpen);
+  const activeProjectId = useAppStore((state) => state.activeProjectId) ?? "";
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { data: runs } = useRuns({ projectId: activeProjectId });
+  const activeRunId = findActiveRunId(runs);
 
   const handleClose = React.useCallback((): void => {
     setCommandPaletteOpen(false);
@@ -249,8 +277,8 @@ export function CommandPalette(): React.JSX.Element {
   }, [setTweaksPanelOpen]);
 
   const commands = React.useMemo(
-    () => buildCommands({ navigate, toast, openTweaks: handleOpenTweaks }),
-    [navigate, toast, handleOpenTweaks],
+    () => buildCommands({ navigate, toast, openTweaks: handleOpenTweaks, activeRunId }),
+    [navigate, toast, handleOpenTweaks, activeRunId],
   );
 
   const handleSelect = React.useCallback(
