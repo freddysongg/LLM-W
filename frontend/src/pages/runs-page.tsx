@@ -114,9 +114,14 @@ export async function maybeCreateOverrideConfig({
   const parsed = normalizeYamlConfig<WorkbenchConfig>(parseYaml(activeConfig.yamlBlob));
   const currentEnv = parsed.execution.environment;
   const currentGpu = parsed.execution.modalGpuType;
-  const targetGpu = environment === "modal" ? modalGpuType : null;
+  // Backend ExecutionConfig.modal_gpu_type is a non-nullable Literal with
+  // default "a10"; serializing null would invalidate the config. When the
+  // target environment is local, preserve the existing GPU (or fall back to
+  // the same default the backend would apply) so the field stays valid.
+  const targetGpu: ModalGpuType =
+    environment === "modal" && modalGpuType !== null ? modalGpuType : (currentGpu ?? "a10");
   const envChanged = currentEnv !== environment;
-  const gpuChanged = currentGpu !== targetGpu;
+  const gpuChanged = environment === "modal" && currentGpu !== targetGpu;
   if (!envChanged && !gpuChanged) {
     return null;
   }

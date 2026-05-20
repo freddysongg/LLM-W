@@ -88,7 +88,7 @@ describe("maybeCreateOverrideConfig", () => {
     expect(patched.execution.modal_gpu_type).toBe("h100");
   });
 
-  it("clears modal_gpu_type when switching modal→local", async () => {
+  it("preserves modal_gpu_type when switching modal→local", async () => {
     const { mock, fn } = makeSaveConfig();
     const result = await maybeCreateOverrideConfig({
       projectId: "p1",
@@ -101,7 +101,28 @@ describe("maybeCreateOverrideConfig", () => {
     const call = mock.mock.calls[0][0] as SaveConfigCall;
     const patched = parseYaml(call.request.yamlContent);
     expect(patched.execution.environment).toBe("local");
-    expect(patched.execution.modal_gpu_type).toBeNull();
+    // The backend rejects modal_gpu_type=null; preserve the existing value
+    // so the patched config still validates even though the run won't use it.
+    expect(patched.execution.modal_gpu_type).toBe("a10");
+  });
+
+  it("does not save a new version when only switching modal→local with same gpu", async () => {
+    const { mock, fn } = makeSaveConfig();
+    // env change still triggers a save, but the gpu mismatch alone (when target is local)
+    // must not bypass the equality check — gpu_changed is irrelevant for local target.
+    const result = await maybeCreateOverrideConfig({
+      projectId: "p1",
+      activeConfig: { id: "cv1", yamlBlob: MODAL_YAML },
+      environment: "local",
+      modalGpuType: "h100",
+      saveConfig: fn,
+    });
+    expect(result).toBe("cv-new");
+    expect(mock).toHaveBeenCalledTimes(1);
+    const call = mock.mock.calls[0][0] as SaveConfigCall;
+    const patched = parseYaml(call.request.yamlContent);
+    // The picker's "h100" is ignored when target is local; existing a10 wins.
+    expect(patched.execution.modal_gpu_type).toBe("a10");
   });
 
   it("saves a new version when GPU changes within modal", async () => {
