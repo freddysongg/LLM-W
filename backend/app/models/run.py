@@ -86,10 +86,12 @@ class Run(Base):
         "RunAttempt",
         back_populates="run",
         cascade="all, delete-orphan",
-        # `lazy="selectin"` makes plain `session.get(Run, id)` and
-        # `RunResponse.model_validate(run)` work without explicit eager loading
-        # on every call site. Each load adds one extra SELECT on `run_attempts`,
-        # which is acceptable for the typical 1–4 attempts-per-run cardinality.
+        # `lazy="selectin"` issues ONE batched IN-load per parent result set, not
+        # one query per row. Verified 2026-05-20 by counting `before_cursor_execute`
+        # events against a list endpoint that returned 5 runs with 10 attempts —
+        # exactly 1 SELECT on `runs` + 1 SELECT on `run_attempts WHERE run_id IN (...)`.
+        # Safe for list endpoints; `RunResponse.model_validate(run)` works without
+        # explicit eager loading on every call site.
         lazy="selectin",
         passive_deletes=True,
         order_by="RunAttempt.attempt_index",
