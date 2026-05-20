@@ -116,6 +116,12 @@ async def start_serving(
     )
 
     async with _lock:
+        # Drop any entries whose subprocess has exited. Without this sweep, a
+        # dead serve from another project would still occupy a capacity slot
+        # and surface a misleading "already serving (project X)" error to the
+        # operator. get_status performs the same eviction lazily on read, so
+        # the only path that needed the explicit sweep was start.
+        _evict_dead_active_entries()
         existing = _active.get(project_id)
         if existing is None and len(_active) >= _MAX_CONCURRENT_SERVES:
             other_project = next(iter(_active))
@@ -182,6 +188,24 @@ async def _stop_locked(*, project_id: str) -> None:
             entry.event_drain_task.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await entry.event_drain_task
+
+
+def _evict_dead_active_entries() -> None:
+    """Remove `_active` entries whose subprocess has exited.
+
+    Caller must already hold `_lock`. Adapter cancel/drain is intentionally
+    skipped here — the subprocess is gone, so there is nothing to cancel; the
+    drain task will see the closed pipe and exit on its own when next scheduled.
+    """
+    for project_id in list(_active.keys()):
+        entry = _active[project_id]
+        if not entry.adapter.is_subprocess_alive:
+            _active.pop(project_id, None)
+            logger.info(
+                "Evicted dead MLX serve for project %s (subprocess exit_code=%s)",
+                project_id,
+                entry.adapter.last_exit_code,
+            )
 
 
 async def _drain_events(*, project_id: str, adapter: MLXServingAdapter) -> None:

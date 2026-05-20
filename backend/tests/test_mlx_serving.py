@@ -477,6 +477,43 @@ async def test_registry_rejects_capacity_exceeded(
         )
 
 
+async def test_registry_start_evicts_dead_entry_from_other_project(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A dead serve in project A must not block a new serve in project B.
+
+    Without the start-time eviction, `_active` would still contain project A's
+    stale entry — `len(_active) >= _MAX_CONCURRENT_SERVES` would be true and
+    the new serve would be rejected even though project A's subprocess is gone.
+    """
+    from app.services.cloud import mlx_serving_registry
+
+    _patch_for_happy_path(monkeypatch)
+
+    await mlx_serving_registry.start_serving(
+        project_id="p1",
+        serving_model_id="mlx-community/Qwen2.5-1.5B-Instruct-4bit",
+        adapter_path=None,
+        trust_remote_code=False,
+    )
+
+    # Simulate p1's subprocess dying without going through stop_serving.
+    mlx_serving_registry._active["p1"].adapter._state.proc._returncode = 137
+
+    # New serve from p2 must succeed — the start sweep evicts the dead p1 entry
+    # before the capacity check sees the count.
+    status = await mlx_serving_registry.start_serving(
+        project_id="p2",
+        serving_model_id="mlx-community/Qwen2.5-1.5B-Instruct-4bit",
+        adapter_path=None,
+        trust_remote_code=False,
+    )
+    assert status.state == "running"
+    assert status.project_id == "p2"
+    assert "p1" not in mlx_serving_registry._active
+    assert "p2" in mlx_serving_registry._active
+
+
 async def test_registry_restarts_when_called_for_same_project(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
