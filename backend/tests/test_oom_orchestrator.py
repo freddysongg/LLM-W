@@ -431,6 +431,74 @@ async def test_cancel_fallback_marks_failed_with_user_cancelled_reason(
     assert failed_events[0]["payload"]["failureReason"] == "oom_user_cancelled"
 
 
+async def test_cancel_fallback_rolls_up_attempt_cost_and_wall_clock(
+    patched_session_factory: async_sessionmaker[Any],
+    tmp_path: Path,
+    captured_events: list[dict[str, Any]],
+) -> None:
+    """User-cancelled fallback must report the paid Modal attempt's cost and time.
+
+    The bug: cancel_fallback was reading run.cost_usd / wall_clock_s straight off
+    the row without rolling up RunAttempt rows, so a user who paid for an L40S
+    OOM attempt before cancelling saw both fields as None/0 in the failed event.
+    """
+    project_dir = tmp_path / "p2"
+    project_dir.mkdir()
+    await _setup_project_and_config(
+        factory=patched_session_factory,
+        project_dir=project_dir,
+        yaml_blob=_yaml_for_modal_run(),
+    )
+
+    started = "2026-05-19T12:00:00+00:00"
+    ended = "2026-05-19T12:01:00+00:00"
+    async with patched_session_factory() as session:
+        session.add(
+            Run(
+                id="r2",
+                project_id="p1",
+                config_version_id="cv1",
+                status="fallback_pending",
+                modal_gpu_type="l40s",
+                environment="modal",
+                device="cuda",
+                created_at=started,
+                updated_at=started,
+            )
+        )
+        # Pre-closed attempt with a non-trivial cost — mirrors the state after
+        # _close_failed_attempt ran inside _handle_trainer_oom.
+        session.add(
+            RunAttempt(
+                id="r2-a0",
+                run_id="r2",
+                attempt_index=0,
+                gpu_type="l40s",
+                device="cuda",
+                started_at=started,
+                ended_at=ended,
+                exit_reason="oom",
+                cost_estimate_usd=0.75,
+                created_at=started,
+            )
+        )
+        await session.commit()
+
+    async with patched_session_factory() as session:
+        cancelled = await orchestrator.cancel_fallback(
+            session=session, run_id="r2", project_id="p1"
+        )
+
+    assert cancelled.cost_usd == 0.75
+    assert cancelled.wall_clock_s == 60.0
+
+    failed_events = [e for e in captured_events if e.get("event") == "run_failed"]
+    assert len(failed_events) == 1
+    payload = failed_events[0]["payload"]
+    assert payload["costUsd"] == 0.75
+    assert payload["wallClockS"] == 60.0
+
+
 async def test_chain_exhausted_after_all_candidates_oom(
     patched_session_factory: async_sessionmaker[Any],
     captured_events: list[dict[str, Any]],

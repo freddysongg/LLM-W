@@ -1992,12 +1992,23 @@ async def cancel_fallback(*, session: AsyncSession, run_id: str, project_id: str
             execution=execution_cfg,
             exit_reason="oom_user_cancelled",
         )
+        # Persist the close so the rollups below see the just-closed attempt's
+        # cost_estimate_usd / ended_at on the next read.
+        await session.commit()
+
+    # Roll up cost and wall-clock across every closed attempt — without this
+    # the run row and the run_failed WS envelope would publish stale values
+    # from before the most recent paid Modal OOM attempt was closed.
+    cost_usd = await _sum_attempt_costs(run_id=run_id)
+    wall_clock_s = await _sum_attempt_wall_clock_s(run_id=run_id)
 
     now = datetime.now(UTC).isoformat()
     run.status = "failed"
     run.failure_reason = "oom_user_cancelled"
     run.completed_at = now
     run.updated_at = now
+    run.cost_usd = cost_usd
+    run.wall_clock_s = wall_clock_s
     await session.commit()
 
     await _mark_pending_stages_skipped(run_id=run_id)
