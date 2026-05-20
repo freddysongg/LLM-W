@@ -8,7 +8,7 @@ import os
 import signal as _signal
 import sys
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -1679,9 +1679,68 @@ async def _handle_trainer_oom(
         candidates=candidates,
         detected_via=detection.trigger,
     )
-    # TODO(oom-recovery): stale fallback_pending runs >N hours auto-fail —
-    # remove when [recovery worker is added].
     return True
+
+
+async def _sweep_abandoned_fallback_runs() -> None:
+    """Auto-fail fallback_pending runs idle past the configured TTL.
+
+    Without this sweep, a client that closes the browser between
+    `fallback_proposed` and `accept_fallback` leaves the run stuck in
+    `fallback_pending` until the process is restarted. Each row is processed
+    inside its own try/except so a malformed run cannot break startup.
+    """
+    cutoff_iso = (
+        datetime.now(UTC) - timedelta(hours=settings.oom_fallback_recovery_ttl_hours)
+    ).isoformat()
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(Run).where(
+                Run.status == "fallback_pending",
+                Run.updated_at < cutoff_iso,
+            )
+        )
+        stale_runs = list(result.scalars().all())
+
+    for run in stale_runs:
+        try:
+            await _fail_abandoned_fallback_run(run_id=run.id, project_id=run.project_id)
+        except Exception:
+            logger.exception(
+                "orchestrator sweep failed to fail-out abandoned fallback run %s", run.id
+            )
+
+
+async def _fail_abandoned_fallback_run(*, run_id: str, project_id: str) -> None:
+    async with async_session_factory() as session:
+        run = await session.get(Run, run_id)
+        if run is None:
+            return
+        config_version = await session.get(ConfigVersion, run.config_version_id)
+        if config_version is None:
+            execution_cfg = ExecutionConfig.model_validate(
+                {"environment": run.environment or "modal"}
+            )
+        else:
+            execution_cfg = _load_execution_cfg_from_config_version(
+                config_version=config_version
+            )
+        attempt = await _load_current_attempt(session=session, run_id=run_id)
+        if attempt is not None and attempt.ended_at is None:
+            await _close_attempt_with_reason(
+                session=session,
+                attempt=attempt,
+                execution=execution_cfg,
+                exit_reason="oom_fallback_abandoned",
+            )
+            await session.commit()
+
+    await _fail_run_with_oom_reason(
+        run_id=run_id,
+        project_id=project_id,
+        failure_reason="oom_fallback_abandoned",
+        publish_run_failed=True,
+    )
 
 
 def _validate_fallback_gpu_choice(*, run: Run, gpu_type: str, max_run_minutes: int) -> None:

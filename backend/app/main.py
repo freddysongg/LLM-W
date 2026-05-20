@@ -30,6 +30,7 @@ from app.core.config import settings
 from app.core.database import async_session_factory, create_tables
 from app.services.cloud import mlx_serving_registry
 from app.services.eval_runner import drain_in_flight_tasks, recover_stale_eval_runs
+from app.services.orchestrator import _sweep_abandoned_fallback_runs
 from app.services.settings_service import _load_persisted_overrides
 from app.services.watchdog import recover_stale_runs
 
@@ -42,6 +43,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     _load_persisted_overrides()
     await recover_stale_runs()
     await recover_stale_eval_runs(session_factory=async_session_factory)
+    await _sweep_abandoned_fallback_runs()
     await connection_manager.start_resource_poller()
     yield
     await connection_manager.stop_resource_poller()
