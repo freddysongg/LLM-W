@@ -14,13 +14,17 @@ from typing import Annotated
 
 import yaml
 from fastapi import APIRouter, Depends, HTTPException, Response
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
 from app.core.exceptions import (
     MissingServingModelIdError,
+    NoCheckpointError,
     ProjectNotFoundError,
+    RunNotFoundError,
 )
+from app.models.run import Run
 from app.schemas.mlx_serving import (
     ServeRequest,
     ServingStartResponse,
@@ -73,12 +77,17 @@ async def start_serve(
             project_id=project_id,
             requested_model_id=payload.serving_model_id,
         )
+        adapter_path = await _resolve_adapter_path(
+            session=session, run_id=payload.run_id
+        )
         status = await mlx_serving_registry.start_serving(
             project_id=project_id,
             serving_model_id=serving_model_id,
-            adapter_path=_resolve_adapter_path(run_id=payload.run_id),
+            adapter_path=adapter_path,
             trust_remote_code=payload.trust_remote_code,
         )
+    except (RunNotFoundError, NoCheckpointError) as exc:
+        raise _map_run_lookup_exception(exc) from exc
     except _ServingDomainError as exc:
         raise _map_serving_exception(exc) from exc
     return ServingStartResponse(status=status)
@@ -138,16 +147,47 @@ async def _resolve_serving_model_id(
     raise MissingServingModelIdError(project_id)
 
 
-def _resolve_adapter_path(*, run_id: str | None) -> Path | None:
-    """Resolve run id to a checkpoint path. v1 only validates the type.
+async def _resolve_adapter_path(
+    *, session: AsyncSession, run_id: str | None
+) -> Path | None:
+    """Look up the on-disk checkpoint directory for *run_id*.
 
-    Real adapter conversion (peft → MLX) is deferred per the design doc.
-    `MLXServingAdapter._guard_adapter_compatibility` will reject the
-    incompatible combination at start time with a typed exception.
+    Returns ``None`` when no run_id was supplied. The serving registry pairs
+    the returned path with the configured base model and, when the directory
+    contains a peft adapter, converts it to MLX format before spawning the
+    server (see ``mlx_adapter_conversion`` and the registry's start path).
     """
     if run_id is None:
         return None
-    return Path(run_id)
+    result = await session.execute(select(Run).where(Run.id == run_id))
+    run = result.scalar_one_or_none()
+    if run is None:
+        raise RunNotFoundError(run_id)
+    if run.last_checkpoint_path is None:
+        raise NoCheckpointError(run_id)
+    return Path(run.last_checkpoint_path)
+
+
+def _map_run_lookup_exception(
+    exc: RunNotFoundError | NoCheckpointError,
+) -> HTTPException:
+    if isinstance(exc, RunNotFoundError):
+        return HTTPException(
+            status_code=404,
+            detail={
+                "code": "RUN_NOT_FOUND",
+                "message": str(exc),
+                "details": {"run_id": exc.run_id},
+            },
+        )
+    return HTTPException(
+        status_code=422,
+        detail={
+            "code": "NO_CHECKPOINT_FOR_SERVING",
+            "message": str(exc),
+            "details": {"run_id": exc.run_id},
+        },
+    )
 
 
 def _map_serving_exception(exc: Exception) -> HTTPException:
@@ -184,12 +224,15 @@ def _map_serving_exception(exc: Exception) -> HTTPException:
             detail={"code": "MLX_NOT_INSTALLED", "message": str(exc), "details": {}},
         )
     if isinstance(exc, AdapterConversionUnsupportedError):
+        details: dict[str, object] = {"serving_model_id": exc.serving_model_id}
+        if exc.reason is not None:
+            details["reason"] = exc.reason
         return HTTPException(
             status_code=422,
             detail={
                 "code": "ADAPTER_CONVERSION_UNSUPPORTED",
                 "message": str(exc),
-                "details": {"serving_model_id": exc.serving_model_id},
+                "details": details,
             },
         )
     return HTTPException(

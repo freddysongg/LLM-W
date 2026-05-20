@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import socket
 import sys
 import types
@@ -16,6 +17,7 @@ from app.core.database import Base, get_db_session
 from app.main import app
 from app.models.config_version import ConfigVersion
 from app.models.project import Project
+from app.models.run import Run
 
 
 @pytest.fixture
@@ -196,10 +198,16 @@ async def test_adapter_start_raises_when_mlx_lm_missing(
         await adapter.start()
 
 
-async def test_adapter_start_rejects_non_mlx_serving_model_id(
+async def test_adapter_start_rejects_any_adapter_against_non_mlx_base(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """v1 refuses HF-format ids — adapter conversion is deferred."""
+    """mlx_lm.server cannot host a HuggingFace base regardless of adapter shape.
+
+    The registry converts peft → MLX format upstream, but the adapter itself
+    still refuses an adapter_path against a non-MLX serving_model_id because
+    the converted weights would never match the model architecture loaded by
+    mlx_lm.server.
+    """
     from app.services.cloud import mlx_serving
     from app.services.cloud.mlx_serving import (
         AdapterConversionUnsupportedError,
@@ -660,6 +668,259 @@ async def test_post_serve_with_nonexistent_project_returns_404(
     assert resp.json()["error"]["code"] == "PROJECT_NOT_FOUND"
 
 
+async def test_registry_converts_peft_adapter_when_base_is_mlx(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A peft adapter dir is rewritten into MLX layout before the supervisor starts."""
+    from app.services.cloud import mlx_serving, mlx_serving_registry
+
+    _patch_for_happy_path(monkeypatch)
+
+    spawned_argv: list[list[str]] = []
+
+    async def _capture_spawn(*, argv: list[str], env: dict[str, str]) -> _FakeSubprocess:
+        spawned_argv.append(argv)
+        return _FakeSubprocess()
+
+    monkeypatch.setattr(mlx_serving, "_spawn_subprocess", _capture_spawn)
+
+    peft_adapter = _write_synthetic_peft_adapter(directory=tmp_path / "checkpoint-final")
+
+    await mlx_serving_registry.start_serving(
+        project_id="p1",
+        serving_model_id="mlx-community/Qwen2.5-1.5B-Instruct-4bit",
+        adapter_path=peft_adapter,
+        trust_remote_code=False,
+    )
+
+    converted_dir = peft_adapter.parent / "mlx-adapters" / peft_adapter.name
+    assert (converted_dir / "adapters.safetensors").is_file()
+    assert (converted_dir / "adapter_config.json").is_file()
+
+    argv = spawned_argv[0]
+    adapter_index = argv.index("--adapter-path")
+    assert argv[adapter_index + 1] == str(converted_dir)
+
+
+async def test_registry_rejects_peft_adapter_against_non_mlx_base(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """peft adapter + HF base must fail before any subprocess spawn attempt."""
+    from app.services.cloud import mlx_serving, mlx_serving_registry
+    from app.services.cloud.mlx_serving import AdapterConversionUnsupportedError
+
+    _patch_for_happy_path(monkeypatch)
+
+    async def _explode_spawn(*, argv: list[str], env: dict[str, str]) -> _FakeSubprocess:
+        raise AssertionError("subprocess must not spawn when conversion is rejected")
+
+    monkeypatch.setattr(mlx_serving, "_spawn_subprocess", _explode_spawn)
+
+    peft_adapter = _write_synthetic_peft_adapter(directory=tmp_path / "checkpoint-final")
+
+    with pytest.raises(AdapterConversionUnsupportedError, match="MLX-format base"):
+        await mlx_serving_registry.start_serving(
+            project_id="p1",
+            serving_model_id="Qwen/Qwen2.5-1.5B-Instruct",
+            adapter_path=peft_adapter,
+            trust_remote_code=False,
+        )
+
+
+async def test_registry_surfaces_converter_rejection_as_unsupported(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A QLoRA adapter dir must surface as ADAPTER_CONVERSION_UNSUPPORTED with reason."""
+    from app.services.cloud import mlx_serving, mlx_serving_registry
+    from app.services.cloud.mlx_serving import AdapterConversionUnsupportedError
+
+    _patch_for_happy_path(monkeypatch)
+
+    async def _explode_spawn(*, argv: list[str], env: dict[str, str]) -> _FakeSubprocess:
+        raise AssertionError("subprocess must not spawn when conversion is rejected")
+
+    monkeypatch.setattr(mlx_serving, "_spawn_subprocess", _explode_spawn)
+
+    qlora_adapter = _write_synthetic_peft_adapter(
+        directory=tmp_path / "qlora",
+        config_overrides={"quantization_config": {"bnb_4bit_quant_type": "nf4"}},
+    )
+
+    with pytest.raises(AdapterConversionUnsupportedError) as exc_info:
+        await mlx_serving_registry.start_serving(
+            project_id="p1",
+            serving_model_id="mlx-community/Qwen2.5-1.5B-Instruct-4bit",
+            adapter_path=qlora_adapter,
+            trust_remote_code=False,
+        )
+
+    assert exc_info.value.reason is not None
+    assert "QLoRA" in exc_info.value.reason
+
+
+async def test_registry_passes_non_peft_adapter_path_through_unchanged(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A directory that lacks the peft files is forwarded as-is to mlx_lm.server."""
+    from app.services.cloud import mlx_serving, mlx_serving_registry
+
+    _patch_for_happy_path(monkeypatch)
+
+    captured_argv: list[list[str]] = []
+
+    async def _capture_spawn(*, argv: list[str], env: dict[str, str]) -> _FakeSubprocess:
+        captured_argv.append(argv)
+        return _FakeSubprocess()
+
+    monkeypatch.setattr(mlx_serving, "_spawn_subprocess", _capture_spawn)
+
+    already_mlx = tmp_path / "mlx-adapter"
+    already_mlx.mkdir()
+    (already_mlx / "adapters.safetensors").write_bytes(b"")
+
+    await mlx_serving_registry.start_serving(
+        project_id="p1",
+        serving_model_id="mlx-community/Qwen2.5-1.5B-Instruct-4bit",
+        adapter_path=already_mlx,
+        trust_remote_code=False,
+    )
+
+    argv = captured_argv[0]
+    adapter_index = argv.index("--adapter-path")
+    assert argv[adapter_index + 1] == str(already_mlx)
+    assert not (already_mlx.parent / "mlx-adapters").exists()
+
+
+async def test_post_serve_returns_404_when_run_id_unknown(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_for_happy_path(monkeypatch)
+    project_id = await _seed_project(
+        db_session,
+        serving_model_id="mlx-community/Qwen2.5-1.5B-Instruct-4bit",
+    )
+
+    resp = await client.post(
+        f"/api/v1/projects/{project_id}/serve",
+        json={"run_id": "run-does-not-exist"},
+    )
+    body = resp.json()
+    assert resp.status_code == 404, body
+    assert body["error"]["code"] == "RUN_NOT_FOUND"
+    assert body["error"]["details"]["run_id"] == "run-does-not-exist"
+
+
+async def test_post_serve_returns_422_when_run_has_no_checkpoint(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_for_happy_path(monkeypatch)
+    project_id = await _seed_project(
+        db_session,
+        serving_model_id="mlx-community/Qwen2.5-1.5B-Instruct-4bit",
+    )
+    run_id = await _seed_run(
+        db_session, project_id=project_id, last_checkpoint_path=None
+    )
+
+    resp = await client.post(
+        f"/api/v1/projects/{project_id}/serve",
+        json={"run_id": run_id},
+    )
+    body = resp.json()
+    assert resp.status_code == 422, body
+    assert body["error"]["code"] == "NO_CHECKPOINT_FOR_SERVING"
+    assert body["error"]["details"]["run_id"] == run_id
+
+
+async def test_post_serve_passes_run_checkpoint_path_to_registry(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """When run_id resolves to a checkpoint path, the registry sees that path."""
+    from app.services.cloud import mlx_serving, mlx_serving_registry
+
+    _patch_for_happy_path(monkeypatch)
+
+    received_paths: list[Path | None] = []
+    real_start_serving = mlx_serving_registry.start_serving
+
+    async def _capture_start(**kwargs: Any) -> Any:
+        received_paths.append(kwargs.get("adapter_path"))
+        return await real_start_serving(**kwargs)
+
+    monkeypatch.setattr(mlx_serving_registry, "start_serving", _capture_start)
+    # Avoid touching disk inside the registry's conversion check.
+    monkeypatch.setattr(mlx_serving, "_spawn_subprocess", _fake_spawn_noop)
+
+    checkpoint_dir = tmp_path / "checkpoints" / "step-100"
+    checkpoint_dir.mkdir(parents=True)
+    project_id = await _seed_project(
+        db_session,
+        serving_model_id="mlx-community/Qwen2.5-1.5B-Instruct-4bit",
+    )
+    run_id = await _seed_run(
+        db_session,
+        project_id=project_id,
+        last_checkpoint_path=str(checkpoint_dir),
+    )
+
+    resp = await client.post(
+        f"/api/v1/projects/{project_id}/serve",
+        json={"run_id": run_id},
+    )
+    assert resp.status_code == 200, resp.json()
+    assert received_paths == [checkpoint_dir]
+
+
+async def _fake_spawn_noop(*, argv: list[str], env: dict[str, str]) -> _FakeSubprocess:
+    return _FakeSubprocess()
+
+
+def _write_synthetic_peft_adapter(
+    *,
+    directory: Path,
+    config_overrides: dict[str, Any] | None = None,
+) -> Path:
+    """Materialize a minimal peft LoRA adapter directory for registry tests."""
+    import numpy as np
+    from safetensors.numpy import save_file
+
+    directory.mkdir(parents=True, exist_ok=True)
+    config: dict[str, Any] = {
+        "peft_type": "LORA",
+        "task_type": "CAUSAL_LM",
+        "r": 8,
+        "lora_alpha": 16,
+        "lora_dropout": 0.05,
+        "target_modules": ["q_proj"],
+        "bias": "none",
+        "base_model_name_or_path": "Qwen/Qwen2.5-1.5B",
+    }
+    if config_overrides:
+        config.update(config_overrides)
+    (directory / "adapter_config.json").write_text(
+        json.dumps(config, sort_keys=True), encoding="utf-8"
+    )
+    save_file(
+        {
+            "base_model.model.model.layers.0.self_attn.q_proj.lora_A.weight": np.zeros(
+                (8, 4), dtype=np.float32
+            ),
+            "base_model.model.model.layers.0.self_attn.q_proj.lora_B.weight": np.zeros(
+                (4, 8), dtype=np.float32
+            ),
+        },
+        str(directory / "adapter_model.safetensors"),
+    )
+    return directory
+
+
 def _patch_for_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
     """Wires the fake subprocess + successful health probe used in lifecycle tests."""
     from app.services.cloud import mlx_serving
@@ -711,6 +972,39 @@ async def _seed_project(
     session.add(config)
     await session.commit()
     return project_id
+
+
+async def _seed_run(
+    session: AsyncSession,
+    *,
+    project_id: str,
+    last_checkpoint_path: str | None,
+) -> str:
+    import uuid
+
+    result = await session.execute(
+        ConfigVersion.__table__.select().where(
+            ConfigVersion.project_id == project_id
+        )
+    )
+    config_row = result.first()
+    assert config_row is not None
+    run_id = str(uuid.uuid4())
+    run = Run(
+        id=run_id,
+        project_id=project_id,
+        config_version_id=config_row.id,
+        status="completed",
+        current_step=100,
+        progress_pct=1.0,
+        last_checkpoint_path=last_checkpoint_path,
+        run_type="training",
+        created_at="2026-05-19T11:00:00+00:00",
+        updated_at="2026-05-19T11:00:00+00:00",
+    )
+    session.add(run)
+    await session.commit()
+    return run_id
 
 
 class _FakeSubprocess:

@@ -109,11 +109,45 @@ async def start_serving(
     request is rejected with `ServingCapacityExceededError`. If the same
     project already has a serve running, the old supervisor is stopped first
     so the request behaves as a restart.
+
+    peft adapters paired with an MLX base are converted on the fly to MLX
+    format and the converted directory is used as the effective adapter path.
     """
     from app.services.cloud.mlx_serving import (
+        AdapterConversionUnsupportedError,
         MLXServingAdapter,
         MLXServingConfig,
+        is_mlx_format_model,
     )
+
+    effective_adapter_path = adapter_path
+    if adapter_path is not None:
+        from app.services.cloud.mlx_adapter_conversion import (
+            UnsupportedPeftAdapterError,
+            convert_peft_adapter_to_mlx,
+            is_peft_adapter_directory,
+        )
+
+        if is_peft_adapter_directory(adapter_path):
+            if not is_mlx_format_model(serving_model_id):
+                raise AdapterConversionUnsupportedError(
+                    serving_model_id=serving_model_id,
+                    reason=(
+                        "peft adapter requires an MLX-format base; "
+                        "mlx_lm.server cannot host the supplied HuggingFace base"
+                    ),
+                )
+            converted_dir = adapter_path.parent / "mlx-adapters" / adapter_path.name
+            try:
+                effective_adapter_path = convert_peft_adapter_to_mlx(
+                    source=adapter_path,
+                    destination=converted_dir,
+                )
+            except UnsupportedPeftAdapterError as exc:
+                raise AdapterConversionUnsupportedError(
+                    serving_model_id=serving_model_id,
+                    reason=exc.reason,
+                ) from exc
 
     async with _lock:
         # Drop any entries whose subprocess has exited. Without this sweep, a
@@ -132,7 +166,7 @@ async def start_serving(
         config = MLXServingConfig(
             project_id=project_id,
             serving_model_id=serving_model_id,
-            adapter_path=adapter_path,
+            adapter_path=effective_adapter_path,
             trust_remote_code=trust_remote_code,
         )
         adapter = MLXServingAdapter(config=config)
@@ -143,7 +177,11 @@ async def start_serving(
             adapter=adapter,
             project_id=project_id,
             model_id=serving_model_id,
-            adapter_path=str(adapter_path) if adapter_path is not None else None,
+            adapter_path=(
+                str(effective_adapter_path)
+                if effective_adapter_path is not None
+                else None
+            ),
             started_at=started_at,
         )
         entry.event_drain_task = asyncio.create_task(

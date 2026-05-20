@@ -13,12 +13,12 @@ Two contracts the rest of the codebase depends on:
    cleanly. Consumers must place `MLXServingAdapter` behind `TYPE_CHECKING`
    if they want strict typing without forcing the dependency at import.
 
-2. **Adapter conversion is not implemented in v1.** When `adapter_path`
-   is supplied, the adapter checks the serving_model_id heuristically for
-   MLX format (`mlx-community/...` prefix or a local MLX directory).
-   Mixing a peft (HuggingFace) adapter with a non-MLX base raises
-   `AdapterConversionUnsupportedError`; the converter is a deferred follow-up
-   per `.context/designs/mlx-serving.md` open question section.
+2. **Adapter format is MLX-only at this layer.** The registry converts peft
+   adapters to MLX format before constructing :class:`MLXServingConfig` (see
+   `mlx_adapter_conversion.py`). This adapter therefore assumes
+   `adapter_path` already points at an MLX-format directory; it only refuses
+   the combination of any adapter against a non-MLX base model, because
+   `mlx_lm.server` cannot host a HuggingFace base regardless of adapter shape.
 """
 
 from __future__ import annotations
@@ -88,20 +88,33 @@ class ServingStartupError(Exception):
 
 
 class AdapterConversionUnsupportedError(Exception):
-    """Raised when a peft (HuggingFace) adapter is paired with a non-MLX base.
+    """Raised when an adapter cannot be loaded for the requested serving model.
 
-    v1 ships without adapter conversion. The user must either serve the base
-    model directly or pre-fuse the adapter into an MLX-format base. See
-    `.context/designs/mlx-serving.md` Open Questions for the deferred work.
+    Triggered in two situations:
+
+    * The base model is not MLX-format. ``mlx_lm.server`` cannot host a
+      HuggingFace base regardless of adapter format, so the operator must
+      point ``serving_model_id`` at an MLX-format model
+      (e.g. ``mlx-community/...``).
+    * The adapter is a peft directory that the converter rejected (QLoRA,
+      non-``"none"`` bias, non-LoRA peft type, or non-standard tensor keys).
+      The originating
+      :class:`~app.services.cloud.mlx_adapter_conversion.UnsupportedPeftAdapterError`
+      is chained as ``__cause__``.
     """
 
-    def __init__(self, *, serving_model_id: str) -> None:
-        super().__init__(
-            f"Cannot load HuggingFace/peft adapter against non-MLX base model "
-            f"{serving_model_id!r}. Either point serving_model_id at an "
-            "MLX-format model (e.g. mlx-community/...) or pre-fuse the adapter."
+    def __init__(self, *, serving_model_id: str, reason: str | None = None) -> None:
+        message = (
+            f"Cannot load adapter against base model {serving_model_id!r}. "
+            "Point serving_model_id at an MLX-format model "
+            "(e.g. mlx-community/...) or supply a peft LoRA adapter the "
+            "converter can translate."
         )
+        if reason:
+            message = f"{message} Details: {reason}"
+        super().__init__(message)
         self.serving_model_id = serving_model_id
+        self.reason = reason
 
 
 class _SubprocessLike(Protocol):
@@ -156,7 +169,7 @@ def _import_mlx_lm() -> object:
     return mlx_lm
 
 
-def _is_mlx_format_model(serving_model_id: str) -> bool:
+def is_mlx_format_model(serving_model_id: str) -> bool:
     """Heuristic check: is this id likely an MLX-format model?
 
     True when the id starts with a known MLX namespace prefix or resolves to a
@@ -370,7 +383,7 @@ class MLXServingAdapter:
     def _guard_adapter_compatibility(self) -> None:
         if self._config.adapter_path is None:
             return
-        if not _is_mlx_format_model(self._config.serving_model_id):
+        if not is_mlx_format_model(self._config.serving_model_id):
             raise AdapterConversionUnsupportedError(
                 serving_model_id=self._config.serving_model_id,
             )
