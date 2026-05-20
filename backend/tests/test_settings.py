@@ -152,3 +152,47 @@ async def test_get_settings_reports_modal_token_set_when_env_provided(
     response = await client.get("/api/v1/settings")
     assert response.status_code == 200
     assert response.json()["is_modal_token_set"] is True
+
+
+def test_app_config_defaults_for_pipeline_and_training_knobs() -> None:
+    from app.core.config import AppConfig
+
+    config = AppConfig()
+    assert config.max_allowed_cost_usd == 5.0
+    assert config.max_sandbox_timeout_seconds == 6 * 3600
+    assert config.oom_fallback_recovery_ttl_hours == 24.0
+    assert config.voice_pending_session_ttl_seconds == 60.0
+
+
+def test_max_allowed_cost_usd_reads_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.core.config import AppConfig
+
+    monkeypatch.setenv("MAX_ALLOWED_COST_USD", "12.5")
+    assert AppConfig().max_allowed_cost_usd == 12.5
+
+
+def test_max_sandbox_timeout_seconds_reads_env_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.core.config import AppConfig
+
+    monkeypatch.setenv("MAX_SANDBOX_TIMEOUT_SECONDS", "7200")
+    assert AppConfig().max_sandbox_timeout_seconds == 7200
+
+
+def test_oom_fallback_recovery_ttl_hours_reads_env_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.core.config import AppConfig
+
+    monkeypatch.setenv("OOM_FALLBACK_RECOVERY_TTL_HOURS", "0.5")
+    assert AppConfig().oom_fallback_recovery_ttl_hours == 0.5
+
+
+def test_voice_pending_session_ttl_seconds_reads_env_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.core.config import AppConfig
+
+    monkeypatch.setenv("VOICE_PENDING_SESSION_TTL_SECONDS", "10")
+    assert AppConfig().voice_pending_session_ttl_seconds == 10.0

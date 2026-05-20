@@ -520,7 +520,7 @@ def test_voice_service_evicts_stale_pending_session_on_next_create(
     assert first.status == "pending"
 
     # Within the TTL: second create still blocks.
-    fake_now[0] += voice_service._PENDING_SESSION_TTL_SECONDS - 1.0
+    fake_now[0] += cfg_module.settings.voice_pending_session_ttl_seconds - 1.0
     with pytest.raises(VoiceSessionAlreadyActiveError):
         voice_service.create_session(payload=payload)
 

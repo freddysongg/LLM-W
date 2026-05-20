@@ -53,12 +53,6 @@ _pending_configs: dict[str, VoiceSessionConfig] = {}
 _pending_created_at: dict[str, float] = {}
 _active_handles: dict[str, VoiceSessionHandle] = {}
 
-# Time a pending session can hold the active-session lock before being treated
-# as abandoned. Clients that crash, lose network, or close the tab between
-# `POST /voice/sessions` and the WS upgrade would otherwise leave the lock held
-# until process restart.
-_PENDING_SESSION_TTL_SECONDS: float = 60.0
-
 
 def _reset_active_state() -> None:
     """Clear in-memory voice state. Called from tests and from app startup recovery."""
@@ -84,7 +78,7 @@ def _evict_if_pending_expired() -> None:
     created_at = _pending_created_at.get(_active_session_id)
     if created_at is None:
         return
-    if time.monotonic() - created_at < _PENDING_SESSION_TTL_SECONDS:
+    if time.monotonic() - created_at < settings.voice_pending_session_ttl_seconds:
         return
     _pending_configs.pop(_active_session_id, None)
     _pending_created_at.pop(_active_session_id, None)

@@ -54,11 +54,6 @@ from app.services.training_dispatcher import (
     dispatch_training,
 )
 
-# Hard ceiling for execution.max_estimated_cost_usd. Configs exceeding this are
-# rejected at run-creation time so a misconfigured budget can't silently rack up
-# a multi-hundred-dollar cloud bill. See plan.md "Cloud Budget Defaults".
-_MAX_ALLOWED_COST_USD: float = 5.0
-
 logger = logging.getLogger(__name__)
 
 _STAGE_ORDER: dict[str, int] = {
@@ -364,10 +359,10 @@ def _validate_execution_for_run(*, execution: ExecutionConfig) -> None:
             "dataset first or switch execution.environment to 'local'."
         )
 
-    if execution.max_estimated_cost_usd > _MAX_ALLOWED_COST_USD:
+    if execution.max_estimated_cost_usd > settings.max_allowed_cost_usd:
         raise UnsupportedEnvironmentError(
             f"execution.max_estimated_cost_usd ({execution.max_estimated_cost_usd}) "
-            f"exceeds the hard cap of ${_MAX_ALLOWED_COST_USD}. Lower the budget or "
+            f"exceeds the hard cap of ${settings.max_allowed_cost_usd}. Lower the budget or "
             "raise the cap explicitly."
         )
 
@@ -396,12 +391,12 @@ def _enforce_worst_case_cost_cap(*, gpu_type: str, max_run_minutes: int) -> None
     """
     gpu_rate = get_modal_gpu_rate_usd_per_second(gpu_type=gpu_type)
     worst_case_cost_usd = max_run_minutes * 60 * gpu_rate
-    if worst_case_cost_usd > _MAX_ALLOWED_COST_USD:
+    if worst_case_cost_usd > settings.max_allowed_cost_usd:
         raise UnsupportedEnvironmentError(
             f"Worst-case spend for modal_gpu_type='{gpu_type}' over "
             f"max_run_minutes={max_run_minutes} is "
             f"${worst_case_cost_usd:.2f}, which exceeds the hard cap of "
-            f"${_MAX_ALLOWED_COST_USD}. Lower max_run_minutes or choose a cheaper GPU."
+            f"${settings.max_allowed_cost_usd}. Lower max_run_minutes or choose a cheaper GPU."
         )
 
 
@@ -1422,7 +1417,7 @@ def _filter_fallback_candidates(
         if option is None:
             continue
         worst_case = max_run_minutes * 60 * (option.rate_usd_hr / 3600.0)
-        if worst_case > _MAX_ALLOWED_COST_USD:
+        if worst_case > settings.max_allowed_cost_usd:
             continue
         candidates.append(option)
     return candidates

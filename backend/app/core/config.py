@@ -37,6 +37,11 @@ class AppConfig(BaseSettings):
     cartesia_api_key: str | None = None
     openai_api_key: str | None = None
 
+    max_allowed_cost_usd: float = 5.0
+    max_sandbox_timeout_seconds: int = 6 * 3600
+    oom_fallback_recovery_ttl_hours: float = 24.0
+    voice_pending_session_ttl_seconds: float = 60.0
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 

@@ -6,12 +6,14 @@ import json
 import logging
 import os
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
 import modal
+
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -175,11 +177,6 @@ class TrainingProcess(Protocol):
     async def wait(self) -> int: ...
 
 
-# Hard ceiling on sandbox lifetime regardless of the configured budget — Modal
-# sandboxes cannot run forever. Six hours matches the prior default and is the
-# fallback when no per-run budget is supplied.
-_MAX_SANDBOX_TIMEOUT_SECONDS: int = 6 * 3600
-
 # Cap on stderr tail captured for OOM detection. The detector only needs the
 # trailing message, and the orchestrator persists this string into the failure
 # reason — keeping it bounded prevents a 100MB stderr from blowing up the DB row.
@@ -213,7 +210,9 @@ class ModalAdapterConfig:
     modal_token_secret: str
     heartbeat_path: Path
     heartbeat_interval_seconds: int = 10
-    sandbox_timeout_seconds: int = _MAX_SANDBOX_TIMEOUT_SECONDS
+    sandbox_timeout_seconds: int = field(
+        default_factory=lambda: settings.max_sandbox_timeout_seconds
+    )
     resume_from_checkpoint: str | None = None
 
 
@@ -268,7 +267,7 @@ class ModalTrainingAdapter:
         # request a sandbox lifetime longer than Modal will actually allow.
         timeout_seconds = min(
             max(self._config.sandbox_timeout_seconds, 60),
-            _MAX_SANDBOX_TIMEOUT_SECONDS,
+            settings.max_sandbox_timeout_seconds,
         )
         self._sandbox = await modal.Sandbox.create.aio(
             image=image,
