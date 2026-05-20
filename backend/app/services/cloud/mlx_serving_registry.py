@@ -70,6 +70,20 @@ def get_status(*, project_id: str) -> ServingStatus:
             state="stopped",
         )
     adapter = entry.adapter
+    if not adapter.is_subprocess_alive:
+        # The mlx_lm subprocess exited without going through stop_serving — the
+        # registry was holding a stale entry that would otherwise keep
+        # advertising state="running" and a base_url that no longer answers.
+        # Evict the entry and signal the failure to the caller. The drain task
+        # cleanup is handled lazily on the next stop_serving / shutdown.
+        exit_code = adapter.last_exit_code
+        _active.pop(project_id, None)
+        return ServingStatus(
+            project_id=project_id,
+            state="failed",
+            last_error=entry.last_error
+            or f"MLX serving subprocess exited unexpectedly (exit_code={exit_code})",
+        )
     return ServingStatus(
         project_id=project_id,
         state="running",

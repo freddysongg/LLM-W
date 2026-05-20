@@ -419,6 +419,38 @@ async def test_registry_starts_and_returns_status(
     assert after_stop.state == "stopped"
 
 
+async def test_registry_get_status_evicts_dead_entry_and_reports_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Subprocess that exits without going through stop_serving must surface as failed."""
+    from app.services.cloud import mlx_serving_registry
+
+    _patch_for_happy_path(monkeypatch)
+
+    await mlx_serving_registry.start_serving(
+        project_id="p1",
+        serving_model_id="mlx-community/Qwen2.5-1.5B-Instruct-4bit",
+        adapter_path=None,
+        trust_remote_code=False,
+    )
+
+    entry = mlx_serving_registry._active["p1"]
+    # Simulate the subprocess dying on its own (not via stop_serving).
+    entry.adapter._state.proc._returncode = 137
+
+    status = mlx_serving_registry.get_status(project_id="p1")
+    assert status.state == "failed"
+    assert status.last_error is not None
+    assert "137" in status.last_error or "exited" in status.last_error
+
+    # Stale entry must be removed so a subsequent start can claim capacity.
+    assert "p1" not in mlx_serving_registry._active
+
+    # Idempotent: a second get_status returns the stopped state cleanly.
+    again = mlx_serving_registry.get_status(project_id="p1")
+    assert again.state == "stopped"
+
+
 async def test_registry_rejects_capacity_exceeded(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

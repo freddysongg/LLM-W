@@ -334,12 +334,24 @@ class MLXServingAdapter:
         await self._state.event_queue.put(None)
 
     async def is_alive(self) -> bool:
+        return self.is_subprocess_alive
+
+    @property
+    def is_subprocess_alive(self) -> bool:
+        """Sync alive check usable from non-async paths like the registry."""
         if self._state.is_terminated:
             return False
         proc = self._state.proc
         if proc is None:
             return False
         return proc.returncode is None
+
+    @property
+    def last_exit_code(self) -> int | None:
+        proc = self._state.proc
+        if proc is None:
+            return None
+        return proc.returncode
 
     async def wait(self) -> int:
         proc = self._state.proc
