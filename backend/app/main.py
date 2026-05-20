@@ -13,6 +13,7 @@ from app.api.routes.configs import router as configs_router
 from app.api.routes.datasets import router as datasets_router
 from app.api.routes.eval import router as eval_router
 from app.api.routes.health import router as health_router
+from app.api.routes.mlx_serving import router as mlx_serving_router
 from app.api.routes.models import router as models_router
 from app.api.routes.projects import router as projects_router
 from app.api.routes.rubrics import router as rubrics_router
@@ -20,10 +21,12 @@ from app.api.routes.runs import router as runs_router
 from app.api.routes.settings import router as settings_router
 from app.api.routes.storage import router as storage_router
 from app.api.routes.suggestions import router as suggestions_router
+from app.api.routes.voice import router as voice_router
 from app.api.websocket.handler import router as ws_router
 from app.api.websocket.stream import connection_manager
 from app.core.config import settings
 from app.core.database import async_session_factory, create_tables
+from app.services.cloud import mlx_serving_registry
 from app.services.eval_runner import drain_in_flight_tasks, recover_stale_eval_runs
 from app.services.settings_service import _load_persisted_overrides
 from app.services.watchdog import recover_stale_runs
@@ -41,6 +44,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
     await connection_manager.stop_resource_poller()
     await drain_in_flight_tasks(timeout_s=10.0)
+    await mlx_serving_registry.shutdown_all()
 
 
 app = FastAPI(
@@ -69,6 +73,8 @@ app.include_router(storage_router)
 app.include_router(suggestions_router)
 app.include_router(eval_router)
 app.include_router(rubrics_router)
+app.include_router(mlx_serving_router)
+app.include_router(voice_router)
 app.include_router(ws_router)
 
 

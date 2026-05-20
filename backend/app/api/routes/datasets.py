@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -8,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db_session
 from app.core.exceptions import (
     ConfigVersionNotFoundError,
+    DatasetNormalizationError,
     DatasetNotResolvedError,
     DatasetResolveError,
     ProjectNotFoundError,
@@ -20,7 +22,11 @@ from app.schemas.dataset import (
     PreviewTransformResponse,
     TokenStats,
 )
-from app.services import dataset_service, project_service
+from app.schemas.dataset_sanitizer import (
+    SanitizeDatasetRequest,
+    SanitizeDatasetResponse,
+)
+from app.services import dataset_sanitizer, dataset_service, project_service
 
 router = APIRouter(prefix="/api/v1/projects", tags=["datasets"])
 
@@ -152,3 +158,49 @@ async def preview_transform(
             status_code=404,
             detail={"code": "DATASET_NOT_RESOLVED", "message": str(exc), "details": {}},
         ) from exc
+
+
+@router.post(
+    "/{project_id}/datasets/sanitize",
+    response_model=SanitizeDatasetResponse,
+    status_code=200,
+)
+async def sanitize_dataset(
+    project_id: str,
+    payload: SanitizeDatasetRequest,
+    session: DbSession,
+) -> SanitizeDatasetResponse:
+    try:
+        project = await project_service.get_project(session=session, project_id=project_id)
+    except ProjectNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "PROJECT_NOT_FOUND", "message": str(exc), "details": {}},
+        ) from exc
+    rows = dataset_service.get_resolved_rows(project_id=project_id)
+    if rows is None:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "DATASET_NOT_RESOLVED",
+                "message": "Dataset must be resolved before sanitization",
+                "details": {"project_id": project_id},
+            },
+        )
+    try:
+        response = dataset_sanitizer.run_sanitization_pipeline(rows=rows, request=payload)
+    except DatasetNormalizationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "DATASET_NORMALIZATION_ERROR",
+                "message": exc.message,
+                "details": {"source_format": payload.source_format},
+            },
+        ) from exc
+    if payload.persist:
+        dataset_sanitizer.persist_sanitized_artifact(
+            project_dir=Path(project.directory_path),
+            response=response,
+        )
+    return response

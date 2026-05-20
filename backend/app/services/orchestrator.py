@@ -33,7 +33,7 @@ from app.models.run_stage import RunStage
 from app.models.weight_snapshot import WeightSnapshot
 from app.schemas.run import RunCreate, RunResponse
 from app.schemas.workbench_config import ExecutionConfig
-from app.services import suggestion_service
+from app.services import settings_service, suggestion_service
 from app.services.config_service import serialize_config_yaml_snapshot
 from app.services.storage_manager import (
     apply_retention_after_checkpoint,
@@ -44,6 +44,23 @@ from app.services.training_dispatcher import (
     UnsupportedEnvironmentError,
     dispatch_training,
 )
+
+# Hard ceiling for execution.max_estimated_cost_usd. Configs exceeding this are
+# rejected at run-creation time so a misconfigured budget can't silently rack up
+# a multi-hundred-dollar cloud bill. See plan.md "Cloud Budget Defaults".
+_MAX_ALLOWED_COST_USD: float = 5.0
+
+# Modal-published USD-per-second GPU rates (rounded from the per-hour pricing on
+# https://modal.com/pricing as of 2025). Used to compute Run.cost_usd at terminal
+# transitions. Keys mirror ExecutionConfig.modal_gpu_type literals.
+_GPU_USD_PER_SECOND: dict[str, float] = {
+    "t4": 0.000164,
+    "a10": 0.000306,
+    "l40s": 0.000542,
+    "a100-40gb": 0.000900,
+    "a100-80gb": 0.001067,
+    "h100": 0.001442,
+}
 
 logger = logging.getLogger(__name__)
 
@@ -190,17 +207,15 @@ async def create_run(
     if config_version is None:
         raise ConfigVersionNotFoundError(payload.config_version_id)
 
-    # Validate execution environment before creating the run — avoids orphaned failed runs.
+    # Validate execution config before creating the run — avoids orphaned failed runs.
     raw_config: dict[str, object] = yaml.safe_load(config_version.yaml_blob) or {}
     execution_raw = raw_config.get("execution", {})
     execution_cfg = ExecutionConfig.model_validate(
         execution_raw if isinstance(execution_raw, dict) else {}
     )
-    if execution_cfg.environment != "local":
-        raise UnsupportedEnvironmentError(
-            f"Execution environment '{execution_cfg.environment}' is not yet supported. "
-            "Set execution.environment to 'local' or wait for the modal adapter to be enabled."
-        )
+    _validate_execution_for_run(execution=execution_cfg)
+    if execution_cfg.environment == "modal" and execution_cfg.data_policy == "sanitized_cloud":
+        _require_sanitized_artifact(project_dir=Path(project.directory_path))
 
     run_id = str(uuid.uuid4())
     now = datetime.now(UTC).isoformat()
@@ -214,6 +229,11 @@ async def create_run(
         current_step=0,
         progress_pct=0.0,
         heartbeat_path=str(settings.projects_dir / project.name / ".heartbeat"),
+        environment=execution_cfg.environment,
+        modal_gpu_type=(
+            execution_cfg.modal_gpu_type if execution_cfg.environment == "modal" else None
+        ),
+        device=execution_cfg.device,
         created_at=now,
         updated_at=now,
     )
@@ -243,6 +263,15 @@ async def create_run(
         config_yaml=config_version.yaml_blob,
     )
 
+    execution_summary = _execution_summary(execution=execution_cfg)
+    logger.info(
+        "run_created",
+        extra={
+            "run_id": run_id,
+            "project_id": project_id,
+            "execution": execution_summary,
+        },
+    )
     await event_bus.publish(
         event_type=f"project.{project_id}.ws",
         payload={
@@ -254,6 +283,7 @@ async def create_run(
                 "runId": run_id,
                 "configVersionId": payload.config_version_id,
                 "status": "pending",
+                "execution": execution_summary,
             },
         },
     )
@@ -288,12 +318,118 @@ async def create_run(
     return run
 
 
+def _validate_execution_for_run(*, execution: ExecutionConfig) -> None:
+    """Reject configs that would launch an unsupported, unsafe, or over-budget run.
+
+    Local runs are always allowed. Modal runs require sanitized data, a configured
+    Modal token pair, and an estimated cost within the hard ceiling.
+    """
+    if execution.environment == "local":
+        return
+    if execution.environment != "modal":
+        raise UnsupportedEnvironmentError(
+            f"Execution environment '{execution.environment}' is not supported. "
+            "Set execution.environment to 'local' or 'modal'."
+        )
+
+    if execution.data_policy == "local_raw":
+        raise UnsupportedEnvironmentError(
+            "Modal runs require execution.data_policy='sanitized_cloud'. "
+            "Raw local logs must not be uploaded to cloud GPUs — sanitize the "
+            "dataset first or switch execution.environment to 'local'."
+        )
+
+    if execution.max_estimated_cost_usd > _MAX_ALLOWED_COST_USD:
+        raise UnsupportedEnvironmentError(
+            f"execution.max_estimated_cost_usd ({execution.max_estimated_cost_usd}) "
+            f"exceeds the hard cap of ${_MAX_ALLOWED_COST_USD}. Lower the budget or "
+            "raise the cap explicitly."
+        )
+
+    # The user-supplied budget is a self-report; the actual ceiling is GPU rate ×
+    # sandbox timeout, since the sandbox can run for the full `max_run_minutes`
+    # window regardless of what the user estimated. Reject when that ceiling
+    # exceeds the cap so a slow H100 config can't outspend the budget.
+    gpu_rate = _GPU_USD_PER_SECOND.get(execution.modal_gpu_type, 0.0)
+    worst_case_cost_usd = execution.max_run_minutes * 60 * gpu_rate
+    if worst_case_cost_usd > _MAX_ALLOWED_COST_USD:
+        raise UnsupportedEnvironmentError(
+            f"Worst-case spend for modal_gpu_type='{execution.modal_gpu_type}' over "
+            f"max_run_minutes={execution.max_run_minutes} is "
+            f"${worst_case_cost_usd:.2f}, which exceeds the hard cap of "
+            f"${_MAX_ALLOWED_COST_USD}. Lower max_run_minutes or choose a cheaper GPU."
+        )
+
+    if settings_service.get_modal_credentials() is None:
+        raise UnsupportedEnvironmentError(
+            "Modal training requires modal_token_id and modal_token_secret to be "
+            "configured under workbench settings before launching a cloud run."
+        )
+
+
+_SANITIZED_DATASET_FILENAME = "sanitized.jsonl"
+
+
+def _require_sanitized_artifact(*, project_dir: Path) -> None:
+    """Refuse Modal runs that don't have a sanitized dataset artifact on disk.
+
+    The `sanitized_cloud` data policy is the contract that only redacted rows
+    leave the host. Without a persisted sanitized artifact, the only thing the
+    adapter could upload is the raw `datasets/` directory — which would violate
+    the policy. This gate enforces that the artifact must exist before the run
+    is created. Operators produce it via POST /api/v1/projects/{id}/datasets/sanitize.
+    """
+    artifact = project_dir / "datasets" / _SANITIZED_DATASET_FILENAME
+    if not artifact.is_file():
+        raise UnsupportedEnvironmentError(
+            f"Modal runs with data_policy='sanitized_cloud' require a sanitized "
+            f"artifact at {artifact}. Call POST /api/v1/projects/{{project_id}}/"
+            f"datasets/sanitize with persist=true before launching the run."
+        )
+
+
+def _execution_summary(*, execution: ExecutionConfig) -> dict[str, Any]:
+    """Return a minimal, JSON-serializable view of the execution config.
+
+    Surfaced via the run_created WebSocket event so the UI and operator logs
+    can show GPU type, environment, and the budget that gated this run.
+    """
+    return {
+        "environment": execution.environment,
+        "modalGpuType": execution.modal_gpu_type,
+        "maxRunMinutes": execution.max_run_minutes,
+        "maxEstimatedCostUsd": execution.max_estimated_cost_usd,
+        "dataPolicy": execution.data_policy,
+    }
+
+
 def _resolve_config_path(*, config_version: ConfigVersion, project_dir: Path) -> Path:
     config_path = project_dir / "configs" / f"version-{config_version.version_number}.yaml"
     if not config_path.exists():
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(config_version.yaml_blob)
     return config_path
+
+
+def _load_execution_config(*, config_path: Path) -> ExecutionConfig:
+    raw_config: dict[str, object] = yaml.safe_load(config_path.read_text()) or {}
+    execution_raw = raw_config.get("execution", {})
+    execution_dict = execution_raw if isinstance(execution_raw, dict) else {}
+    return ExecutionConfig.model_validate(execution_dict)
+
+
+async def _load_run_started_iso(*, run_id: str) -> str | None:
+    """Return the canonical run-start ISO timestamp used as the cost-meter anchor.
+
+    Prefers `Run.started_at` (written on the first `stage_enter` event, i.e. when
+    the trainer actually entered a stage) and falls back to `Run.created_at` for
+    runs that crashed before any stage was reported.
+    """
+    async with async_session_factory() as session:
+        run = await session.get(Run, run_id)
+        if run is None:
+            return None
+        return run.started_at or run.created_at
 
 
 async def _update_run_status(
@@ -308,6 +444,9 @@ async def _update_run_status(
     failure_stage: str | None = None,
     pid: int | None = None,
     last_checkpoint_path: str | None = None,
+    cost_usd: float | None = None,
+    wall_clock_s: float | None = None,
+    started_at: str | None = None,
 ) -> None:
     async with async_session_factory() as session:
         run = await session.get(Run, run_id)
@@ -334,7 +473,36 @@ async def _update_run_status(
             run.pid = pid
         if last_checkpoint_path is not None:
             run.last_checkpoint_path = last_checkpoint_path
+        if cost_usd is not None:
+            run.cost_usd = cost_usd
+        if wall_clock_s is not None:
+            run.wall_clock_s = wall_clock_s
+        # First-stage write only — later stages must not reset the cost anchor.
+        if started_at is not None and run.started_at is None:
+            run.started_at = started_at
         await session.commit()
+
+
+def _compute_run_cost(
+    *,
+    execution: ExecutionConfig,
+    started_iso: str,
+    ended_iso: str,
+) -> tuple[float, float]:
+    """Return (wall_clock_seconds, cost_usd) for a terminal run.
+
+    Cost is zero for local execution. For Modal runs, cost is the elapsed wall
+    clock seconds multiplied by the published per-second GPU rate. Wall clock
+    is clamped at zero to absorb clock skew that would otherwise produce a
+    negative cost.
+    """
+    started = datetime.fromisoformat(started_iso)
+    ended = datetime.fromisoformat(ended_iso)
+    wall_clock_s = max(0.0, (ended - started).total_seconds())
+    if execution.environment != "modal":
+        return (wall_clock_s, 0.0)
+    rate = _GPU_USD_PER_SECOND.get(execution.modal_gpu_type, 0.0)
+    return (wall_clock_s, wall_clock_s * rate)
 
 
 async def _update_stage(
@@ -427,9 +595,7 @@ async def _record_artifact(
         await session.commit()
 
 
-async def _extract_model_identity(
-    *, session: AsyncSession, run: Run
-) -> tuple[str, str, str]:
+async def _extract_model_identity(*, session: AsyncSession, run: Run) -> tuple[str, str, str]:
     """Derive (model_id, source, family) from the run's ConfigVersion YAML.
 
     The Run table has no direct model columns, so identity is sourced from the
@@ -597,6 +763,7 @@ async def _process_trainer_event(
             run_id=run_id,
             status="running",
             current_stage=stage_name,
+            started_at=timestamp,
         )
         await event_bus.publish(
             event_type=f"project.{project_id}.ws",
@@ -926,6 +1093,10 @@ async def _run_trainer_subprocess(
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file_path = log_dir / f"{run_id}.log"
 
+    # Read execution config up front so terminal cost accounting still works
+    # even if the YAML on disk is later mutated by an unrelated edit.
+    execution_cfg = _load_execution_config(config_path=config_path)
+
     try:
         proc = await dispatch_training(
             run_id=run_id,
@@ -1037,9 +1208,23 @@ async def _run_trainer_subprocess(
                 captured_failure_reason = f"Trainer process exited with code {proc.returncode}"
 
         now = datetime.now(UTC).isoformat()
+        started_iso = await _load_run_started_iso(run_id=run_id)
+        wall_clock_s, cost_usd = (0.0, 0.0)
+        if started_iso is not None:
+            wall_clock_s, cost_usd = _compute_run_cost(
+                execution=execution_cfg,
+                started_iso=started_iso,
+                ended_iso=now,
+            )
+
         if terminal_status == "completed":
             await _mark_pending_stages_skipped(run_id=run_id)
-            await _update_run_status(run_id=run_id, status="completed")
+            await _update_run_status(
+                run_id=run_id,
+                status="completed",
+                cost_usd=cost_usd,
+                wall_clock_s=wall_clock_s,
+            )
             async with async_session_factory() as session:
                 await _run_final_retention_sweep(session=session, project_id=project_id)
             await event_bus.publish(
@@ -1053,6 +1238,8 @@ async def _run_trainer_subprocess(
                         "runId": run_id,
                         "totalDurationMs": 0,
                         "finalMetrics": final_metrics,
+                        "costUsd": cost_usd,
+                        "wallClockS": wall_clock_s,
                     },
                 },
             )
@@ -1065,7 +1252,12 @@ async def _run_trainer_subprocess(
             analysis_task.add_done_callback(_log_background_task_exception)
         elif terminal_status == "cancelled":
             await _mark_pending_stages_skipped(run_id=run_id)
-            await _update_run_status(run_id=run_id, status="cancelled")
+            await _update_run_status(
+                run_id=run_id,
+                status="cancelled",
+                cost_usd=cost_usd,
+                wall_clock_s=wall_clock_s,
+            )
             async with async_session_factory() as session:
                 await _run_final_retention_sweep(session=session, project_id=project_id)
             await event_bus.publish(
@@ -1075,7 +1267,11 @@ async def _run_trainer_subprocess(
                     "event": "run_cancelled",
                     "runId": run_id,
                     "timestamp": now,
-                    "payload": {"runId": run_id},
+                    "payload": {
+                        "runId": run_id,
+                        "costUsd": cost_usd,
+                        "wallClockS": wall_clock_s,
+                    },
                 },
             )
         else:
@@ -1085,6 +1281,8 @@ async def _run_trainer_subprocess(
                 status="failed",
                 failure_reason=captured_failure_reason,
                 failure_stage=captured_failure_stage or None,
+                cost_usd=cost_usd,
+                wall_clock_s=wall_clock_s,
             )
             async with async_session_factory() as session:
                 await _run_final_retention_sweep(session=session, project_id=project_id)
@@ -1100,6 +1298,8 @@ async def _run_trainer_subprocess(
                         "failureReason": captured_failure_reason,
                         "failureStage": captured_failure_stage or None,
                         "lastStep": 0,
+                        "costUsd": cost_usd,
+                        "wallClockS": wall_clock_s,
                     },
                 },
             )

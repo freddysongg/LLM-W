@@ -9,6 +9,7 @@ import { ModelIdInput } from "@/components/model/model-id-input";
 import { ModelResolveButton } from "@/components/model/model-resolve-button";
 import { ArchitectureDiagram } from "@/components/model/architecture-diagram";
 import { RegisterModelModal } from "@/components/model/register-model-modal";
+import { ServingActions, ServingStatusRow } from "@/components/model/serving-panel";
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -137,9 +138,11 @@ function formatDiskEstimate(vramGb: number): string {
 function buildActiveKvRows({
   profile,
   architecture,
+  projectId,
 }: {
   readonly profile: ModelProfile;
   readonly architecture: ModelArchitectureResponse | undefined;
+  readonly projectId: string;
 }): ReadonlyArray<{ readonly key: string; readonly value: React.ReactNode }> {
   const layersLabel = architecture
     ? `${(architecture.tree.children ?? []).length || "—"} · params ${formatParamCount(architecture.total_parameters)}`
@@ -156,6 +159,7 @@ function buildActiveKvRows({
     { key: "Dtype", value: profile.torch_dtype },
     { key: "Disk", value: formatDiskEstimate(profile.resource_estimate.disk_gb) },
     { key: "License", value: "—" },
+    { key: "Serving", value: <ServingStatusRow projectId={projectId} /> },
   ];
 }
 
@@ -201,8 +205,8 @@ export default function ModelsPage(): React.JSX.Element {
 
   const canResolve = Boolean(projectId) && modelForm.modelId.trim().length > 0;
   const activeKvRows = React.useMemo(
-    () => (profile ? buildActiveKvRows({ profile, architecture }) : []),
-    [profile, architecture],
+    () => (profile ? buildActiveKvRows({ profile, architecture, projectId }) : []),
+    [profile, architecture, projectId],
   );
 
   return (
@@ -332,10 +336,13 @@ export default function ModelsPage(): React.JSX.Element {
                         <KVList rows={activeKvRows} />
                       </CardContent>
                       <CardFooter>
-                        <Button variant="outline" size="sm" onClick={() => navigate("/weights")}>
-                          <Layers className="size-3" aria-hidden="true" />
-                          Inspect weights
-                        </Button>
+                        <div className="flex items-center gap-2">
+                          <Button variant="outline" size="sm" onClick={() => navigate("/weights")}>
+                            <Layers className="size-3" aria-hidden="true" />
+                            Inspect weights
+                          </Button>
+                          <ServingActions projectId={projectId} />
+                        </div>
                         <div className="flex items-center gap-2">
                           <Button
                             variant="outline"

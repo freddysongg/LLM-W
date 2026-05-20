@@ -24,6 +24,13 @@ class AppConfig(BaseSettings):
     watchdog_stale_timeout_seconds: int = 120
     watchdog_heartbeat_interval_seconds: int = 10
 
+    modal_token_id: str | None = None
+    modal_token_secret: str | None = None
+
+    deepgram_api_key: str | None = None
+    cartesia_api_key: str | None = None
+    openai_api_key: str | None = None
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 

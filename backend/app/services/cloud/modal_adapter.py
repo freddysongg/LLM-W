@@ -18,14 +18,85 @@ logger = logging.getLogger(__name__)
 _GPU_TYPE_MAP: dict[str, str] = {
     "t4": "T4",
     "a10": "A10G",
+    "l40s": "L40S",
     "a100-40gb": "A100",
     "a100-80gb": "A100-80GB",
     "h100": "H100",
 }
 
+_DEFAULT_MODAL_GPU: str = "A10G"
+
+
+def is_valid_modal_gpu_type(gpu_type: str) -> bool:
+    """Return True if gpu_type maps to a Modal GPU spec the adapter knows about."""
+    return gpu_type in _GPU_TYPE_MAP
+
+
+def resolve_modal_gpu_spec(gpu_type: str) -> str | None:
+    """Return the Modal GPU spec string (e.g. 'A10G') for a workbench GPU type.
+
+    Returns None when the GPU type is not recognized — callers must validate
+    via `is_valid_modal_gpu_type` first when they need to distinguish missing
+    keys from a valid default.
+    """
+    return _GPU_TYPE_MAP.get(gpu_type)
+
+
 _WORKSPACE_ROOT = "/workspace"
 _WORKSPACE_CONFIGS = f"{_WORKSPACE_ROOT}/configs"
 _WORKSPACE_DATASETS = f"{_WORKSPACE_ROOT}/datasets"
+
+_SANITIZED_DATASET_FILENAME = "sanitized.jsonl"
+_SANITIZED_MANIFEST_FILENAME = "sanitized.meta.json"
+
+
+class SanitizedArtifactMissingError(RuntimeError):
+    """Raised when the adapter cannot find a persisted sanitized dataset.
+
+    The orchestrator gate at `_require_sanitized_artifact` should catch this
+    earlier; this exception is the defense-in-depth check at the upload
+    boundary so raw datasets are never sent even if the gate is bypassed.
+    """
+
+
+@dataclass(frozen=True)
+class ModalUploadPlan:
+    """Files and directories the adapter will upload to the Modal volume.
+
+    Only the sanitized dataset artifact (and its optional manifest) is
+    uploaded under `datasets/`. The raw `datasets/` directory is never sent.
+    """
+
+    files: tuple[tuple[Path, str], ...]
+    directories: tuple[tuple[Path, str], ...]
+
+
+def build_modal_upload_plan(*, project_dir: Path, config_path: Path) -> ModalUploadPlan:
+    """Return the upload plan for a Modal cloud run.
+
+    Modal runs require `data_policy=sanitized_cloud`, which means a persisted
+    sanitized artifact at `datasets/sanitized.jsonl` must exist. Raises when
+    the artifact is absent so the upload pipeline cannot send raw data.
+    """
+    sanitized = project_dir / "datasets" / _SANITIZED_DATASET_FILENAME
+    if not sanitized.is_file():
+        raise SanitizedArtifactMissingError(
+            f"Modal upload requires a sanitized dataset artifact at {sanitized}. "
+            "Call POST /api/v1/projects/{project_id}/datasets/sanitize with "
+            "persist=true before launching the cloud run."
+        )
+    files: list[tuple[Path, str]] = [
+        (config_path, f"{_WORKSPACE_CONFIGS}/{config_path.name}"),
+        (sanitized, f"{_WORKSPACE_DATASETS}/{sanitized.name}"),
+    ]
+    manifest = project_dir / "datasets" / _SANITIZED_MANIFEST_FILENAME
+    if manifest.is_file():
+        files.append((manifest, f"{_WORKSPACE_DATASETS}/{manifest.name}"))
+    directories: list[tuple[Path, str]] = []
+    configs_dir = project_dir / "configs"
+    if configs_dir.is_dir():
+        directories.append((configs_dir, _WORKSPACE_CONFIGS))
+    return ModalUploadPlan(files=tuple(files), directories=tuple(directories))
 
 
 def _workspace_checkpoints_path(run_id: str) -> str:
@@ -61,6 +132,29 @@ class TrainingProcess(Protocol):
     async def wait(self) -> int: ...
 
 
+# Hard ceiling on sandbox lifetime regardless of the configured budget — Modal
+# sandboxes cannot run forever. Six hours matches the prior default and is the
+# fallback when no per-run budget is supplied.
+_MAX_SANDBOX_TIMEOUT_SECONDS: int = 6 * 3600
+
+# Packages installed into the Modal training image. `accelerate` is required by
+# the trainer's launch wrapper; `bitsandbytes` is required by QLoRA / 4-bit
+# quantization paths — without it `adapters.type=qlora` configs raise at model
+# resolution time even though the config validates locally.
+_TRAINING_IMAGE_PACKAGES: tuple[str, ...] = (
+    "torch>=2.2.0",
+    "transformers>=4.40.0",
+    "accelerate>=0.30.0",
+    "peft>=0.10.0",
+    "trl>=0.9.0",
+    "datasets>=2.0.0",
+    "bitsandbytes>=0.43.0",
+    "pyyaml>=6.0.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+)
+
+
 @dataclass(frozen=True)
 class ModalAdapterConfig:
     run_id: str
@@ -71,6 +165,7 @@ class ModalAdapterConfig:
     modal_token_secret: str
     heartbeat_path: Path
     heartbeat_interval_seconds: int = 10
+    sandbox_timeout_seconds: int = _MAX_SANDBOX_TIMEOUT_SECONDS
     resume_from_checkpoint: str | None = None
 
 
@@ -103,12 +198,18 @@ class ModalTrainingAdapter:
             ignore=_should_ignore_backend_path,
         )
 
-        gpu_spec = _GPU_TYPE_MAP.get(self._config.gpu_type, "T4")
+        gpu_spec = _GPU_TYPE_MAP.get(self._config.gpu_type, _DEFAULT_MODAL_GPU)
+        # Clamp to a sane bound — a misconfigured timeout shouldn't be able to
+        # request a sandbox lifetime longer than Modal will actually allow.
+        timeout_seconds = min(
+            max(self._config.sandbox_timeout_seconds, 60),
+            _MAX_SANDBOX_TIMEOUT_SECONDS,
+        )
         self._sandbox = await modal.Sandbox.create.aio(
             image=image,
             gpu=gpu_spec,
             volumes={_WORKSPACE_ROOT: self._volume},
-            timeout=6 * 3600,
+            timeout=timeout_seconds,
         )
 
         config_name = self._config.config_path.name
@@ -196,34 +297,26 @@ class ModalTrainingAdapter:
         return self._exit_code if self._exit_code is not None else 1
 
     async def _upload_training_data(self, *, volume: modal.Volume) -> None:
-        config_path = self._config.config_path
-        project_dir = self._config.project_dir
-        datasets_dir = project_dir / "datasets"
-        configs_dir = project_dir / "configs"
+        plan = build_modal_upload_plan(
+            project_dir=self._config.project_dir,
+            config_path=self._config.config_path,
+        )
 
         loop = asyncio.get_running_loop()
 
         def _sync_upload() -> None:
             with volume.batch_upload() as batch:
-                batch.put_file(str(config_path), f"{_WORKSPACE_CONFIGS}/{config_path.name}")
-                if datasets_dir.exists():
-                    batch.put_directory(str(datasets_dir), _WORKSPACE_DATASETS)
-                if configs_dir.exists():
-                    batch.put_directory(str(configs_dir), _WORKSPACE_CONFIGS)
+                for local, remote in plan.files:
+                    batch.put_file(str(local), remote)
+                for local_dir, remote_dir in plan.directories:
+                    batch.put_directory(str(local_dir), remote_dir)
 
         await loop.run_in_executor(None, _sync_upload)
 
     @staticmethod
     def _build_training_image() -> modal.Image:
         return modal.Image.debian_slim(python_version="3.11").pip_install(
-            "torch>=2.2.0",
-            "transformers>=4.40.0",
-            "peft>=0.10.0",
-            "trl>=0.9.0",
-            "datasets>=2.0.0",
-            "pyyaml>=6.0.0",
-            "pydantic>=2.0.0",
-            "pydantic-settings>=2.0.0",
+            *_TRAINING_IMAGE_PACKAGES,
         )
 
     async def _synthesize_heartbeats(self) -> None:

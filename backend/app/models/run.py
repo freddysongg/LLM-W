@@ -42,6 +42,8 @@ class Run(Base):
     heartbeat_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     pid: Mapped[int | None] = mapped_column(Integer, nullable=True)
     run_type: Mapped[str] = mapped_column(Text, nullable=False, default="training")
+    environment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    modal_gpu_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     device: Mapped[str | None] = mapped_column(Text, nullable=True)
     tokens_per_sec: Mapped[float | None] = mapped_column(Float, nullable=True)
     time_to_first_checkpoint_s: Mapped[float | None] = mapped_column(Float, nullable=True)

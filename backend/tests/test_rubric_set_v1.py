@@ -9,7 +9,13 @@ from app.schemas.rubric import Rubric
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _RUBRICS_DIR = _REPO_ROOT / "rubrics"
-_EXPECTED_RUBRIC_STEMS = {"faithfulness", "instruction_following", "safety", "hallucination"}
+_EXPECTED_RUBRIC_STEMS = {
+    "faithfulness",
+    "instruction_following",
+    "safety",
+    "hallucination",
+    "shopping_assistant",
+}
 _KNOWN_R_IDS = {"R1", "R3", "R4", "R5", "R6", "R11", "R12"}
 _MIN_EXAMPLES = 5
 _LATEST_ALIAS_MARKER = "-latest"
@@ -23,13 +29,13 @@ def _load(path: Path) -> Rubric:
     return Rubric.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
 
 
-def test_rubrics_directory_contains_the_expected_four_files() -> None:
+def test_rubrics_directory_contains_the_expected_files() -> None:
     discovered_stems = {path.stem for path in _yaml_paths()}
     assert discovered_stems == _EXPECTED_RUBRIC_STEMS
 
 
 @pytest.mark.parametrize("yaml_path", _yaml_paths(), ids=lambda path: path.stem)
-def test_all_four_yamls_load_via_pydantic(yaml_path: Path) -> None:
+def test_all_rubric_yamls_load_via_pydantic(yaml_path: Path) -> None:
     rubric = _load(yaml_path)
     assert rubric.id == yaml_path.stem
 

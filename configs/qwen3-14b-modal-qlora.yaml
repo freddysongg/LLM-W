@@ -1,0 +1,103 @@
+# Qwen3-14B QLoRA fine-tune on Modal A10. Conforms to
+# `WorkbenchConfig` (backend/app/schemas/workbench_config.py). Designed for
+# the `sanitized_cloud` data policy and the $3 / 90-minute cost+time caps
+# enforced by the dispatcher.
+
+project:
+  name: qwen3-14b-shopping
+  description: Qwen3-14B QLoRA fine-tune on Modal A10
+  mode: single_user_local
+
+model:
+  source: huggingface
+  model_id: Qwen/Qwen3-14B
+  family: causal_lm
+  revision: main
+  trust_remote_code: false
+  torch_dtype: bfloat16
+  serving_model_id: Qwen/Qwen3-14B-MLX-4bit
+
+dataset:
+  source: huggingface
+  dataset_id: tatsu-lab/alpaca
+  format: alpaca
+  train_split: train
+  train_ratio: 0.9
+  val_ratio: 0.1
+
+preprocessing:
+  max_seq_length: 2048
+  packing: false
+  padding: longest
+
+training:
+  task_type: sft
+  epochs: 1
+  batch_size: 1
+  gradient_accumulation_steps: 16
+  learning_rate: 2.0e-4
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+  eval_steps: 50
+  save_steps: 100
+  logging_steps: 5
+  seed: 42
+
+optimization:
+  optimizer: paged_adamw_8bit
+  scheduler: cosine
+  warmup_ratio: 0.03
+  gradient_checkpointing: true
+  mixed_precision: bf16
+
+adapters:
+  enabled: true
+  type: qlora
+  rank: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules: [q_proj, k_proj, v_proj, o_proj]
+  bias: none
+  task_type: CAUSAL_LM
+
+quantization:
+  enabled: true
+  mode: 4bit
+  compute_dtype: bfloat16
+  quant_type: nf4
+  double_quant: true
+
+observability:
+  log_every_steps: 5
+  capture_grad_norm: true
+  capture_memory: true
+  capture_activation_samples: false
+  capture_weight_deltas: false
+  observability_level: standard
+
+ai_assistant:
+  enabled: true
+  provider: anthropic
+  mode: suggest_only
+  allow_config_diffs: true
+  auto_analyze_on_completion: true
+
+execution:
+  environment: modal
+  modal_gpu_type: a10
+  max_run_minutes: 90
+  max_estimated_cost_usd: 3.0
+  data_policy: sanitized_cloud
+  num_workers: 2
+
+checkpoint_retention:
+  keep_last_n: 2
+  always_keep_best_eval: true
+  always_keep_final: true
+  delete_intermediates_after_completion: false
+
+introspection:
+  architecture_view: true
+  editable_weight_scope: disabled
+  activation_probe_samples: 1
+  activation_storage: summary_only

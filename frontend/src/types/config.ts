@@ -126,12 +126,17 @@ export interface AIAssistantConfig {
   readonly autoAnalyzeOnCompletion: boolean;
 }
 
+export type DataPolicy = "local_raw" | "sanitized_cloud";
+
 export interface ExecutionConfig {
   readonly device: DeviceType;
   readonly maxMemoryGb: number | null;
   readonly numWorkers: number;
   readonly environment: TrainingEnvironment;
   readonly modalGpuType: ModalGpuType | null;
+  readonly dataPolicy?: DataPolicy;
+  readonly maxRunMinutes?: number;
+  readonly maxEstimatedCostUsd?: number;
 }
 
 export interface CheckpointRetentionConfig {

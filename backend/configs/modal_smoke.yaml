@@ -1,0 +1,104 @@
+# Minimal Modal cloud-training smoke config. Drives one-step LoRA fine-tuning of
+# the smallest Qwen3 variant against a four-sample slice of tatsu-lab/alpaca on
+# an A10 sandbox. Used by `llmw modal smoke` to verify provisioning, upload,
+# training entry, and checkpoint download end-to-end at minimal cost.
+
+project:
+  name: modal-smoke
+  description: "Modal cloud-training smoke test"
+  mode: single_user_local
+
+model:
+  source: huggingface
+  model_id: Qwen/Qwen3-0.6B
+  family: causal_lm
+  revision: main
+  trust_remote_code: false
+  torch_dtype: auto
+
+dataset:
+  source: huggingface
+  dataset_id: tatsu-lab/alpaca
+  train_split: train
+  eval_split: null
+  input_field: instruction
+  target_field: output
+  format: alpaca
+  max_samples: 4
+
+preprocessing:
+  max_seq_length: 256
+  truncation: true
+  packing: false
+  padding: longest
+
+training:
+  task_type: sft
+  epochs: 1
+  batch_size: 1
+  gradient_accumulation_steps: 1
+  learning_rate: 2.0e-4
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+  seed: 42
+
+optimization:
+  optimizer: adamw
+  scheduler: constant
+  warmup_ratio: 0.0
+  warmup_steps: 0
+  gradient_checkpointing: false
+  mixed_precision: bf16
+
+adapters:
+  enabled: true
+  type: lora
+  rank: 4
+  alpha: 8
+  dropout: 0.05
+  target_modules: [q_proj, v_proj]
+  bias: none
+  task_type: CAUSAL_LM
+
+quantization:
+  enabled: false
+  mode: 4bit
+  compute_dtype: bfloat16
+  quant_type: nf4
+  double_quant: true
+
+observability:
+  log_every_steps: 1
+  capture_grad_norm: false
+  capture_memory: false
+  capture_activation_samples: false
+  capture_weight_deltas: false
+  observability_level: minimal
+
+ai_assistant:
+  enabled: false
+  provider: anthropic
+  mode: suggest_only
+  allow_config_diffs: false
+  auto_analyze_on_completion: false
+
+execution:
+  device: auto
+  num_workers: 0
+  environment: modal
+  modal_gpu_type: a10
+  max_run_minutes: 15
+  max_estimated_cost_usd: 0.5
+  data_policy: sanitized_cloud
+
+checkpoint_retention:
+  keep_last_n: 1
+  always_keep_best_eval: false
+  always_keep_final: true
+  delete_intermediates_after_completion: false
+
+introspection:
+  architecture_view: false
+  editable_weight_scope: disabled
+  activation_probe_samples: 0
+  activation_storage: summary_only

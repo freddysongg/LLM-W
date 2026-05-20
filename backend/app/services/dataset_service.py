@@ -396,6 +396,16 @@ def get_dataset_samples(
     )
 
 
+def get_resolved_rows(*, project_id: str) -> list[dict[str, Any]] | None:
+    """Return the in-memory resolved rows for a project, or None if not resolved.
+
+    Returns a shallow copy so callers can mutate without affecting the cache.
+    """
+    if project_id not in _profiles:
+        return None
+    return list(_samples.get(project_id, []))
+
+
 def get_token_stats(*, project_id: str) -> TokenStats:
     profile = _profiles.get(project_id)
     if profile is None:
