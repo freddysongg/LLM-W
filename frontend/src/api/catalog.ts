@@ -1,5 +1,6 @@
 import type { ModalGpuOption } from "@/types/catalog";
 import type { ModalGpuType } from "@/types/config";
+import type { LlmCatalogProvider, LlmModelOption } from "@/types/llm-catalog";
 import { ApiError, fetchApi } from "./client";
 
 interface RawModalGpuOption {
@@ -13,6 +14,16 @@ interface RawModalGpuCatalogResponse {
   readonly options: ReadonlyArray<RawModalGpuOption>;
 }
 
+interface RawLlmModelOption {
+  readonly provider: string;
+  readonly model_id: string;
+  readonly label: string;
+}
+
+interface RawLlmCatalogResponse {
+  readonly options: ReadonlyArray<RawLlmModelOption>;
+}
+
 const KNOWN_MODAL_GPU_TYPES: ReadonlySet<ModalGpuType> = new Set<ModalGpuType>([
   "t4",
   "a10",
@@ -22,8 +33,17 @@ const KNOWN_MODAL_GPU_TYPES: ReadonlySet<ModalGpuType> = new Set<ModalGpuType>([
   "h100",
 ]);
 
+const KNOWN_LLM_PROVIDERS: ReadonlySet<LlmCatalogProvider> = new Set<LlmCatalogProvider>([
+  "openai",
+  "anthropic",
+]);
+
 function isModalGpuType(value: string): value is ModalGpuType {
   return KNOWN_MODAL_GPU_TYPES.has(value as ModalGpuType);
+}
+
+function isLlmCatalogProvider(value: string): value is LlmCatalogProvider {
+  return KNOWN_LLM_PROVIDERS.has(value as LlmCatalogProvider);
 }
 
 function normalizeOption(raw: RawModalGpuOption): ModalGpuOption {
@@ -45,7 +65,26 @@ function normalizeOption(raw: RawModalGpuOption): ModalGpuOption {
   };
 }
 
+function normalizeLlmOption(raw: RawLlmModelOption): LlmModelOption {
+  const { provider, model_id, label } = raw;
+  if (!isLlmCatalogProvider(provider)) {
+    throw new ApiError({
+      status: 200,
+      statusText: "OK",
+      code: "CATALOG_INVALID_LLM_PROVIDER",
+      message: `Unknown llm provider received from server: ${provider}`,
+      details: { provider },
+    });
+  }
+  return { provider, modelId: model_id, label };
+}
+
 export async function fetchModalGpus(): Promise<ReadonlyArray<ModalGpuOption>> {
   const raw = await fetchApi<RawModalGpuCatalogResponse>({ path: "/catalog/modal-gpus" });
   return raw.options.map(normalizeOption);
+}
+
+export async function fetchLlmModels(): Promise<ReadonlyArray<LlmModelOption>> {
+  const raw = await fetchApi<RawLlmCatalogResponse>({ path: "/catalog/llm-models" });
+  return raw.options.map(normalizeLlmOption);
 }
