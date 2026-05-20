@@ -61,3 +61,23 @@ def test_modal_smoke_register_subcommand_does_not_pull_modal_adapter() -> None:
     assert "app.services.cloud.modal_adapter" not in sys.modules
 
 
+def test_cloud_package_init_does_not_pull_modal_adapter() -> None:
+    """Loading the `app.services.cloud` package init must not import modal.
+
+    Re-exporting modal symbols from `cloud/__init__.py` would force
+    `import modal` at base install time just to register the MLX route
+    (which imports `app.services.cloud.mlx_serving_registry`).
+    """
+    # Re-importing mlx_serving_registry here would create a second module
+    # instance distinct from the one the route layer captured at app load,
+    # so we only re-import the package init itself.
+    if "app.services.cloud.modal_adapter" in sys.modules:
+        del sys.modules["app.services.cloud.modal_adapter"]
+    if "app.services.cloud" in sys.modules:
+        del sys.modules["app.services.cloud"]
+
+    import app.services.cloud  # noqa: F401
+
+    assert "app.services.cloud.modal_adapter" not in sys.modules
+
+
