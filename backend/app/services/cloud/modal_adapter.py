@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Protocol
 
 import modal
+import yaml
 
 from app.core.config import settings
 
@@ -73,6 +74,39 @@ class ModalUploadPlan:
     directories: tuple[tuple[Path, str], ...]
 
 
+_MODAL_UPLOAD_STAGING_DIR = ".modal-uploads"
+
+
+def _rewrite_config_for_modal_upload(*, src_config_path: Path, dst_path: Path) -> None:
+    """Write a copy of the config whose dataset section points at the uploaded
+    sanitized artifact.
+
+    The remote trainer reads `dataset.source` / `dataset.dataset_id` from the
+    config we upload. Without this rewrite, a `local_jsonl` config would point
+    at a host path that does not exist in the Modal sandbox, and a
+    `huggingface` config would re-download the raw dataset, bypassing the
+    `sanitized_cloud` data policy.
+    """
+    raw = yaml.safe_load(src_config_path.read_text(encoding="utf-8")) or {}
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"Config at {src_config_path} did not parse as a mapping (got {type(raw).__name__})."
+        )
+    dataset_section = raw.get("dataset", {})
+    if not isinstance(dataset_section, dict):
+        dataset_section = {}
+    raw["dataset"] = {
+        **dataset_section,
+        "source": "local_jsonl",
+        "dataset_id": f"{_WORKSPACE_DATASETS}/{_SANITIZED_DATASET_FILENAME}",
+        "format": "openai",
+    }
+    dst_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = dst_path.with_suffix(dst_path.suffix + ".tmp")
+    tmp_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    os.replace(tmp_path, dst_path)
+
+
 def build_modal_upload_plan(*, project_dir: Path, config_path: Path) -> ModalUploadPlan:
     """Return the upload plan for a Modal cloud run.
 
@@ -87,18 +121,23 @@ def build_modal_upload_plan(*, project_dir: Path, config_path: Path) -> ModalUpl
             "Call POST /api/v1/projects/{project_id}/datasets/sanitize with "
             "persist=true before launching the cloud run."
         )
+    # Stage a rewritten config under project_dir/.modal-uploads/ so the
+    # uploaded file points dataset.source/dataset_id at the sanitized artifact
+    # instead of carrying the host's raw source. The remote name continues to
+    # match the original so the trainer's --config-path argument is unchanged.
+    staging_path = project_dir / _MODAL_UPLOAD_STAGING_DIR / config_path.name
+    _rewrite_config_for_modal_upload(src_config_path=config_path, dst_path=staging_path)
+
     files: list[tuple[Path, str]] = [
-        (config_path, f"{_WORKSPACE_CONFIGS}/{config_path.name}"),
+        (staging_path, f"{_WORKSPACE_CONFIGS}/{config_path.name}"),
         (sanitized, f"{_WORKSPACE_DATASETS}/{sanitized.name}"),
     ]
     manifest = project_dir / "datasets" / _SANITIZED_MANIFEST_FILENAME
     if manifest.is_file():
         files.append((manifest, f"{_WORKSPACE_DATASETS}/{manifest.name}"))
-    directories: list[tuple[Path, str]] = []
-    configs_dir = project_dir / "configs"
-    if configs_dir.is_dir():
-        directories.append((configs_dir, _WORKSPACE_CONFIGS))
-    return ModalUploadPlan(files=tuple(files), directories=tuple(directories))
+    # Intentionally no directory uploads. Uploading project_dir/configs/ would
+    # clobber the rewritten config above with its raw-source original.
+    return ModalUploadPlan(files=tuple(files), directories=())
 
 
 def _workspace_checkpoints_path(run_id: str) -> str:

@@ -222,6 +222,106 @@ def test_build_modal_upload_plan_includes_manifest_when_present(tmp_path: Path) 
     assert any("sanitized.meta.json" in path for path in uploaded_remote_paths)
 
 
+def test_build_modal_upload_plan_uploads_rewritten_config_pointing_at_sanitized(
+    tmp_path: Path,
+) -> None:
+    """The uploaded config must replace the host's dataset.source / dataset_id
+    with the path of the uploaded sanitized artifact so the remote trainer
+    doesn't try to load host paths or bypass sanitized_cloud by fetching HF."""
+    import yaml as _yaml
+
+    from app.services.cloud.modal_adapter import build_modal_upload_plan
+
+    project_dir = tmp_path / "p1"
+    datasets_dir = project_dir / "datasets"
+    datasets_dir.mkdir(parents=True)
+    (datasets_dir / "sanitized.jsonl").write_text('{"messages":[]}\n')
+
+    configs_dir = project_dir / "configs"
+    configs_dir.mkdir(parents=True)
+    config_path = configs_dir / "run-foo.yaml"
+    config_path.write_text(
+        _yaml.safe_dump(
+            {
+                "project": {"name": "demo"},
+                "dataset": {
+                    "source": "huggingface",
+                    "dataset_id": "HuggingFaceH4/ultrachat_200k",
+                    "format": "sharegpt",
+                },
+                "execution": {"environment": "modal"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    plan = build_modal_upload_plan(project_dir=project_dir, config_path=config_path)
+
+    config_entry = next(
+        (local, remote)
+        for local, remote in plan.files
+        if remote.endswith(f"/{config_path.name}")
+    )
+    uploaded_path, remote_target = config_entry
+    # The local source must be the staged rewrite, not the host's raw config.
+    assert ".modal-uploads" in str(uploaded_path)
+    assert uploaded_path.is_file()
+    # The remote target name still matches the trainer's --config-path argument.
+    assert remote_target.endswith(f"/{config_path.name}")
+
+    rewritten = _yaml.safe_load(uploaded_path.read_text(encoding="utf-8"))
+    assert rewritten["dataset"]["source"] == "local_jsonl"
+    assert rewritten["dataset"]["dataset_id"] == "/workspace/datasets/sanitized.jsonl"
+    assert rewritten["dataset"]["format"] == "openai"
+    # The user's other config sections must survive the rewrite intact.
+    assert rewritten["project"]["name"] == "demo"
+    assert rewritten["execution"]["environment"] == "modal"
+
+
+def test_build_modal_upload_plan_does_not_upload_configs_directory(tmp_path: Path) -> None:
+    """Uploading the configs/ directory would clobber the rewritten config."""
+    import yaml as _yaml
+
+    from app.services.cloud.modal_adapter import build_modal_upload_plan
+
+    project_dir = tmp_path / "p1"
+    datasets_dir = project_dir / "datasets"
+    datasets_dir.mkdir(parents=True)
+    (datasets_dir / "sanitized.jsonl").write_text('{"messages":[]}\n')
+
+    configs_dir = project_dir / "configs"
+    configs_dir.mkdir(parents=True)
+    config_path = configs_dir / "run-foo.yaml"
+    config_path.write_text(
+        _yaml.safe_dump({"dataset": {"source": "local_jsonl", "dataset_id": "/host/x.jsonl"}}),
+        encoding="utf-8",
+    )
+    (configs_dir / "stale.yaml").write_text("ignored: true\n", encoding="utf-8")
+
+    plan = build_modal_upload_plan(project_dir=project_dir, config_path=config_path)
+
+    assert plan.directories == ()
+
+
+def test_rewrite_config_for_modal_upload_handles_missing_dataset_section(
+    tmp_path: Path,
+) -> None:
+    """A config that lacks a dataset section should still be rewritten without raising."""
+    import yaml as _yaml
+
+    from app.services.cloud.modal_adapter import _rewrite_config_for_modal_upload
+
+    src = tmp_path / "src.yaml"
+    src.write_text("project:\n  name: demo\n", encoding="utf-8")
+    dst = tmp_path / "out" / "src.yaml"
+
+    _rewrite_config_for_modal_upload(src_config_path=src, dst_path=dst)
+
+    rewritten = _yaml.safe_load(dst.read_text(encoding="utf-8"))
+    assert rewritten["dataset"]["source"] == "local_jsonl"
+    assert rewritten["project"]["name"] == "demo"
+
+
 def test_validate_execution_rejects_modal_without_credentials() -> None:
     cfg = ExecutionConfig.model_validate(
         {
