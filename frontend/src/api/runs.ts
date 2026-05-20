@@ -119,6 +119,7 @@ interface RawCheckpoint {
   readonly file_size_bytes: number | null;
   readonly metadata_json: string | null;
   readonly is_retained: boolean;
+  readonly is_best: boolean;
   readonly created_at: string;
 }
 
@@ -221,6 +222,7 @@ function normalizeCheckpoint(raw: RawCheckpoint): Checkpoint {
     path: raw.file_path,
     sizeBytes: raw.file_size_bytes ?? 0,
     isRetained: raw.is_retained,
+    isBest: raw.is_best,
     createdAt: raw.created_at,
   };
 }

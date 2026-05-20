@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { ChevronRight, User, Settings, Lock, BookOpen, LogOut } from "lucide-react";
+import { ChevronRight, Settings, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app-store";
 import type { NavGroupKey } from "@/stores/app-store";
@@ -7,6 +7,7 @@ import { NAV_GROUPS, NAV_ICON_COMPONENTS, SETTINGS_NAV_ITEM } from "@/lib/nav";
 import type { NavItem } from "@/lib/nav";
 import { useToast } from "@/hooks/use-toast";
 import { useRunStreamStore } from "@/stores/run-stream-store";
+import { CURRENT_USER } from "@/lib/current-user";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,10 +16,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-
-const USER_NAME_STUB = "freddy";
-const USER_EMAIL_STUB = "freddy@llm-w.dev";
-const USER_INITIALS_STUB = "FS";
 
 interface SidebarItemProps {
   readonly item: NavItem;
@@ -198,13 +195,10 @@ interface SidebarFooterProps {
 
 function SidebarFooter({ collapsed }: SidebarFooterProps): React.JSX.Element {
   const { toast } = useToast();
+  const { name, email, initials } = CURRENT_USER;
 
   const handleShowToast = (title: string): void => {
     toast({ title });
-  };
-
-  const handleOpenDocs = (): void => {
-    window.open("https://example.com", "_blank", "noopener,noreferrer");
   };
 
   return (
@@ -229,42 +223,32 @@ function SidebarFooter({ collapsed }: SidebarFooterProps): React.JSX.Element {
               style={{ background: "linear-gradient(135deg, var(--iris-3), var(--iris-4))" }}
               aria-hidden="true"
             >
-              {USER_INITIALS_STUB}
+              {initials}
             </div>
             {!collapsed && (
               <div className="flex-1 min-w-0 text-left">
-                <div className="text-[12px] font-medium text-ink-1 truncate">{USER_NAME_STUB}</div>
-                <div className="font-mono text-[10px] text-ink-3 truncate">{USER_EMAIL_STUB}</div>
+                <div className="text-[12px] font-medium text-ink-1 truncate">{name}</div>
+                <div className="font-mono text-[10px] text-ink-3 truncate">{email}</div>
               </div>
             )}
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" side="top" className="w-60">
-          <DropdownMenuLabel>{USER_EMAIL_STUB}</DropdownMenuLabel>
+        <DropdownMenuContent
+          align="end"
+          side="top"
+          sideOffset={10}
+          collisionPadding={16}
+          className="w-56"
+        >
+          <DropdownMenuLabel>{email}</DropdownMenuLabel>
           <DropdownMenuSeparator />
-          <DropdownMenuItem asChild>
-            <NavLink to={SETTINGS_NAV_ITEM.path} className="cursor-pointer">
-              <User className="h-4 w-4" />
-              <span>Profile</span>
-            </NavLink>
-          </DropdownMenuItem>
           <DropdownMenuItem asChild>
             <NavLink to={SETTINGS_NAV_ITEM.path} className="cursor-pointer">
               <Settings className="h-4 w-4" />
               <span>Settings</span>
             </NavLink>
           </DropdownMenuItem>
-          <DropdownMenuItem asChild>
-            <NavLink to={SETTINGS_NAV_ITEM.path} className="cursor-pointer">
-              <Lock className="h-4 w-4" />
-              <span>API keys</span>
-            </NavLink>
-          </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={handleOpenDocs}>
-            <BookOpen className="h-4 w-4" />
-            <span>Documentation</span>
-          </DropdownMenuItem>
           <DropdownMenuItem
             onSelect={() => handleShowToast("Signed out — stubbed")}
             className="text-danger focus:text-danger"

@@ -70,5 +70,12 @@ class Run(Base):
         "Artifact", back_populates="run", cascade="all, delete-orphan"
     )
     ai_suggestions: Mapped[list[AISuggestion]] = relationship(
-        "AISuggestion", back_populates="source_run", foreign_keys="AISuggestion.source_run_id"
+        "AISuggestion",
+        back_populates="source_run",
+        foreign_keys="AISuggestion.source_run_id",
+        # Suggestions outlive the run that produced them — `run_service.delete_run`
+        # nulls `source_run_id` explicitly. `passive_deletes="all"` keeps the ORM
+        # from also issuing its own disassociation UPDATEs (which would touch the
+        # same rows again and trip async lazy-load on `session.delete(run)`).
+        passive_deletes="all",
     )

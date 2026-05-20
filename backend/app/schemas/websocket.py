@@ -44,3 +44,13 @@ WsInboundEnvelope = Annotated[
 
 
 ws_inbound_envelope_adapter: TypeAdapter[WsInboundEnvelope] = TypeAdapter(WsInboundEnvelope)
+
+
+class ResourceUpdatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    gpu_memory_used_mb: float
+    vram_total_mb: float | None
+    cpu_pct: float
+    ram_used_mb: float
+    ram_total_mb: float

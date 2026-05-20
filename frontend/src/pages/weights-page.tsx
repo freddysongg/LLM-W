@@ -3,7 +3,10 @@ import { Loader2 } from "lucide-react";
 import { useAppStore } from "@/stores/app-store";
 import { useModelArchitecture, useLayerDetail } from "@/hooks/useModelArchitecture";
 import { useCaptureActivations, useRequestFullTensor } from "@/hooks/useActivations";
+import { useRuns } from "@/hooks/useRuns";
 import { ArchFlow } from "@/components/weights/arch-flow";
+import { LayerTree } from "@/components/weights/layer-tree";
+import { LayerWeightHistory } from "@/components/weights/layer-weight-history";
 import { LayerInspector } from "@/components/weights/layer-inspector";
 import { ModuleSearchInput } from "@/components/weights/module-search-input";
 import { LayerDetailDrawer } from "@/components/weights/layer-detail-drawer";
@@ -46,7 +49,14 @@ import type {
 } from "@/types/model";
 
 type ParameterFilter = "all" | "trainable" | "frozen";
-type SecondaryTab = "parameters" | "activations" | "deltas" | "flow" | "expert" | "tree";
+type SecondaryTab =
+  | "parameters"
+  | "activations"
+  | "deltas"
+  | "flow"
+  | "expert"
+  | "tree"
+  | "weights";
 
 const DEFAULT_INSPECTOR_STATS = { mean: 0.0002, std: 0.0186, max: 0.2431 } as const;
 
@@ -198,8 +208,21 @@ export default function WeightsPage(): React.JSX.Element {
   const [flowMode, setFlowMode] = React.useState<FlowMode>("structural");
   const [flowSnapshotIndex, setFlowSnapshotIndex] = React.useState(0);
   const [secondaryTab, setSecondaryTab] = React.useState<SecondaryTab>("parameters");
+  const [selectedWeightsRunId, setSelectedWeightsRunId] = React.useState<string | null>(null);
+  const [selectedWeightLayerName, setSelectedWeightLayerName] = React.useState<string | null>(null);
 
   const { data: architecture, isLoading: isArchLoading } = useModelArchitecture({ projectId });
+  const { data: runs = [] } = useRuns({ projectId });
+
+  React.useEffect(() => {
+    if (selectedWeightsRunId === null && runs.length > 0) {
+      setSelectedWeightsRunId(runs[0].id);
+    }
+  }, [runs, selectedWeightsRunId]);
+
+  React.useEffect(() => {
+    setSelectedWeightLayerName(null);
+  }, [selectedWeightsRunId]);
 
   const backendLayerName = React.useMemo((): string | null => {
     if (!selectedLayerName || !architecture) return null;
@@ -382,6 +405,7 @@ export default function WeightsPage(): React.JSX.Element {
                 <TabsTrigger value="deltas">Deltas</TabsTrigger>
                 <TabsTrigger value="flow">Flow</TabsTrigger>
                 <TabsTrigger value="tree">Tree</TabsTrigger>
+                <TabsTrigger value="weights">Weights</TabsTrigger>
                 <TabsTrigger value="expert">Expert edit</TabsTrigger>
               </TabsList>
 
@@ -627,6 +651,69 @@ export default function WeightsPage(): React.JSX.Element {
                       isCapturing={captureActivations.isPending}
                       sampleInput={sampleInput}
                     />
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              <TabsContent value="weights">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Per-layer weights</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {runs.length === 0 ? (
+                      <div className="py-8 text-center font-mono text-[11px] text-ink-3">
+                        No runs recorded for this project yet. Start a training run to populate
+                        per-layer weight snapshots.
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-3">
+                          <span className="font-mono text-[11px] text-ink-3">Run:</span>
+                          <Select
+                            value={selectedWeightsRunId ?? ""}
+                            onValueChange={(value) => setSelectedWeightsRunId(value)}
+                          >
+                            <SelectTrigger className="h-7 w-[260px] text-[11px]">
+                              <SelectValue placeholder="Select training run" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {runs.map((run) => (
+                                <SelectItem key={run.id} value={run.id}>
+                                  <span className="font-mono text-xs">{run.id.slice(0, 8)}</span>
+                                  <span className="ml-2 text-xs text-ink-3">{run.status}</span>
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        {selectedWeightsRunId ? (
+                          <div className="grid grid-cols-[1fr_1.2fr] gap-4">
+                            <LayerTree
+                              projectId={projectId}
+                              runId={selectedWeightsRunId}
+                              selectedLayer={selectedWeightLayerName}
+                              onSelectLayer={setSelectedWeightLayerName}
+                            />
+                            {selectedWeightLayerName !== null ? (
+                              <LayerWeightHistory
+                                projectId={projectId}
+                                runId={selectedWeightsRunId}
+                                layerName={selectedWeightLayerName}
+                              />
+                            ) : (
+                              <div className="font-mono text-[11px] text-ink-3">
+                                Select a layer to view weight history.
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="font-mono text-[11px] text-ink-3">
+                            Select a run to view its weights.
+                          </div>
+                        )}
+                      </>
+                    )}
                   </CardContent>
                 </Card>
               </TabsContent>

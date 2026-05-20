@@ -114,4 +114,5 @@ class CheckpointResponse(BaseModel):
     file_size_bytes: int | None
     metadata_json: str | None
     is_retained: bool
+    is_best: bool
     created_at: str

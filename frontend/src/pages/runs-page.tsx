@@ -17,8 +17,11 @@ import {
 import { useActiveConfig } from "@/hooks/useConfigs";
 import { useSettings } from "@/hooks/useSettings";
 import { useRunStream } from "@/hooks/useRunStream";
+import { useToast } from "@/hooks/use-toast";
+import { describeApiError } from "@/lib/api-error";
 import { ActiveRunBanner } from "@/components/runs/active-run-banner";
 import { CheckpointList } from "@/components/runs/checkpoint-list";
+import { ConfigSnapshotTab } from "@/components/runs/config-snapshot-tab";
 import { EnvironmentSelector } from "@/components/runs/environment-selector";
 import { FailurePanel } from "@/components/runs/failure-panel";
 import { LiveMetricsCharts } from "@/components/runs/live-metrics-charts";
@@ -87,6 +90,7 @@ function countByStatus(runs: ReadonlyArray<Run>, predicate: (run: Run) => boolea
 
 export default function RunsPage(): React.JSX.Element {
   const navigate = useNavigate();
+  const { toast } = useToast();
   const { activeProjectId } = useAppStore();
   const [selectedRunId, setSelectedRunId] = React.useState<string | null>(null);
   const [selectedStageId, setSelectedStageId] = React.useState<string | null>(null);
@@ -193,7 +197,23 @@ export default function RunsPage(): React.JSX.Element {
     if (!activeProjectId || !activeConfig) return;
     createRunMutation.mutate(
       { projectId: activeProjectId, configVersionId: activeConfig.id },
-      { onSuccess: (newRun) => setSelectedRunId(newRun.id) },
+      {
+        onSuccess: (newRun) => {
+          setSelectedRunId(newRun.id);
+          setSelectedStageId(null);
+          toast({
+            title: "Run launched",
+            description: `Started run ${newRun.id.slice(0, 6)}.`,
+          });
+        },
+        onError: (cause) => {
+          toast({
+            title: "Launch failed",
+            description: describeApiError({ cause, fallback: "Unknown error." }),
+            variant: "destructive",
+          });
+        },
+      },
     );
   };
 
@@ -207,6 +227,17 @@ export default function RunsPage(): React.JSX.Element {
             setSelectedRunId(null);
             setSelectedStageId(null);
           }
+          toast({
+            title: "Run deleted",
+            description: `Deleted run ${runId.slice(0, 6)}.`,
+          });
+        },
+        onError: (cause) => {
+          toast({
+            title: "Delete failed",
+            description: describeApiError({ cause, fallback: "Unknown error." }),
+            variant: "destructive",
+          });
         },
       },
     );
@@ -362,6 +393,7 @@ export default function RunsPage(): React.JSX.Element {
               <TabsTrigger value="metrics">Metrics</TabsTrigger>
               <TabsTrigger value="logs">Logs</TabsTrigger>
               <TabsTrigger value="system">System</TabsTrigger>
+              <TabsTrigger value="config">Config</TabsTrigger>
               <TabsTrigger value="ckpts">
                 Checkpoints
                 {allCheckpoints.length > 0 ? (
@@ -384,7 +416,11 @@ export default function RunsPage(): React.JSX.Element {
             </TabsContent>
 
             <TabsContent value="metrics">
-              <LiveMetricsCharts metricPoints={mergedMetrics} />
+              <LiveMetricsCharts
+                projectId={activeProjectId ?? ""}
+                runId={selectedRun.id}
+                metricPoints={mergedMetrics}
+              />
             </TabsContent>
 
             <TabsContent value="logs">
@@ -393,6 +429,16 @@ export default function RunsPage(): React.JSX.Element {
 
             <TabsContent value="system">
               <SystemResourceMonitor resources={streamState.systemResources} />
+            </TabsContent>
+
+            <TabsContent value="config" className="space-y-3">
+              {activeProjectId && selectedRunId ? (
+                <ConfigSnapshotTab projectId={activeProjectId} runId={selectedRunId} />
+              ) : (
+                <div className="text-xs text-muted-foreground">
+                  Select a run to view its config.
+                </div>
+              )}
             </TabsContent>
 
             <TabsContent value="ckpts">

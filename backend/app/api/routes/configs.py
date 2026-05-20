@@ -14,6 +14,7 @@ from app.core.exceptions import (
 )
 from app.schemas.config_version import (
     ConfigDiffResponse,
+    ConfigValidateInlineRequest,
     ConfigValidationResponse,
     ConfigVersionCreate,
     ConfigVersionListResponse,
@@ -60,6 +61,26 @@ async def get_active_config_version(
             status_code=404,
             detail={"code": "CONFIG_VERSION_NOT_FOUND", "message": str(exc), "details": {}},
         ) from exc
+
+
+@router.post(
+    "/{project_id}/configs/validate-inline",
+    response_model=ConfigValidationResponse,
+)
+async def validate_inline_config(
+    project_id: str,
+    payload: ConfigValidateInlineRequest,
+    session: DbSession = None,  # type: ignore[assignment]
+) -> ConfigValidationResponse:
+    try:
+        await project_service.get_project(session=session, project_id=project_id)
+    except ProjectNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "PROJECT_NOT_FOUND", "message": str(exc), "details": {}},
+        ) from exc
+
+    return config_service.validate_config(yaml_content=payload.yaml_content)
 
 
 @router.get("/{project_id}/configs/{version_id}", response_model=ConfigVersionResponse)

@@ -2,6 +2,7 @@ import * as React from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { wsClient } from "@/ws/client";
 import { useRunStreamStore } from "@/stores/run-stream-store";
+import { toast } from "@/hooks/use-toast";
 import type {
   WebSocketEnvelope,
   MetricRecordedPayload,
@@ -10,6 +11,7 @@ import type {
   ResourceUpdatePayload,
   CheckpointSavedPayload,
   ProgressUpdatePayload,
+  RetentionAppliedPayload,
 } from "@/types/websocket";
 import type { MetricPoint, LogEntry, Checkpoint } from "@/types/run";
 
@@ -19,9 +21,10 @@ export interface RunStreamState {
   readonly liveMetrics: ReadonlyArray<MetricPoint>;
   readonly systemResources: {
     readonly gpuMemoryUsedMb: number;
-    readonly gpuUtilizationPct: number;
+    readonly vramTotalMb: number | null;
     readonly cpuPct: number;
     readonly ramUsedMb: number;
+    readonly ramTotalMb: number;
   } | null;
   readonly liveCheckpoints: ReadonlyArray<Checkpoint>;
   readonly progressPct: number | null;
@@ -115,9 +118,10 @@ export function useRunStream({
           const payload = envelope.payload as ResourceUpdatePayload;
           setSystemResources({
             gpuMemoryUsedMb: payload.gpuMemoryUsedMb,
-            gpuUtilizationPct: payload.gpuUtilizationPct,
+            vramTotalMb: payload.vramTotalMb,
             cpuPct: payload.cpuPct,
             ramUsedMb: payload.ramUsedMb,
+            ramTotalMb: payload.ramTotalMb,
           });
         }
         if (envelope.event === "checkpoint_saved") {
@@ -128,10 +132,34 @@ export function useRunStream({
             step: payload.step,
             path: payload.path,
             sizeBytes: payload.sizeBytes,
-            isRetained: false,
+            isRetained: true,
+            isBest: payload.isBestEval,
             createdAt: new Date().toISOString(),
           };
           appendCheckpoint(runId, checkpoint);
+        }
+        if (envelope.event === "retention_applied") {
+          const payload = envelope.payload as RetentionAppliedPayload;
+          if (payload.pruned.length > 0) {
+            const count = payload.pruned.length;
+            toast({
+              title: "Retention policy applied",
+              description: `Pruned ${count} checkpoint${count === 1 ? "" : "s"} per retention policy`,
+            });
+          }
+          void queryClient.invalidateQueries({
+            queryKey: ["projects", projectId, "runs", runId, "checkpoints"],
+          });
+        }
+        if (envelope.event === "model_profile_ready") {
+          void queryClient.invalidateQueries({
+            queryKey: ["projects", projectId, "runs", runId, "model-profile"],
+          });
+        }
+        if (envelope.event === "weight_stats_recorded") {
+          void queryClient.invalidateQueries({
+            queryKey: ["projects", projectId, "runs", runId, "weight-snapshots"],
+          });
         }
       }
 

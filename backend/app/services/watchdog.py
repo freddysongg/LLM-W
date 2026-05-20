@@ -18,6 +18,7 @@ from app.core.config import settings
 from app.core.database import async_session_factory
 from app.models.decision_log import DecisionLog
 from app.models.run import Run
+from app.models.run_stage import RunStage
 
 logger = logging.getLogger(__name__)
 
@@ -237,6 +238,21 @@ def _resolve_project_dir(run: Run, heartbeat: dict[str, object] | None) -> Path:
     return settings.projects_dir
 
 
+_STATUS_FAILED = "failed"
+_STATUS_PENDING = "pending"
+_STATUS_RUNNING = "running"
+_STATUS_SKIPPED_STAGE = "skipped"
+_STATUS_PENDING_STAGE = "pending"
+
+_ACTION_RUN_RECOVERY_FAILED = "run_recovery_failed"
+
+# A run row that was inserted by orchestrator.create_run a moment before
+# the backend restarted may still be in `pending` here — the trainer task
+# might be spawning concurrently with this sweep. Give it a grace window
+# before declaring it orphaned, otherwise we race the in-flight launch.
+_PENDING_RECOVERY_GRACE_SECONDS = 60
+
+
 async def _mark_run_failed(
     *,
     session: AsyncSession,
@@ -246,7 +262,7 @@ async def _mark_run_failed(
     last_checkpoint_path: str | None,
 ) -> None:
     now = datetime.now(UTC).isoformat()
-    run.status = "failed"
+    run.status = _STATUS_FAILED
     run.failure_reason = failure_reason
     run.failure_stage = failure_stage
     run.completed_at = now
@@ -257,21 +273,96 @@ async def _mark_run_failed(
     logger.info("marked run %s as failed: %s", run.id, failure_reason)
 
 
-async def recover_stale_runs() -> None:
-    """Called on app startup to recover runs that died while the app was down."""
-    async with async_session_factory() as session:
-        result = await session.execute(select(Run).where(Run.status == "running"))
-        running_runs = list(result.scalars().all())
+async def _skip_pending_stages_no_commit(*, session: AsyncSession, run_id: str) -> None:
+    """Flip pending stages to skipped without committing.
 
-    for run in running_runs:
+    Caller must commit. Kept commit-less so it can share a transaction with
+    `_mark_run_failed`; previously these ran in two separate commits and a
+    crash between them left the exact orphan state recovery was supposed
+    to clean up.
+    """
+    result = await session.execute(
+        select(RunStage).where(
+            RunStage.run_id == run_id, RunStage.status == _STATUS_PENDING_STAGE
+        )
+    )
+    for stage_row in result.scalars().all():
+        stage_row.status = _STATUS_SKIPPED_STAGE
+
+
+_ORPHAN_PENDING_REASON = (
+    "Trainer subprocess never launched before backend restart — "
+    "the orchestration task was lost. Re-submit the run."
+)
+
+
+def _is_within_grace_window(run: Run) -> bool:
+    """True if the run was inserted recently enough that recovery should defer.
+
+    The watchdog runs at lifespan startup; a `pending` row created seconds
+    before restart is indistinguishable from one created milliseconds before
+    this sweep ran. Only treat as orphan if it has aged past the grace
+    window — otherwise the orchestrator may still be racing to spawn it.
+    """
+    try:
+        created = datetime.fromisoformat(run.created_at)
+    except ValueError:
+        return False
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=UTC)
+    age_seconds = (datetime.now(UTC) - created).total_seconds()
+    return age_seconds < _PENDING_RECOVERY_GRACE_SECONDS
+
+
+async def recover_stale_runs() -> None:
+    """Called on app startup to recover runs that died while the app was down.
+
+    Handles two classes of orphan:
+    - `running` rows whose process is gone or whose heartbeat has stalled.
+    - `pending` rows that never progressed past orchestrator.create_run —
+      this happens when the backend restarts between the DB insert and the
+      trainer subprocess actually being spawned. Without this sweep, such
+      runs remain visible in the UI as forever-pending phantoms.
+    """
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(Run).where(Run.status.in_((_STATUS_RUNNING, _STATUS_PENDING)))
+        )
+        stale_runs = list(result.scalars().all())
+
+    for run in stale_runs:
         async with async_session_factory() as session:
-            refreshed = await session.get(Run, run.id)
-            if refreshed is None:
+            target_run = await session.get(Run, run.id)
+            if target_run is None:
                 continue
 
-            project_result = await session.execute(select(Run).where(Run.id == run.id))
-            target_run = project_result.scalar_one_or_none()
-            if target_run is None:
+            if target_run.status == _STATUS_PENDING:
+                if _is_within_grace_window(target_run):
+                    logger.info(
+                        "run %s is pending within grace window, skipping recovery",
+                        target_run.id,
+                    )
+                    continue
+                await _mark_run_failed(
+                    session=session,
+                    run=target_run,
+                    failure_reason=_ORPHAN_PENDING_REASON,
+                    failure_stage="config_validation",
+                    last_checkpoint_path=None,
+                )
+                await _skip_pending_stages_no_commit(session=session, run_id=target_run.id)
+                decision = DecisionLog(
+                    id=str(uuid.uuid4()),
+                    project_id=target_run.project_id,
+                    action_type=_ACTION_RUN_RECOVERY_FAILED,
+                    actor="system",
+                    target_type="run",
+                    target_id=target_run.id,
+                    notes=f"watchdog recovery: {_ORPHAN_PENDING_REASON}",
+                    created_at=datetime.now(UTC).isoformat(),
+                )
+                session.add(decision)
+                await session.commit()
                 continue
 
             heartbeat: dict[str, object] | None = None
@@ -282,7 +373,6 @@ async def recover_stale_runs() -> None:
             pid_is_alive = pid is not None and _is_pid_alive(pid)
 
             if pid_is_alive and heartbeat is not None and not _is_heartbeat_stale(heartbeat):
-                # Process is alive and healthy — reattach monitoring
                 logger.info("run %s is alive (pid=%s), skipping recovery", target_run.id, pid)
                 continue
 
@@ -310,7 +400,7 @@ async def recover_stale_runs() -> None:
             decision = DecisionLog(
                 id=str(uuid.uuid4()),
                 project_id=target_run.project_id,
-                action_type="run_cancelled",
+                action_type=_ACTION_RUN_RECOVERY_FAILED,
                 actor="system",
                 target_type="run",
                 target_id=target_run.id,
@@ -325,7 +415,7 @@ async def check_run_health(*, run_id: str) -> bool:
     """Returns True if the run appears alive, False after marking it failed with diagnostics."""
     async with async_session_factory() as session:
         run = await session.get(Run, run_id)
-        if run is None or run.status != "running":
+        if run is None or run.status != _STATUS_RUNNING:
             return False
 
         pid = run.pid

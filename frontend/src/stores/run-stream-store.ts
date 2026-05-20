@@ -3,9 +3,10 @@ import type { LogEntry, MetricPoint, Checkpoint } from "@/types/run";
 
 interface SystemResources {
   readonly gpuMemoryUsedMb: number;
-  readonly gpuUtilizationPct: number;
+  readonly vramTotalMb: number | null;
   readonly cpuPct: number;
   readonly ramUsedMb: number;
+  readonly ramTotalMb: number;
 }
 
 interface RunStreamData {
@@ -38,7 +39,12 @@ interface RunStreamStoreActions {
   appendLogs: (runId: string, entries: ReadonlyArray<LogEntry>) => void;
   appendMetricPoints: (runId: string, points: ReadonlyArray<MetricPoint>) => void;
   appendCheckpoint: (runId: string, checkpoint: Checkpoint) => void;
-  setProgress: (runId: string, progressPct: number, currentStep: number, totalSteps: number) => void;
+  setProgress: (
+    runId: string,
+    progressPct: number,
+    currentStep: number,
+    totalSteps: number,
+  ) => void;
   setSystemResources: (resources: SystemResources) => void;
 }
 

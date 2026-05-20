@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
-from sqlalchemy import func, select
+from sqlalchemy import delete, distinct, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import (
@@ -16,12 +16,17 @@ from app.core.exceptions import (
     RunNotFoundError,
     RunStateError,
 )
+from app.models.activation_snapshot import ActivationSnapshot
 from app.models.artifact import Artifact
 from app.models.config_version import ConfigVersion
+from app.models.eval_run import EvalRun
 from app.models.metric_point import MetricPoint
+from app.models.model_profile import ModelProfile
 from app.models.project import Project
 from app.models.run import Run
 from app.models.run_stage import RunStage
+from app.models.suggestion import AISuggestion
+from app.models.weight_snapshot import WeightSnapshot
 from app.schemas.run import (
     CheckpointResponse,
     RunArtifactCompareSummary,
@@ -35,6 +40,26 @@ from app.schemas.run import (
     RunResumeResponse,
     RunStageResponse,
 )
+from app.schemas.run_observability import (
+    ConfigDiff,
+    ConfigSnapshotResponse,
+    MetricNamesResponse,
+    RunSummaryBatchResponse,
+    RunSummaryResponse,
+)
+from app.schemas.weights import (
+    LayerProfile,
+    LayerWeightStats,
+    ModelProfileResponse,
+    WeightSnapshotAllResponse,
+    WeightSnapshotResponse,
+)
+from app.services.config_service import compute_config_diff
+from app.services.metrics_service import downsample_to_n
+
+_TRAIN_LOSS_METRIC = "train_loss"
+_EVAL_LOSS_METRIC = "eval_loss"
+_SPARKLINE_MAX_POINTS = 40
 
 _CANCELLABLE_STATUSES = frozenset({"pending", "running", "paused"})
 _PAUSABLE_STATUSES = frozenset({"running"})
@@ -139,6 +164,26 @@ async def delete_run(*, session: AsyncSession, run_id: str, project_id: str) -> 
     run = await get_run(session=session, run_id=run_id, project_id=project_id)
     if run.status not in _DELETABLE_STATUSES:
         raise RunStateError(run_id=run_id, action="delete", current_status=run.status)
+
+    # Sever soft references: these children are archival and should survive
+    # the parent run rather than disappear with it.
+    await session.execute(
+        update(EvalRun).where(EvalRun.training_run_id == run_id).values(training_run_id=None)
+    )
+    await session.execute(
+        update(AISuggestion).where(AISuggestion.source_run_id == run_id).values(source_run_id=None)
+    )
+    await session.execute(
+        update(Run).where(Run.parent_run_id == run_id).values(parent_run_id=None)
+    )
+
+    # Hard-delete children that only exist as observability of the parent —
+    # the ORM has no relationship declared for these tables, so they would
+    # otherwise become orphans (SQLite FK is off) or block the delete (if
+    # FK is ever enabled).
+    await session.execute(delete(WeightSnapshot).where(WeightSnapshot.run_id == run_id))
+    await session.execute(delete(ActivationSnapshot).where(ActivationSnapshot.run_id == run_id))
+
     await session.delete(run)
     await session.commit()
 
@@ -302,10 +347,59 @@ async def list_checkpoints(
             file_size_bytes=a.file_size_bytes,
             metadata_json=a.metadata_json,
             is_retained=bool(a.is_retained),
+            is_best=bool(a.is_best),
             created_at=a.created_at,
         )
         for a in artifacts
     ]
+
+
+async def get_config_snapshot(
+    *,
+    session: AsyncSession,
+    project_id: str,
+    run_id: str,
+) -> ConfigSnapshotResponse:
+    run = await get_run(session=session, run_id=run_id, project_id=project_id)
+
+    artifact = (
+        await session.execute(
+            select(Artifact).where(
+                Artifact.run_id == run_id,
+                Artifact.artifact_type == "config_snapshot",
+            )
+        )
+    ).scalar_one_or_none()
+    if artifact is None:
+        raise RunNotFoundError(f"no config snapshot for run {run_id}")
+
+    snapshot_yaml = Path(artifact.file_path).read_text(encoding="utf-8")
+    parent = await session.get(ConfigVersion, run.config_version_id)
+    parent_yaml = parent.yaml_blob if parent is not None else ""
+    diff_dict = compute_config_diff(old_yaml=parent_yaml, new_yaml=snapshot_yaml)
+
+    return ConfigSnapshotResponse(
+        run_id=run_id,
+        parent_config_version_id=run.config_version_id,
+        yaml=snapshot_yaml,
+        diff=ConfigDiff(**diff_dict),
+    )
+
+
+async def list_metric_names(
+    *,
+    session: AsyncSession,
+    project_id: str,
+    run_id: str,
+) -> MetricNamesResponse:
+    await get_run(session=session, run_id=run_id, project_id=project_id)
+    result = await session.execute(
+        select(distinct(MetricPoint.metric_name))
+        .where(MetricPoint.run_id == run_id)
+        .order_by(MetricPoint.metric_name)
+    )
+    names = [row[0] for row in result.all()]
+    return MetricNamesResponse(metric_names=names)
 
 
 async def compare_runs(
@@ -412,3 +506,162 @@ def _compute_trend(values: list[float]) -> str:
     if slope > threshold:
         return "increasing"
     return "stable"
+
+
+async def get_run_summaries(
+    *,
+    session: AsyncSession,
+    project_id: str,
+    run_ids: list[str],
+) -> RunSummaryBatchResponse:
+    summaries: list[RunSummaryResponse] = []
+    for run_id in run_ids:
+        run_result = await session.execute(
+            select(Run).where(Run.id == run_id, Run.project_id == project_id)
+        )
+        run = run_result.scalar_one_or_none()
+        if run is None:
+            continue
+
+        train_points = await _fetch_metric_values(
+            session=session, run_id=run_id, metric_name=_TRAIN_LOSS_METRIC
+        )
+        eval_points = await _fetch_metric_values(
+            session=session, run_id=run_id, metric_name=_EVAL_LOSS_METRIC
+        )
+
+        final_train_loss = train_points[-1] if train_points else None
+        final_eval_loss = eval_points[-1] if eval_points else None
+        wall_clock_ms = _compute_wall_clock_ms(run=run)
+        step_count = await _fetch_max_step(session=session, run_id=run_id)
+        sparkline = downsample_to_n(points=train_points, n=_SPARKLINE_MAX_POINTS)
+
+        summaries.append(
+            RunSummaryResponse(
+                run_id=run_id,
+                status=run.status,
+                final_train_loss=final_train_loss,
+                final_eval_loss=final_eval_loss,
+                wall_clock_ms=wall_clock_ms,
+                step_count=step_count,
+                train_loss_sparkline=sparkline,
+            )
+        )
+    return RunSummaryBatchResponse(runs=summaries)
+
+
+async def _fetch_metric_values(
+    *,
+    session: AsyncSession,
+    run_id: str,
+    metric_name: str,
+) -> list[float]:
+    result = await session.execute(
+        select(MetricPoint.metric_value)
+        .where(
+            MetricPoint.run_id == run_id,
+            MetricPoint.metric_name == metric_name,
+        )
+        .order_by(MetricPoint.step)
+    )
+    return [row[0] for row in result.all()]
+
+
+async def _fetch_max_step(*, session: AsyncSession, run_id: str) -> int:
+    result = await session.execute(
+        select(func.max(MetricPoint.step)).where(
+            MetricPoint.run_id == run_id,
+            MetricPoint.metric_name == _TRAIN_LOSS_METRIC,
+        )
+    )
+    value = result.scalar_one_or_none()
+    return int(value) if value is not None else 0
+
+
+def _compute_wall_clock_ms(*, run: Run) -> int:
+    if run.started_at is None or run.completed_at is None:
+        return 0
+    start = datetime.fromisoformat(run.started_at)
+    end = datetime.fromisoformat(run.completed_at)
+    return int((end - start).total_seconds() * 1000)
+
+
+async def get_model_profile(
+    *,
+    session: AsyncSession,
+    project_id: str,
+    run_id: str,
+) -> ModelProfileResponse:
+    run = await get_run(session=session, run_id=run_id, project_id=project_id)
+
+    cfg_row = await session.get(ConfigVersion, run.config_version_id)
+    if cfg_row is None or not cfg_row.yaml_blob:
+        raise RunNotFoundError(f"no config for run {run_id}")
+    parsed_cfg = yaml.safe_load(cfg_row.yaml_blob)
+    model_block = parsed_cfg.get("model", {}) if isinstance(parsed_cfg, dict) else {}
+    model_id = model_block.get("model_id", "")
+
+    profile = (
+        await session.execute(
+            select(ModelProfile).where(
+                ModelProfile.project_id == project_id,
+                ModelProfile.model_id == model_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if profile is None or profile.layers_json is None:
+        raise RunNotFoundError(f"no model profile for run {run_id}")
+
+    raw_layers = json.loads(profile.layers_json)
+    return ModelProfileResponse(
+        run_id=run_id,
+        total_params=profile.parameter_count or 0,
+        trainable_params=profile.trainable_count or 0,
+        layers=[LayerProfile(**layer) for layer in raw_layers],
+    )
+
+
+async def list_weight_snapshots(
+    *,
+    session: AsyncSession,
+    project_id: str,
+    run_id: str,
+    layer_name: str | None,
+) -> WeightSnapshotResponse | WeightSnapshotAllResponse:
+    await get_run(session=session, run_id=run_id, project_id=project_id)
+    query = select(WeightSnapshot).where(WeightSnapshot.run_id == run_id)
+    if layer_name is not None:
+        query = query.where(WeightSnapshot.layer_name == layer_name)
+    query = query.order_by(WeightSnapshot.step)
+    rows = (await session.execute(query)).scalars().all()
+
+    if layer_name is not None:
+        return WeightSnapshotResponse(
+            run_id=run_id,
+            layer_name=layer_name,
+            points=[
+                LayerWeightStats(
+                    step=row.step,
+                    mean=row.mean,
+                    std=row.std,
+                    norm=row.norm,
+                    min_val=row.min_val,
+                    max_val=row.max_val,
+                )
+                for row in rows
+            ],
+        )
+
+    by_layer: dict[str, list[LayerWeightStats]] = {}
+    for row in rows:
+        by_layer.setdefault(row.layer_name, []).append(
+            LayerWeightStats(
+                step=row.step,
+                mean=row.mean,
+                std=row.std,
+                norm=row.norm,
+                min_val=row.min_val,
+                max_val=row.max_val,
+            )
+        )
+    return WeightSnapshotAllResponse(run_id=run_id, snapshots_by_layer=by_layer)

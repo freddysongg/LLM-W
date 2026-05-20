@@ -2,8 +2,11 @@ import * as React from "react";
 import type { MetricName, MetricPoint } from "@/types/run";
 import { ChartBox } from "@/components/shared/chart-box";
 import type { ChartSeries } from "@/components/shared/chart-box";
+import { OtherMetricsSection } from "@/components/runs/other-metrics-section";
 
 interface LiveMetricsChartsProps {
+  readonly projectId: string;
+  readonly runId: string;
   readonly metricPoints: ReadonlyArray<MetricPoint>;
 }
 
@@ -38,17 +41,24 @@ function buildSeries({
   };
 }
 
-export function LiveMetricsCharts({ metricPoints }: LiveMetricsChartsProps): React.JSX.Element {
+export function LiveMetricsCharts({
+  projectId,
+  runId,
+  metricPoints,
+}: LiveMetricsChartsProps): React.JSX.Element {
   return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-      {CHART_SPECS.map((spec) => (
-        <ChartBox
-          key={spec.metric}
-          title={spec.title}
-          series={[buildSeries({ ...spec, points: metricPoints })]}
-          height={200}
-        />
-      ))}
+    <div>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        {CHART_SPECS.map((spec) => (
+          <ChartBox
+            key={spec.metric}
+            title={spec.title}
+            series={[buildSeries({ ...spec, points: metricPoints })]}
+            height={200}
+          />
+        ))}
+      </div>
+      <OtherMetricsSection projectId={projectId} runId={runId} metricPoints={metricPoints} />
     </div>
   );
 }

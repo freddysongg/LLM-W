@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import signal as _signal
 import sys
 import uuid
@@ -25,12 +26,19 @@ from app.core.exceptions import (
 from app.models.artifact import Artifact
 from app.models.config_version import ConfigVersion
 from app.models.metric_point import MetricPoint
+from app.models.model_profile import ModelProfile
 from app.models.project import Project
 from app.models.run import Run
 from app.models.run_stage import RunStage
+from app.models.weight_snapshot import WeightSnapshot
 from app.schemas.run import RunCreate, RunResponse
 from app.schemas.workbench_config import ExecutionConfig
 from app.services import suggestion_service
+from app.services.config_service import serialize_config_yaml_snapshot
+from app.services.storage_manager import (
+    apply_retention_after_checkpoint,
+    run_project_cleanup,
+)
 from app.services.training_dispatcher import (
     TrainingProcess,
     UnsupportedEnvironmentError,
@@ -77,6 +85,30 @@ _IS_UNIX = sys.platform != "win32"
 
 # Maps run_id → TrainingProcess handle
 _active_processes: dict[str, TrainingProcess] = {}
+
+# Strong references to the orchestration tasks spawned by create_run. Without
+# these, Python's event loop only holds weak refs (see asyncio.create_task
+# docs) and the GC can silently drop a task mid-flight, leaving a run stuck
+# in "pending" with no pid and no trainer ever launched.
+_active_tasks: dict[str, asyncio.Task[None]] = {}
+
+# Post-completion analysis tasks fanned out from terminal-state transitions.
+# Same weak-ref hazard as `_active_tasks` — without a strong reference here
+# the auto-analyze call can disappear before it runs.
+_active_analysis_tasks: set[asyncio.Task[None]] = set()
+
+
+def _log_background_task_exception(task: asyncio.Task[None]) -> None:
+    """Surface unhandled exceptions from background tasks.
+
+    Without this, an exception escapes as a GC-time `Task exception was
+    never retrieved` warning, with no stack trace tied to the failing run.
+    """
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.error("background task %s raised", task.get_name(), exc_info=exc)
 
 
 async def list_runs(*, session: AsyncSession, project_id: str) -> list[Run]:
@@ -202,6 +234,15 @@ async def create_run(
     await session.commit()
     await session.refresh(run)
 
+    project_dir = Path(project.directory_path)
+
+    await _write_config_snapshot(
+        run_id=run.id,
+        project_id=project_id,
+        project_dir=project_dir,
+        config_yaml=config_version.yaml_blob,
+    )
+
     await event_bus.publish(
         event_type=f"project.{project_id}.ws",
         payload={
@@ -224,20 +265,25 @@ async def create_run(
         if parent is not None and parent.last_checkpoint_path:
             resume_checkpoint = parent.last_checkpoint_path
 
-    config_path = _resolve_config_path(
-        config_version=config_version, project_dir=settings.projects_dir / project.name
-    )
-    project_dir = settings.projects_dir / project.name
+    config_path = _resolve_config_path(config_version=config_version, project_dir=project_dir)
 
-    asyncio.create_task(
+    task = asyncio.create_task(
         _run_trainer_subprocess(
             run_id=run_id,
             project_id=project_id,
             config_path=config_path,
             project_dir=project_dir,
             resume_from_checkpoint=resume_checkpoint,
-        )
+        ),
+        name=f"trainer-orchestration-{run_id}",
     )
+    _active_tasks[run_id] = task
+
+    def _on_task_done(completed: asyncio.Task[None]) -> None:
+        _active_tasks.pop(run_id, None)
+        _log_background_task_exception(completed)
+
+    task.add_done_callback(_on_task_done)
 
     return run
 
@@ -356,7 +402,13 @@ async def _mark_pending_stages_skipped(*, run_id: str) -> None:
 
 
 async def _record_artifact(
-    *, run_id: str, project_id: str, artifact_type: str, file_path: str, size_bytes: int
+    *,
+    run_id: str,
+    project_id: str,
+    artifact_type: str,
+    file_path: str,
+    size_bytes: int,
+    is_best: int = 0,
 ) -> None:
     async with async_session_factory() as session:
         now = datetime.now(UTC).isoformat()
@@ -368,7 +420,153 @@ async def _record_artifact(
             file_path=file_path,
             file_size_bytes=size_bytes,
             is_retained=1,
+            is_best=is_best,
             created_at=now,
+        )
+        session.add(artifact)
+        await session.commit()
+
+
+async def _extract_model_identity(
+    *, session: AsyncSession, run: Run
+) -> tuple[str, str, str]:
+    """Derive (model_id, source, family) from the run's ConfigVersion YAML.
+
+    The Run table has no direct model columns, so identity is sourced from the
+    immutable config snapshot that was used to launch the run.
+    """
+    config_version = await session.get(ConfigVersion, run.config_version_id)
+    if config_version is None or not config_version.yaml_blob:
+        return ("", "", "")
+    parsed: object = yaml.safe_load(config_version.yaml_blob)
+    if not isinstance(parsed, dict):
+        return ("", "", "")
+    model_block = parsed.get("model", {})
+    if not isinstance(model_block, dict):
+        return ("", "", "")
+    return (
+        str(model_block.get("model_id", "") or ""),
+        str(model_block.get("source", "") or ""),
+        str(model_block.get("family", "") or ""),
+    )
+
+
+async def _persist_model_profile(
+    *,
+    run_id: str,
+    project_id: str,
+    total_params: int,
+    trainable_params: int,
+    layers: list[dict[str, Any]],
+) -> None:
+    async with async_session_factory() as session:
+        run = await session.get(Run, run_id)
+        if run is None:
+            return
+
+        model_id, model_source, model_family = await _extract_model_identity(
+            session=session, run=run
+        )
+
+        existing = (
+            await session.execute(
+                select(ModelProfile).where(
+                    ModelProfile.project_id == project_id,
+                    ModelProfile.model_id == model_id,
+                )
+            )
+        ).scalar_one_or_none()
+
+        now = datetime.now(UTC).isoformat()
+        if existing is None:
+            session.add(
+                ModelProfile(
+                    id=str(uuid.uuid4()),
+                    project_id=project_id,
+                    source=model_source,
+                    model_id=model_id,
+                    family=model_family,
+                    parameter_count=total_params,
+                    trainable_count=trainable_params,
+                    layers_json=json.dumps(layers),
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+        elif existing.layers_json is None:
+            existing.layers_json = json.dumps(layers)
+            existing.parameter_count = existing.parameter_count or total_params
+            existing.trainable_count = existing.trainable_count or trainable_params
+            existing.updated_at = now
+
+        await session.commit()
+
+
+async def _persist_weight_stats(
+    *,
+    run_id: str,
+    step: int,
+    stats: dict[str, dict[str, float]],
+) -> None:
+    async with async_session_factory() as session:
+        now = datetime.now(UTC).isoformat()
+        session.add_all(
+            [
+                WeightSnapshot(
+                    run_id=run_id,
+                    step=step,
+                    layer_name=layer_name,
+                    mean=values["mean"],
+                    std=values["std"],
+                    norm=values["norm"],
+                    min_val=values["min"],
+                    max_val=values["max"],
+                    created_at=now,
+                )
+                for layer_name, values in stats.items()
+            ]
+        )
+        await session.commit()
+
+
+async def _run_final_retention_sweep(
+    *,
+    session: AsyncSession,
+    project_id: str,
+) -> None:
+    """On run termination, invoke the project-level cleanup which honors
+    delete_intermediates_after_completion per config."""
+    await run_project_cleanup(session=session, project_id=project_id)
+
+
+async def _write_config_snapshot(
+    *,
+    run_id: str,
+    project_id: str,
+    project_dir: Path,
+    config_yaml: str,
+) -> None:
+    run_dir = project_dir / "runs" / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    snapshot_path = run_dir / "config.yaml"
+    effective_yaml = serialize_config_yaml_snapshot(raw_yaml=config_yaml)
+
+    # tmp-write + os.replace keeps readers from observing a partial file if the
+    # process dies mid-write; matches trainer.py's checkpoint marker pattern.
+    tmp_path = snapshot_path.with_suffix(".yaml.tmp")
+    tmp_path.write_text(effective_yaml, encoding="utf-8")
+    os.replace(tmp_path, snapshot_path)
+
+    async with async_session_factory() as session:
+        artifact = Artifact(
+            id=str(uuid.uuid4()),
+            run_id=run_id,
+            project_id=project_id,
+            artifact_type="config_snapshot",
+            file_path=str(snapshot_path),
+            file_size_bytes=snapshot_path.stat().st_size,
+            is_retained=1,
+            created_at=datetime.now(UTC).isoformat(),
         )
         session.add(artifact)
         await session.commit()
@@ -527,6 +725,7 @@ async def _process_trainer_event(
         step = event["step"]
         path = event["path"]
         size_bytes = event.get("size_bytes", 0)
+        is_best_eval = bool(event.get("is_best_eval", False))
         await _update_run_status(run_id=run_id, status="running", last_checkpoint_path=path)
         await _record_artifact(
             run_id=run_id,
@@ -534,7 +733,13 @@ async def _process_trainer_event(
             artifact_type="checkpoint",
             file_path=path,
             size_bytes=size_bytes,
+            is_best=1 if is_best_eval else 0,
         )
+        async with async_session_factory() as session:
+            retention_result = await apply_retention_after_checkpoint(
+                session=session,
+                run_id=run_id,
+            )
         await event_bus.publish(
             event_type=f"project.{project_id}.ws",
             payload={
@@ -547,6 +752,21 @@ async def _process_trainer_event(
                     "step": step,
                     "path": path,
                     "sizeBytes": size_bytes,
+                    "isBestEval": is_best_eval,
+                },
+            },
+        )
+        await event_bus.publish(
+            event_type=f"project.{project_id}.ws",
+            payload={
+                "channel": "system",
+                "event": "retention_applied",
+                "runId": run_id,
+                "timestamp": timestamp,
+                "payload": {
+                    "runId": run_id,
+                    "kept": retention_result["kept"],
+                    "pruned": retention_result["pruned"],
                 },
             },
         )
@@ -570,6 +790,51 @@ async def _process_trainer_event(
                 "runId": run_id,
                 "timestamp": timestamp,
                 "payload": {"runId": run_id, "artifactType": artifact_type, "path": path},
+            },
+        )
+
+    elif event_type == "model_profile":
+        await _persist_model_profile(
+            run_id=run_id,
+            project_id=project_id,
+            total_params=event["total_params"],
+            trainable_params=event["trainable_params"],
+            layers=event["layers"],
+        )
+        await event_bus.publish(
+            event_type=f"project.{project_id}.ws",
+            payload={
+                "channel": "system",
+                "event": "model_profile_ready",
+                "runId": run_id,
+                "timestamp": timestamp,
+                "payload": {
+                    "runId": run_id,
+                    "layerCount": len(event["layers"]),
+                    "totalParams": event["total_params"],
+                    "trainableParams": event["trainable_params"],
+                },
+            },
+        )
+
+    elif event_type == "weight_stats":
+        await _persist_weight_stats(
+            run_id=run_id,
+            step=event["step"],
+            stats=event["stats"],
+        )
+        await event_bus.publish(
+            event_type=f"project.{project_id}.ws",
+            payload={
+                "channel": "system",
+                "event": "weight_stats_recorded",
+                "runId": run_id,
+                "timestamp": timestamp,
+                "payload": {
+                    "runId": run_id,
+                    "step": event["step"],
+                    "layerCount": len(event["stats"]),
+                },
             },
         )
 
@@ -775,6 +1040,8 @@ async def _run_trainer_subprocess(
         if terminal_status == "completed":
             await _mark_pending_stages_skipped(run_id=run_id)
             await _update_run_status(run_id=run_id, status="completed")
+            async with async_session_factory() as session:
+                await _run_final_retention_sweep(session=session, project_id=project_id)
             await event_bus.publish(
                 event_type=f"project.{project_id}.ws",
                 payload={
@@ -789,10 +1056,18 @@ async def _run_trainer_subprocess(
                     },
                 },
             )
-            asyncio.create_task(_auto_analyze_if_enabled(run_id=run_id, project_id=project_id))
+            analysis_task = asyncio.create_task(
+                _auto_analyze_if_enabled(run_id=run_id, project_id=project_id),
+                name=f"auto-analyze-{run_id}",
+            )
+            _active_analysis_tasks.add(analysis_task)
+            analysis_task.add_done_callback(_active_analysis_tasks.discard)
+            analysis_task.add_done_callback(_log_background_task_exception)
         elif terminal_status == "cancelled":
             await _mark_pending_stages_skipped(run_id=run_id)
             await _update_run_status(run_id=run_id, status="cancelled")
+            async with async_session_factory() as session:
+                await _run_final_retention_sweep(session=session, project_id=project_id)
             await event_bus.publish(
                 event_type=f"project.{project_id}.ws",
                 payload={
@@ -811,6 +1086,8 @@ async def _run_trainer_subprocess(
                 failure_reason=captured_failure_reason,
                 failure_stage=captured_failure_stage or None,
             )
+            async with async_session_factory() as session:
+                await _run_final_retention_sweep(session=session, project_id=project_id)
             await event_bus.publish(
                 event_type=f"project.{project_id}.ws",
                 payload={
@@ -836,6 +1113,8 @@ async def _run_trainer_subprocess(
             status="failed",
             failure_reason=str(exc),
         )
+        async with async_session_factory() as session:
+            await _run_final_retention_sweep(session=session, project_id=project_id)
 
 
 async def cancel_run(*, session: AsyncSession, run_id: str) -> Run:

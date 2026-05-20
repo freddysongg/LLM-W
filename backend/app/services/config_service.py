@@ -247,3 +247,24 @@ def _compute_diff(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
         result["removed"] = removed
 
     return result
+
+
+def compute_config_diff(*, old_yaml: str, new_yaml: str) -> dict[str, Any]:
+    old_parsed = yaml.safe_load(old_yaml) or {}
+    new_parsed = yaml.safe_load(new_yaml) or {}
+    raw_diff = _compute_diff(old_parsed, new_parsed)
+    return {
+        "changed": raw_diff.get("changed", {}),
+        "added": raw_diff.get("added", {}),
+        "removed": raw_diff.get("removed", {}),
+    }
+
+
+def serialize_config_yaml_snapshot(*, raw_yaml: str) -> str:
+    try:
+        parsed = yaml.safe_load(raw_yaml)
+    except yaml.YAMLError as exc:
+        raise ConfigValidationError(str(exc)) from exc
+    if not isinstance(parsed, dict):
+        raise ConfigValidationError("Config must be a YAML mapping")
+    return yaml.safe_dump(parsed, sort_keys=False)

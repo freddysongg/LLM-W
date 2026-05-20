@@ -4,6 +4,7 @@ import { Download, FileText, Play } from "lucide-react";
 import { useAppStore } from "@/stores/app-store";
 import { useActiveConfig, useSaveConfig } from "@/hooks/useConfigs";
 import { useCreateRun, useRuns } from "@/hooks/useRuns";
+import { useRunSummaries } from "@/hooks/useRunSummaries";
 import { useModelProfile } from "@/hooks/useModelProfile";
 import { useDatasetProfile } from "@/hooks/useDatasetProfile";
 import { Button } from "@/components/ui/button";
@@ -12,9 +13,11 @@ import { NoProjectSelected } from "@/components/shared/no-project-selected";
 import { CopyForAI } from "@/components/shared/copy-for-ai";
 import { buildTrainingPrompt } from "@/lib/ai-copy-prompts";
 import { denormalizeYamlConfig, normalizeYamlConfig } from "@/lib/yaml-config";
-import type { MetricPoint, Run } from "@/types/run";
+import type { Run } from "@/types/run";
+import type { RunSummary } from "@/types/run-summary";
 import type { TrainingConfig, WorkbenchConfig } from "@/types/config";
 import { useToast } from "@/hooks/use-toast";
+import { describeApiError } from "@/lib/api-error";
 import {
   TrainingForm,
   type TrainingFormSlice,
@@ -116,9 +119,16 @@ export default function TrainingPage(): React.JSX.Element {
     );
   }, [runs]);
 
-  const metricsByRun = React.useMemo<Readonly<Record<string, ReadonlyArray<MetricPoint>>>>(() => {
-    return {};
-  }, []);
+  const runIds = React.useMemo<ReadonlyArray<string>>(
+    () => trainingHistory.map((run) => run.id),
+    [trainingHistory],
+  );
+  const { data: summaries } = useRunSummaries({ projectId, runIds });
+  const summariesByRun = React.useMemo<ReadonlyMap<string, RunSummary>>(() => {
+    const entries = new Map<string, RunSummary>();
+    (summaries ?? []).forEach((summary) => entries.set(summary.runId, summary));
+    return entries;
+  }, [summaries]);
 
   const yamlPreview = React.useMemo<string>(() => {
     if (!parsedConfig || !slice) return "";
@@ -160,10 +170,17 @@ export default function TrainingPage(): React.JSX.Element {
     );
   };
 
-  const handleLaunch = ({ runName }: { readonly runName: string }): void => {
-    if (!configVersion) return;
+  const launchWithConfigVersion = ({
+    configVersionId,
+    runName,
+    savedNewVersion,
+  }: {
+    readonly configVersionId: string;
+    readonly runName: string;
+    readonly savedNewVersion: boolean;
+  }): void => {
     createRun.mutate(
-      { projectId, configVersionId: configVersion.id },
+      { projectId, configVersionId },
       {
         onSuccess: () => {
           setIsLaunchDialogOpen(false);
@@ -172,10 +189,57 @@ export default function TrainingPage(): React.JSX.Element {
             description: `Started ${runName}.`,
           });
         },
-        onError: () => {
+        onError: (cause) => {
+          const fallback = savedNewVersion
+            ? "Config saved as a new version, but the run failed to start."
+            : "Unable to start training run.";
           toast({
             title: "Launch failed",
-            description: "Unable to start training run.",
+            description: describeApiError({ cause, fallback }),
+            variant: "destructive",
+          });
+        },
+      },
+    );
+  };
+
+  const handleLaunch = ({ runName }: { readonly runName: string }): void => {
+    if (!configVersion || !parsedConfig || !slice) return;
+    const composed = composeFullConfig({ base: parsedConfig, slice });
+    const composedYaml = stringifyYaml(denormalizeYamlConfig(composed));
+
+    if (composedYaml === configVersion.yamlBlob) {
+      launchWithConfigVersion({
+        configVersionId: configVersion.id,
+        runName,
+        savedNewVersion: false,
+      });
+      return;
+    }
+
+    saveConfig.mutate(
+      {
+        request: {
+          projectId,
+          yamlContent: composedYaml,
+          sourceTag: "user",
+        },
+      },
+      {
+        onSuccess: (newVersion) => {
+          launchWithConfigVersion({
+            configVersionId: newVersion.id,
+            runName,
+            savedNewVersion: true,
+          });
+        },
+        onError: (cause) => {
+          toast({
+            title: "Launch failed",
+            description: describeApiError({
+              cause,
+              fallback: "Could not save config before launch.",
+            }),
             variant: "destructive",
           });
         },
@@ -236,7 +300,7 @@ export default function TrainingPage(): React.JSX.Element {
             variant="primary"
             size="sm"
             onClick={() => setIsLaunchDialogOpen(true)}
-            disabled={!configVersion || createRun.isPending}
+            disabled={!configVersion || createRun.isPending || saveConfig.isPending}
           >
             <Play aria-hidden="true" />
             {createRun.isPending ? "Launching…" : "Launch run"}
@@ -278,7 +342,7 @@ export default function TrainingPage(): React.JSX.Element {
           <TabsContent value="history">
             <TrainingHistoryTab
               runs={trainingHistory}
-              metricsByRun={metricsByRun}
+              summariesByRun={summariesByRun}
               onRerun={() => setIsLaunchDialogOpen(true)}
             />
           </TabsContent>
@@ -287,6 +351,8 @@ export default function TrainingPage(): React.JSX.Element {
 
       <YamlPreviewDialog
         isOpen={isYamlDialogOpen}
+        projectId={projectId}
+        activeVersionId={configVersion?.id ?? null}
         yamlContent={yamlPreview}
         onClose={() => setIsYamlDialogOpen(false)}
       />
@@ -297,7 +363,7 @@ export default function TrainingPage(): React.JSX.Element {
           method={resolveMethod(slice)}
           modelId={modelProfile?.model_id ?? null}
           datasetId={datasetProfile?.datasetId ?? null}
-          isLaunching={createRun.isPending}
+          isLaunching={createRun.isPending || saveConfig.isPending}
           onLaunch={handleLaunch}
           onClose={() => setIsLaunchDialogOpen(false)}
         />

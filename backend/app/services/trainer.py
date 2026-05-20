@@ -171,8 +171,92 @@ def _emit_metric(*, step: int, epoch: float, metrics: dict[str, float]) -> None:
     _emit({"type": "metric", "step": step, "epoch": epoch, "metrics": metrics})
 
 
-def _emit_checkpoint(*, step: int, path: str, size_bytes: int) -> None:
-    _emit({"type": "checkpoint", "step": step, "path": path, "size_bytes": size_bytes})
+def _emit_checkpoint(
+    *,
+    step: int,
+    path: str,
+    size_bytes: int,
+    is_best_eval: bool = False,
+) -> None:
+    _emit(
+        {
+            "type": "checkpoint",
+            "step": step,
+            "path": path,
+            "size_bytes": size_bytes,
+            "is_best_eval": is_best_eval,
+        }
+    )
+
+
+def _emit_model_profile(*, model: Any) -> None:
+    if not _is_main_process():
+        return
+
+    layers: list[dict[str, Any]] = []
+    total_params = 0
+    trainable_params = 0
+    for name, param in model.named_parameters():
+        count = int(param.numel())
+        total_params += count
+        if param.requires_grad:
+            trainable_params += count
+        layers.append(
+            {
+                "name": name,
+                "shape": list(param.shape),
+                "param_count": count,
+                "trainable": bool(param.requires_grad),
+                "dtype": str(param.dtype).replace("torch.", ""),
+            }
+        )
+
+    _emit(
+        {
+            "type": "model_profile",
+            "total_params": total_params,
+            "trainable_params": trainable_params,
+            "layers": layers,
+        }
+    )
+
+
+def _emit_weight_stats(*, model: Any, step: int) -> None:
+    if not _is_main_process():
+        return
+
+    stats: dict[str, dict[str, float]] = {}
+    for name, param in model.named_parameters():
+        data = param.data
+        stats[name] = {
+            "mean": float(data.mean().item()),
+            "std": float(data.std().item()) if data.numel() > 1 else 0.0,
+            "norm": float(data.norm().item()),
+            "min": float(data.min().item()),
+            "max": float(data.max().item()),
+        }
+
+    _emit({"type": "weight_stats", "step": step, "stats": stats})
+
+
+class _BestEvalTracker:
+    """Tracks the lowest mid-training eval loss seen across callback evals.
+
+    Final-evaluation metrics are intentionally excluded because they are a
+    post-training observation, not a candidate for retention-protected
+    checkpoint identification.
+    """
+
+    def __init__(self) -> None:
+        self.best_loss: float = float("inf")
+        self.best_step: int | None = None
+
+    def update(self, *, step: int, eval_loss: float) -> bool:
+        if eval_loss < self.best_loss:
+            self.best_loss = eval_loss
+            self.best_step = step
+            return True
+        return False
 
 
 def _emit_complete(*, status: str, final_metrics: dict[str, float]) -> None:
@@ -314,10 +398,12 @@ class WorkbenchCallback(TrainerCallback):
         run_id: str,
         project_dir: Path,
         heartbeat_state: dict[str, Any],
+        best_eval_tracker: _BestEvalTracker,
     ) -> None:
         self._run_id = run_id
         self._project_dir = project_dir
         self._heartbeat_state = heartbeat_state
+        self._best_eval_tracker = best_eval_tracker
         self._last_metrics: dict[str, float] = {}
         self._last_log_time: float | None = None
         self._last_num_tokens: float | None = None
@@ -445,6 +531,9 @@ class WorkbenchCallback(TrainerCallback):
             epoch = float(state.epoch or 0.0)
             eval_metrics = {k: float(v) for k, v in metrics.items() if isinstance(v, (int, float))}
             _emit_metric(step=step, epoch=epoch, metrics=eval_metrics)
+            eval_loss = eval_metrics.get("eval_loss")
+            if eval_loss is not None:
+                self._best_eval_tracker.update(step=step, eval_loss=eval_loss)
         _emit_stage_complete(
             stage_name=_CALLBACK_EVAL_STAGE_NAME,
             duration_ms=0,
@@ -478,7 +567,16 @@ class WorkbenchCallback(TrainerCallback):
             )
             return
         size = _get_dir_size(checkpoint_dir)
-        _emit_checkpoint(step=step, path=str(checkpoint_dir), size_bytes=size)
+        is_best_eval = self._best_eval_tracker.best_step == step
+        _emit_checkpoint(
+            step=step,
+            path=str(checkpoint_dir),
+            size_bytes=size,
+            is_best_eval=is_best_eval,
+        )
+        model = kwargs.get("model")
+        if model is not None:
+            _emit_weight_stats(model=model, step=step)
 
     def on_train_end(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
         if not _is_main_process():
@@ -1026,10 +1124,12 @@ def _stage_training_preparation(
             include_num_input_tokens_seen=True,
         )
 
+        best_eval_tracker = _BestEvalTracker()
         callback = WorkbenchCallback(
             run_id=run_id,
             project_dir=project_dir,
             heartbeat_state=heartbeat_state,
+            best_eval_tracker=best_eval_tracker,
         )
 
         _emit_log(severity="info", message="Initializing SFTTrainer...", stage=stage_name)
@@ -1174,6 +1274,47 @@ def _poll_cancel_flag(cancel_flag_path: Path, stop_event: threading.Event) -> No
         stop_event.wait(timeout=1.0)
 
 
+def _emit_final_evaluation(
+    *,
+    hf_trainer: Any,
+    has_eval_dataset: bool,
+) -> None:
+    if not _is_main_process():
+        return
+
+    start = time.perf_counter()
+    _emit_stage_enter(stage_name="evaluation", stage_order=11)
+
+    if not has_eval_dataset:
+        duration_ms = int((time.perf_counter() - start) * 1000)
+        _emit_stage_complete(
+            stage_name="evaluation",
+            duration_ms=duration_ms,
+            output_summary="skipped; no eval dataset configured",
+        )
+        return
+
+    eval_metrics = hf_trainer.evaluate()
+    step = hf_trainer.state.global_step
+    epoch = float(hf_trainer.state.epoch or 0.0)
+    final_metrics: dict[str, float] = {}
+    for key, value in eval_metrics.items():
+        if not isinstance(value, (int, float)):
+            continue
+        final_key = key if key.startswith("final_") else f"final_{key}"
+        final_metrics[final_key] = float(value)
+
+    if final_metrics:
+        _emit_metric(step=step, epoch=epoch, metrics=final_metrics)
+
+    duration_ms = int((time.perf_counter() - start) * 1000)
+    _emit_stage_complete(
+        stage_name="evaluation",
+        duration_ms=duration_ms,
+        output_summary=f"final eval at step {step}; {len(final_metrics)} metrics emitted",
+    )
+
+
 def main() -> int:
     if _IS_UNIX:
         signal.signal(signal.SIGTERM, _handle_sigterm)
@@ -1246,6 +1387,8 @@ def main() -> int:
             _emit_complete(status="cancelled", final_metrics=final_metrics)
             return 0
 
+        _emit_model_profile(model=model)
+
         heartbeat_state["stage"] = "dataset_resolution"
         train_dataset, eval_dataset = _stage_dataset_resolution(
             raw_config=raw_config, tokenizer=tokenizer
@@ -1303,14 +1446,9 @@ def main() -> int:
                 k: float(v) for k, v in last_log.items() if isinstance(v, (int, float))
             }
 
-        # Stage 11 is a reserved no-op placeholder in v4: eval runs manually
-        # via the UI button or `llmw eval` CLI, never inline at training
-        # completion. The emission keeps the 14-stage timeline contract honest.
-        _emit_stage_enter(stage_name="evaluation", stage_order=11)
-        _emit_stage_complete(
-            stage_name="evaluation",
-            duration_ms=0,
-            output_summary="reserved no-op; v4 eval runs manually via UI or CLI",
+        _emit_final_evaluation(
+            hf_trainer=trainer,
+            has_eval_dataset=eval_dataset is not None,
         )
 
         heartbeat_state["stage"] = "artifact_finalization"
