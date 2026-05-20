@@ -138,15 +138,15 @@ def _import_pipecat_modules() -> dict[str, Any]:
         from pipecat.pipeline.pipeline import Pipeline
         from pipecat.pipeline.runner import PipelineRunner
         from pipecat.pipeline.task import PipelineTask
-        from pipecat.processors.aggregators.llm_context import (
-            LLMContext,
+        from pipecat.processors.aggregators.llm_context import LLMContext
+        from pipecat.processors.aggregators.llm_response_universal import (
             LLMContextAggregatorPair,
         )
         from pipecat.serializers.base_serializer import FrameSerializer
         from pipecat.services.cartesia.tts import CartesiaTTSService
         from pipecat.services.deepgram.stt import DeepgramSTTService
         from pipecat.services.openai.llm import OpenAILLMService
-        from pipecat.transports.network.fastapi_websocket import (
+        from pipecat.transports.websocket.fastapi import (
             FastAPIWebsocketParams,
             FastAPIWebsocketTransport,
         )

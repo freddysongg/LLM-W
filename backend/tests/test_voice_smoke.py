@@ -65,6 +65,8 @@ def _install_fake_pipecat_modules(monkeypatch: pytest.MonkeyPatch) -> None:
         "pipecat.processors.aggregators": MagicMock(),
         "pipecat.processors.aggregators.llm_context": MagicMock(
             LLMContext=MagicMock(),
+        ),
+        "pipecat.processors.aggregators.llm_response_universal": MagicMock(
             LLMContextAggregatorPair=MagicMock(),
         ),
         "pipecat.serializers": MagicMock(),
@@ -77,8 +79,8 @@ def _install_fake_pipecat_modules(monkeypatch: pytest.MonkeyPatch) -> None:
         "pipecat.services.openai": MagicMock(),
         "pipecat.services.openai.llm": MagicMock(OpenAILLMService=MagicMock()),
         "pipecat.transports": MagicMock(),
-        "pipecat.transports.network": MagicMock(),
-        "pipecat.transports.network.fastapi_websocket": MagicMock(
+        "pipecat.transports.websocket": MagicMock(),
+        "pipecat.transports.websocket.fastapi": MagicMock(
             FastAPIWebsocketParams=MagicMock(),
             FastAPIWebsocketTransport=MagicMock(),
         ),

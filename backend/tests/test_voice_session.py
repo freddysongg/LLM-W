@@ -93,6 +93,10 @@ def test_voice_module_imports_with_pipecat_blocked() -> None:
         "pipecat.pipeline.pipeline",
         "pipecat.pipeline.runner",
         "pipecat.pipeline.task",
+        "pipecat.processors",
+        "pipecat.processors.aggregators",
+        "pipecat.processors.aggregators.llm_context",
+        "pipecat.processors.aggregators.llm_response_universal",
         "pipecat.serializers",
         "pipecat.serializers.base_serializer",
         "pipecat.services",
@@ -103,8 +107,8 @@ def test_voice_module_imports_with_pipecat_blocked() -> None:
         "pipecat.services.openai",
         "pipecat.services.openai.llm",
         "pipecat.transports",
-        "pipecat.transports.network",
-        "pipecat.transports.network.fastapi_websocket",
+        "pipecat.transports.websocket",
+        "pipecat.transports.websocket.fastapi",
     }
     saved: dict[str, object] = {}
     for name in blocked:
@@ -663,6 +667,8 @@ async def test_start_voice_session_constructs_pipeline_when_pipecat_available(
         "pipecat.processors.aggregators": MagicMock(),
         "pipecat.processors.aggregators.llm_context": MagicMock(
             LLMContext=_FakeLLMContext,
+        ),
+        "pipecat.processors.aggregators.llm_response_universal": MagicMock(
             LLMContextAggregatorPair=_FakeAggregatorPair,
         ),
         "pipecat.serializers": MagicMock(),
@@ -684,8 +690,8 @@ async def test_start_voice_session_constructs_pipeline_when_pipecat_available(
         "pipecat.services.openai": MagicMock(),
         "pipecat.services.openai.llm": MagicMock(OpenAILLMService=_FakeOpenAI),
         "pipecat.transports": MagicMock(),
-        "pipecat.transports.network": MagicMock(),
-        "pipecat.transports.network.fastapi_websocket": MagicMock(
+        "pipecat.transports.websocket": MagicMock(),
+        "pipecat.transports.websocket.fastapi": MagicMock(
             FastAPIWebsocketTransport=_FakeTransport,
             FastAPIWebsocketParams=_FakeParams,
         ),
