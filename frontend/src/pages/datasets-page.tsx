@@ -70,11 +70,19 @@ type AddSourceOption = "huggingface" | "upload-file" | "s3-gcs" | "url";
 interface LibraryEntry {
   readonly name: string;
   readonly format: DatasetFormat;
+  readonly source: DatasetSource;
   readonly rows: string;
   readonly size: string;
   readonly isFrozen: boolean;
   readonly isActive: boolean;
 }
+
+const SOURCE_PILL_LABEL: Readonly<Record<DatasetSource, string>> = {
+  huggingface: "HF",
+  local_jsonl: "local jsonl",
+  local_csv: "local csv",
+  custom: "custom",
+};
 
 interface AddDatasetDraft {
   readonly sourceMode: AddSourceOption;
@@ -227,6 +235,7 @@ function buildLibraryEntries({ profile }: BuildLibraryParams): ReadonlyArray<Lib
     {
       name: profile.datasetId,
       format: profile.format,
+      source: profile.source,
       rows: formatRowCount(profile.totalRows),
       size: estimateSizeLabel(profile.totalRows),
       isFrozen: false,
@@ -564,6 +573,9 @@ export default function DatasetsPage(): React.JSX.Element {
                           <span className="truncate font-mono text-[12px] text-ink-1">
                             {entry.name}
                           </span>
+                          <Badge variant="outline" className="text-[10px]">
+                            {SOURCE_PILL_LABEL[entry.source]}
+                          </Badge>
                           {isSelected ? <Badge variant="iris">ACTIVE</Badge> : null}
                         </div>
                         <div className="truncate font-mono text-[10px] text-ink-3">
