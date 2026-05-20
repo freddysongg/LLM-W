@@ -628,6 +628,66 @@ async def test_strategy_disabled_fails_immediately(
         assert run.failure_reason == "oom"
 
 
+async def test_strategy_disabled_publishes_rolled_up_attempt_cost(
+    patched_session_factory: async_sessionmaker[Any],
+    captured_events: list[dict[str, Any]],
+) -> None:
+    """Disabled-strategy OOM must report the cost of the failed Modal attempt, not zero."""
+    execution = ExecutionConfig.model_validate(
+        yaml.safe_load(_yaml_for_modal_run(strategy="disabled"))["execution"]
+    )
+
+    now = "2026-05-19T12:00:00+00:00"
+    async with patched_session_factory() as session:
+        session.add(
+            Run(
+                id="r1",
+                project_id="p1",
+                config_version_id="cv1",
+                status="running",
+                modal_gpu_type="l40s",
+                environment="modal",
+                device="cuda",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.add(
+            RunAttempt(
+                id="a0",
+                run_id="r1",
+                attempt_index=0,
+                gpu_type="l40s",
+                device="cuda",
+                started_at=now,
+                created_at=now,
+            )
+        )
+        await session.commit()
+
+    handled = await orchestrator._handle_trainer_oom(
+        run_id="r1",
+        project_id="p1",
+        execution=execution,
+        exit_code=1,
+        stderr_tail="CUDA out of memory",
+        exception_type_name=None,
+    )
+    assert handled is True
+
+    failed = [e for e in captured_events if e.get("event") == "run_failed"]
+    assert len(failed) == 1
+    # _close_failed_attempt closes the Modal attempt with a positive cost based
+    # on the l40s rate × elapsed time. That cost must surface in both the run
+    # row and the WS envelope; the bug had it pinned at 0.
+    async with patched_session_factory() as session:
+        run = await session.get(Run, "r1")
+        assert run is not None
+        assert run.cost_usd is not None
+        assert run.cost_usd > 0.0
+        assert failed[0]["payload"]["costUsd"] == run.cost_usd
+
+
 async def test_local_oom_emits_system_event_but_does_not_trigger_fallback(
     patched_session_factory: async_sessionmaker[Any],
     captured_events: list[dict[str, Any]],

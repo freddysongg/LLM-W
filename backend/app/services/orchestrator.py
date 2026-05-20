@@ -1538,12 +1538,18 @@ async def _fail_run_with_oom_reason(
     failure_reason: str,
     publish_run_failed: bool,
 ) -> None:
+    # Callers (disabled strategy, chain exhausted, abandoned-fallback sweep)
+    # have already closed the current attempt with its `cost_estimate_usd`, so
+    # the rolling total across attempts is meaningful here. Reporting 0 would
+    # under-bill any Modal attempts the user already paid for.
+    cost_usd = await _sum_attempt_costs(run_id=run_id)
     await _mark_pending_stages_skipped(run_id=run_id)
     await _update_run_status(
         run_id=run_id,
         status="failed",
         failure_reason=failure_reason,
         failure_stage=None,
+        cost_usd=cost_usd,
     )
     async with async_session_factory() as session:
         await _run_final_retention_sweep(session=session, project_id=project_id)
@@ -1560,7 +1566,7 @@ async def _fail_run_with_oom_reason(
                     "failureReason": failure_reason,
                     "failureStage": None,
                     "lastStep": 0,
-                    "costUsd": 0.0,
+                    "costUsd": cost_usd,
                     "wallClockS": 0.0,
                 },
             },
