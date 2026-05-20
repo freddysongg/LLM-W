@@ -5,6 +5,7 @@ import {
   useDatasetProfile,
   useResolveDataset,
   useSanitizeProjectDataset,
+  useSanitizeStatus,
 } from "@/hooks/useDatasetProfile";
 import { useDatasetSamples, usePreviewTransform } from "@/hooks/useDatasetSamples";
 import { useToast } from "@/hooks/use-toast";
@@ -329,6 +330,7 @@ export default function DatasetsPage(): React.JSX.Element {
 
   const previewTransform = usePreviewTransform({ projectId });
   const sanitizeDataset = useSanitizeProjectDataset({ projectId });
+  const { data: sanitizeStatus } = useSanitizeStatus({ projectId });
 
   React.useEffect(() => {
     if (profile && !datasetForm.datasetId) {
@@ -505,6 +507,13 @@ export default function DatasetsPage(): React.JSX.Element {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {sanitizeStatus !== undefined ? (
+            <Badge variant={sanitizeStatus.exists ? "secondary" : "outline"} className="text-xs">
+              {sanitizeStatus.exists && sanitizeStatus.contentHash !== null
+                ? `sanitized · ${sanitizeStatus.contentHash.slice(0, 7)}`
+                : "not sanitized"}
+            </Badge>
+          ) : null}
           <Button
             variant="outline"
             size="sm"

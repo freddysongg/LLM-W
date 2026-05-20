@@ -11,6 +11,7 @@ import type {
   SanitizeSourceFormat,
   SanitizeSplitAssignment,
   SanitizeSplitName,
+  SanitizeStatus,
 } from "@/types/dataset";
 import { fetchApi } from "./client";
 
@@ -196,6 +197,27 @@ export async function sanitizeProjectDataset({
     contentHash: raw.content_hash,
     sourceFormat: raw.source_format,
     normalized: raw.normalized,
+  };
+}
+
+interface RawSanitizeStatusResponse {
+  readonly exists: boolean;
+  readonly content_hash: string | null;
+  readonly sanitized_at: string | null;
+}
+
+export async function fetchSanitizeStatus({
+  projectId,
+}: {
+  projectId: string;
+}): Promise<SanitizeStatus> {
+  const raw = await fetchApi<RawSanitizeStatusResponse>({
+    path: `/projects/${projectId}/datasets/sanitize/status`,
+  });
+  return {
+    exists: raw.exists,
+    contentHash: raw.content_hash,
+    sanitizedAt: raw.sanitized_at,
   };
 }
 

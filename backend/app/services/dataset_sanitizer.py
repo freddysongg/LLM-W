@@ -4,6 +4,8 @@ import hashlib
 import json
 import os
 import re
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
@@ -20,6 +22,13 @@ from app.schemas.dataset_sanitizer import (
     SplitName,
     SplitRatios,
 )
+
+
+@dataclass(frozen=True)
+class SanitizeArtifactStatus:
+    exists: bool
+    content_hash: str | None
+    sanitized_at: str | None
 
 PERSISTED_DATASET_FILENAME = "sanitized.jsonl"
 PERSISTED_MANIFEST_FILENAME = "sanitized.meta.json"
@@ -343,3 +352,28 @@ def persist_sanitized_artifact(
     os.replace(tmp_manifest, manifest_path)
 
     return artifact_path
+
+
+def get_sanitize_status(*, project_dir: Path) -> SanitizeArtifactStatus:
+    """Report whether a persisted sanitized artifact exists for the project.
+
+    `sanitized_at` is derived from the manifest file's mtime because the
+    manifest payload itself does not carry a timestamp. Both the artifact and
+    the manifest are written atomically via os.replace, so the manifest's
+    mtime is a reliable proxy for when sanitization completed.
+    """
+    datasets_dir = project_dir / "datasets"
+    artifact_path = datasets_dir / PERSISTED_DATASET_FILENAME
+    manifest_path = datasets_dir / PERSISTED_MANIFEST_FILENAME
+    if not artifact_path.is_file() or not manifest_path.is_file():
+        return SanitizeArtifactStatus(exists=False, content_hash=None, sanitized_at=None)
+    try:
+        manifest_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return SanitizeArtifactStatus(exists=False, content_hash=None, sanitized_at=None)
+    content_hash = manifest_payload.get("content_hash")
+    content_hash = content_hash if isinstance(content_hash, str) else None
+    sanitized_at = datetime.fromtimestamp(manifest_path.stat().st_mtime, tz=UTC).isoformat()
+    return SanitizeArtifactStatus(
+        exists=True, content_hash=content_hash, sanitized_at=sanitized_at
+    )

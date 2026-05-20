@@ -25,6 +25,7 @@ from app.schemas.dataset import (
 from app.schemas.dataset_sanitizer import (
     SanitizeDatasetRequest,
     SanitizeDatasetResponse,
+    SanitizeStatusResponse,
 )
 from app.services import dataset_sanitizer, dataset_service, project_service
 
@@ -204,3 +205,23 @@ async def sanitize_dataset(
             response=response,
         )
     return response
+
+
+@router.get(
+    "/{project_id}/datasets/sanitize/status",
+    response_model=SanitizeStatusResponse,
+    status_code=200,
+)
+async def get_sanitize_status(
+    project_id: str,
+    session: DbSession,
+) -> SanitizeStatusResponse:
+    try:
+        project = await project_service.get_project(session=session, project_id=project_id)
+    except ProjectNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "PROJECT_NOT_FOUND", "message": str(exc), "details": {}},
+        ) from exc
+    status = dataset_sanitizer.get_sanitize_status(project_dir=Path(project.directory_path))
+    return SanitizeStatusResponse.model_validate(status)

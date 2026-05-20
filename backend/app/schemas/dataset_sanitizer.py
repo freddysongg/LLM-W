@@ -106,3 +106,13 @@ class SanitizeDatasetResponse(BaseModel):
     normalized: bool
 
     model_config = {"extra": "forbid"}
+
+
+class SanitizeStatusResponse(BaseModel):
+    """Whether a persisted sanitized artifact exists for the project."""
+
+    exists: bool
+    content_hash: str | None
+    sanitized_at: str | None
+
+    model_config = {"from_attributes": True}

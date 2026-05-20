@@ -108,3 +108,9 @@ export interface SanitizeDatasetResponse {
   readonly sourceFormat: SanitizeSourceFormat;
   readonly normalized: boolean;
 }
+
+export interface SanitizeStatus {
+  readonly exists: boolean;
+  readonly contentHash: string | null;
+  readonly sanitizedAt: string | null;
+}

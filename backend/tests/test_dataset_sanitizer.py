@@ -277,3 +277,23 @@ def test_persist_sanitized_artifact_overwrites_atomically(tmp_path: Path) -> Non
     assert json.loads(lines[0])["messages"][0]["content"] == "second"
     # No .tmp files left behind from the atomic write.
     assert not list((tmp_path / "datasets").glob("*.tmp"))
+
+
+def test_get_sanitize_status_reports_missing_when_no_artifact(tmp_path: Path) -> None:
+    status = dataset_sanitizer.get_sanitize_status(project_dir=tmp_path)
+    assert status.exists is False
+    assert status.content_hash is None
+    assert status.sanitized_at is None
+
+
+def test_get_sanitize_status_reports_existing_artifact_with_hash_and_timestamp(
+    tmp_path: Path,
+) -> None:
+    response = _make_response_for_persist_test()
+    persist_sanitized_artifact(project_dir=tmp_path, response=response)
+
+    status = dataset_sanitizer.get_sanitize_status(project_dir=tmp_path)
+    assert status.exists is True
+    assert status.content_hash == "a" * 64
+    assert status.sanitized_at is not None
+    assert status.sanitized_at.endswith("+00:00")
