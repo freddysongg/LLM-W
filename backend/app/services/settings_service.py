@@ -187,10 +187,9 @@ async def test_modal_connection(*, default_gpu_type: str | None = None) -> Modal
     gpu_type_valid: bool | None = None
     resolved_spec: str | None = None
     if default_gpu_type is not None:
-        from app.services.cloud.modal_adapter import (
-            is_valid_modal_gpu_type,
-            resolve_modal_gpu_spec,
-        )
+        # Import from the catalog (no `import modal`) so this path stays usable
+        # on base installs without the optional cloud extra.
+        from app.core.modal_catalog import is_valid_modal_gpu_type, resolve_modal_gpu_spec
 
         gpu_type_valid = is_valid_modal_gpu_type(default_gpu_type)
         if not gpu_type_valid:

@@ -15,34 +15,9 @@ import modal
 import yaml
 
 from app.core.config import settings
+from app.core.modal_catalog import DEFAULT_MODAL_GPU_SPEC, MODAL_GPU_SPEC_MAP
 
 logger = logging.getLogger(__name__)
-
-_GPU_TYPE_MAP: dict[str, str] = {
-    "t4": "T4",
-    "a10": "A10G",
-    "l40s": "L40S",
-    "a100-40gb": "A100",
-    "a100-80gb": "A100-80GB",
-    "h100": "H100",
-}
-
-_DEFAULT_MODAL_GPU: str = "A10G"
-
-
-def is_valid_modal_gpu_type(gpu_type: str) -> bool:
-    """Return True if gpu_type maps to a Modal GPU spec the adapter knows about."""
-    return gpu_type in _GPU_TYPE_MAP
-
-
-def resolve_modal_gpu_spec(gpu_type: str) -> str | None:
-    """Return the Modal GPU spec string (e.g. 'A10G') for a workbench GPU type.
-
-    Returns None when the GPU type is not recognized — callers must validate
-    via `is_valid_modal_gpu_type` first when they need to distinguish missing
-    keys from a valid default.
-    """
-    return _GPU_TYPE_MAP.get(gpu_type)
 
 
 _WORKSPACE_ROOT = "/workspace"
@@ -337,7 +312,7 @@ class ModalTrainingAdapter:
             ignore=_should_ignore_backend_path,
         )
 
-        gpu_spec = _GPU_TYPE_MAP.get(self._config.gpu_type, _DEFAULT_MODAL_GPU)
+        gpu_spec = MODAL_GPU_SPEC_MAP.get(self._config.gpu_type, DEFAULT_MODAL_GPU_SPEC)
         # Clamp to a sane bound — a misconfigured timeout shouldn't be able to
         # request a sandbox lifetime longer than Modal will actually allow.
         timeout_seconds = min(

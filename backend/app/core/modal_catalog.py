@@ -26,6 +26,22 @@ MODAL_GPU_CATALOG: tuple[ModalGpuOption, ...] = (
 _GPU_INDEX: dict[str, ModalGpuOption] = {option.gpu_type: option for option in MODAL_GPU_CATALOG}
 
 
+# Map workbench GPU keys to Modal SDK GPU specs. Lives here (not in
+# `modal_adapter`) so callers like the settings test-connection helper can
+# validate a GPU type without importing `modal` — base installs that omit the
+# `cloud` extra should still be able to round-trip GPU type validation.
+MODAL_GPU_SPEC_MAP: dict[str, str] = {
+    "t4": "T4",
+    "a10": "A10G",
+    "l40s": "L40S",
+    "a100-40gb": "A100",
+    "a100-80gb": "A100-80GB",
+    "h100": "H100",
+}
+
+DEFAULT_MODAL_GPU_SPEC: str = "A10G"
+
+
 def get_modal_gpu_option(*, gpu_type: str) -> ModalGpuOption | None:
     return _GPU_INDEX.get(gpu_type)
 
@@ -35,3 +51,18 @@ def get_modal_gpu_rate_usd_per_second(*, gpu_type: str) -> float:
     if option is None:
         return 0.0
     return option.rate_usd_hr / _SECONDS_PER_HOUR
+
+
+def is_valid_modal_gpu_type(gpu_type: str) -> bool:
+    """Return True if gpu_type maps to a Modal GPU spec the adapter knows about."""
+    return gpu_type in MODAL_GPU_SPEC_MAP
+
+
+def resolve_modal_gpu_spec(gpu_type: str) -> str | None:
+    """Return the Modal GPU spec string (e.g. 'A10G') for a workbench GPU type.
+
+    Returns None when the GPU type is not recognized — callers must validate
+    via `is_valid_modal_gpu_type` first when they need to distinguish missing
+    keys from a valid default.
+    """
+    return MODAL_GPU_SPEC_MAP.get(gpu_type)

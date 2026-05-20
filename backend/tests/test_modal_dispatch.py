@@ -8,11 +8,11 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.database import Base, get_db_session
+from app.core.modal_catalog import is_valid_modal_gpu_type
 from app.main import app
 from app.models.run import Run
 from app.schemas.workbench_config import ExecutionConfig
 from app.services import orchestrator, settings_service
-from app.services.cloud.modal_adapter import is_valid_modal_gpu_type
 from app.services.training_dispatcher import (
     ModalCredentialsMissingError,
     UnsupportedEnvironmentError,
@@ -88,6 +88,26 @@ def test_modal_gpu_type_validity_helper() -> None:
     assert is_valid_modal_gpu_type("l40s") is True
     assert is_valid_modal_gpu_type("h100") is True
     assert is_valid_modal_gpu_type("unknown") is False
+
+
+def test_modal_catalog_source_has_no_modal_import() -> None:
+    """`app.core.modal_catalog` must stay source-clean of the optional `modal` SDK.
+
+    `settings_service.test_modal_connection` validates a candidate GPU type
+    before contacting Modal. That validation runs on base installs without the
+    `cloud` extra, so the catalog module — which owns the workbench→Modal GPU
+    spec map — must not contain `import modal` anywhere or the validation path
+    would raise ImportError instead of returning the intended ModalTestResponse.
+    """
+    import inspect
+
+    import app.core.modal_catalog
+
+    source = inspect.getsource(app.core.modal_catalog)
+    for raw_line in source.splitlines():
+        stripped = raw_line.strip()
+        assert not stripped.startswith("import modal"), stripped
+        assert not stripped.startswith("from modal"), stripped
 
 
 def test_validate_execution_rejects_local_raw_for_modal() -> None:
