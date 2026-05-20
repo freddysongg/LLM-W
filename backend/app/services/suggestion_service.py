@@ -21,7 +21,7 @@ from app.models.project import Project
 from app.models.suggestion import AISuggestion
 from app.schemas.config_version import ConfigVersionCreate
 from app.schemas.suggestion import SuggestionListResponse, SuggestionResponse
-from app.services import config_service
+from app.services import config_service, notifications_service
 from app.services.ai_recommender import AISuggestionCreate, build_engine
 from app.services.settings_service import get_raw_api_key, get_settings
 
@@ -207,6 +207,15 @@ async def generate_suggestions(
         stored.append(suggestion)
 
     await session.commit()
+
+    for suggestion in stored:
+        await notifications_service.create_notification(
+            session=session,
+            notification_type="ai_suggestion",
+            title="New AI suggestion",
+            subtitle=suggestion.expected_effect,
+        )
+
     return SuggestionListResponse(
         items=[_to_response(s) for s in stored],
         total=len(stored),

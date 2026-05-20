@@ -35,6 +35,7 @@ import {
 const PROJECT_NAME_FALLBACK = "Workbench";
 
 const NOTIFICATION_TYPE_COLOR: Readonly<Record<string, string>> = {
+  run_created: "text-ink-2",
   run_started: "text-info",
   run_completed: "text-success",
   run_failed: "text-danger",

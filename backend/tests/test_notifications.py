@@ -111,3 +111,47 @@ async def test_mark_notification_read_returns_404_for_missing_id(client: AsyncCl
     response = await client.post("/api/v1/notifications/missing/read")
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "NOTIFICATION_NOT_FOUND"
+
+
+async def test_create_notification_persists_row_with_provided_fields(
+    db_session: async_sessionmaker[Any],
+) -> None:
+    """Writer must persist the row with type, title, subtitle, a UUID id, and now-ish created_at."""
+    from app.services import notifications_service
+
+    async with db_session() as session:
+        notification = await notifications_service.create_notification(
+            session=session,
+            notification_type="run_started",
+            title="Run abc123 started",
+            subtitle="modal · a10",
+        )
+
+    async with db_session() as session:
+        persisted = await session.get(Notification, notification.id)
+        assert persisted is not None
+        assert persisted.type == "run_started"
+        assert persisted.title == "Run abc123 started"
+        assert persisted.subtitle == "modal · a10"
+        assert persisted.read_at is None
+        # created_at must round-trip as a parseable ISO-8601 string.
+        assert datetime.fromisoformat(persisted.created_at).tzinfo is not None
+
+
+async def test_create_notification_accepts_null_subtitle(
+    db_session: async_sessionmaker[Any],
+) -> None:
+    from app.services import notifications_service
+
+    async with db_session() as session:
+        notification = await notifications_service.create_notification(
+            session=session,
+            notification_type="run_created",
+            title="Run xyz456 created",
+            subtitle=None,
+        )
+
+    async with db_session() as session:
+        persisted = await session.get(Notification, notification.id)
+        assert persisted is not None
+        assert persisted.subtitle is None

@@ -41,7 +41,7 @@ from app.models.run_stage import RunStage
 from app.models.weight_snapshot import WeightSnapshot
 from app.schemas.run import RunCreate, RunResponse
 from app.schemas.workbench_config import ExecutionConfig
-from app.services import settings_service, suggestion_service
+from app.services import notifications_service, settings_service, suggestion_service
 from app.services.config_service import serialize_config_yaml_snapshot
 from app.services.oom_detector import detect_oom
 from app.services.storage_manager import (
@@ -308,6 +308,13 @@ async def create_run(
         },
     )
 
+    await notifications_service.create_notification(
+        session=session,
+        notification_type="run_created",
+        title=f"Run {run_id[:6]} created",
+        subtitle=None,
+    )
+
     # Launch trainer subprocess asynchronously
     resume_checkpoint: str | None = None
     if payload.parent_run_id:
@@ -467,6 +474,8 @@ async def _update_run_status(
     wall_clock_s: float | None = None,
     started_at: str | None = None,
 ) -> None:
+    project_id_for_event: str | None = None
+    first_start_iso: str | None = None
     async with async_session_factory() as session:
         run = await session.get(Run, run_id)
         if run is None:
@@ -499,7 +508,30 @@ async def _update_run_status(
         # First-stage write only — later stages must not reset the cost anchor.
         if started_at is not None and run.started_at is None:
             run.started_at = started_at
+            # Capture project_id now while the row is loaded; we need it after
+            # commit to publish the run_started event and create a notification.
+            project_id_for_event = run.project_id
+            first_start_iso = started_at
         await session.commit()
+
+    if project_id_for_event is not None and first_start_iso is not None:
+        await event_bus.publish(
+            event_type=f"project.{project_id_for_event}.ws",
+            payload={
+                "channel": "run_state",
+                "event": "run_started",
+                "runId": run_id,
+                "timestamp": first_start_iso,
+                "payload": {"runId": run_id},
+            },
+        )
+        async with async_session_factory() as notif_session:
+            await notifications_service.create_notification(
+                session=notif_session,
+                notification_type="run_started",
+                title=f"Run {run_id[:6]} started",
+                subtitle=None,
+            )
 
 
 async def _update_stage(
@@ -1252,6 +1284,13 @@ async def _run_trainer_subprocess(
                     },
                 },
             )
+            async with async_session_factory() as notif_session:
+                await notifications_service.create_notification(
+                    session=notif_session,
+                    notification_type="run_completed",
+                    title=f"Run {run_id[:6]} completed",
+                    subtitle=f"cost ${cost_usd:.4f} · {wall_clock_s:.0f}s",
+                )
             analysis_task = asyncio.create_task(
                 _auto_analyze_if_enabled(run_id=run_id, project_id=project_id),
                 name=f"auto-analyze-{run_id}",
@@ -1335,6 +1374,13 @@ async def _run_trainer_subprocess(
                     },
                 },
             )
+            async with async_session_factory() as notif_session:
+                await notifications_service.create_notification(
+                    session=notif_session,
+                    notification_type="run_failed",
+                    title=f"Run {run_id[:6]} failed",
+                    subtitle=captured_failure_reason,
+                )
 
     except Exception as exc:
         removed = _active_processes.pop(run_id, None)
@@ -1557,6 +1603,13 @@ async def _fail_run_with_oom_reason(
                 },
             },
         )
+        async with async_session_factory() as notif_session:
+            await notifications_service.create_notification(
+                session=notif_session,
+                notification_type="run_failed",
+                title=f"Run {run_id[:6]} failed",
+                subtitle=failure_reason,
+            )
 
 
 async def _close_failed_attempt(*, run_id: str, execution: ExecutionConfig) -> RunAttempt | None:
@@ -1967,6 +2020,13 @@ async def cancel_fallback(*, session: AsyncSession, run_id: str, project_id: str
                 "wallClockS": run.wall_clock_s,
             },
         },
+    )
+
+    await notifications_service.create_notification(
+        session=session,
+        notification_type="run_failed",
+        title=f"Run {run_id[:6]} failed",
+        subtitle="oom_user_cancelled",
     )
 
     return run
