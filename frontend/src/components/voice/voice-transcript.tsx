@@ -31,7 +31,7 @@ export function VoiceTranscript({ entries }: VoiceTranscriptProps): React.JSX.El
           <li
             key={entry.index}
             className={cn(
-              "rounded border border-hairline px-3 py-2",
+              "voice-transcript-entry rounded border border-hairline px-3 py-2",
               entry.role === "user" ? "bg-surface-2" : "bg-surface-1",
             )}
           >

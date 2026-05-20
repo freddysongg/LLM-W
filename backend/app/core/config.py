@@ -24,6 +24,12 @@ class AppConfig(BaseSettings):
     watchdog_stale_timeout_seconds: int = 120
     watchdog_heartbeat_interval_seconds: int = 10
 
+    project_storage_quota_bytes: int = 250 * 1024 * 1024 * 1024
+
+    local_user_id: str = "local"
+    local_user_name: str = "Local User"
+    local_user_email: str = "local@llm-workbench.dev"
+
     modal_token_id: str | None = None
     modal_token_secret: str | None = None
 

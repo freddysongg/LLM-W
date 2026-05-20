@@ -255,6 +255,10 @@
     animation: fade-up var(--dur-2) var(--ease-out) both;
   }
 
+  .voice-transcript-entry {
+    animation: voice-transcript-enter 180ms var(--ease-out) both;
+  }
+
   .btn-primary-shimmer {
     position: relative;
     overflow: hidden;
@@ -290,6 +294,10 @@
 }
 @keyframes fade-up {
   from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes voice-transcript-enter {
+  from { opacity: 0; transform: translateY(2px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 @keyframes fade-in {

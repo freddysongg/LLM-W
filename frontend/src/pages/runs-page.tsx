@@ -1,7 +1,11 @@
 import * as React from "react";
+import { parse as parseYaml } from "yaml";
 import { GitCompare, Play } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAppStore } from "@/stores/app-store";
+import { useRunStreamStore } from "@/stores/run-stream-store";
+import { normalizeYamlConfig } from "@/lib/yaml-config";
+import type { WorkbenchConfig } from "@/types/config";
 import {
   useCancelRun,
   useCheckpoints,
@@ -28,6 +32,8 @@ import { LiveMetricsCharts } from "@/components/runs/live-metrics-charts";
 import { LogStream } from "@/components/runs/log-stream";
 import { ResumeFromCheckpointDialog } from "@/components/runs/resume-from-checkpoint-dialog";
 import { RunActions } from "@/components/runs/run-actions";
+import { RunAttemptsStrip } from "@/components/runs/run-attempts-strip";
+import { RunFallbackDialog } from "@/components/runs/run-fallback-dialog";
 import { RunList } from "@/components/runs/run-list";
 import { RunTimeline } from "@/components/runs/run-timeline";
 import { StageDetailPanel } from "@/components/runs/stage-detail-panel";
@@ -170,6 +176,21 @@ export default function RunsPage(): React.JSX.Element {
   const createRunMutation = useCreateRun();
 
   const { data: activeConfig } = useActiveConfig({ projectId: activeProjectId ?? "" });
+
+  const { fallbackProposal, clearFallbackProposal } = useRunStreamStore((state) => ({
+    fallbackProposal: selectedRunId ? (state.fallbackProposals[selectedRunId] ?? null) : null,
+    clearFallbackProposal: state.clearFallbackProposal,
+  }));
+
+  const maxRunMinutes = React.useMemo<number>(() => {
+    if (!activeConfig?.yamlBlob) return 90;
+    try {
+      const parsed = normalizeYamlConfig<WorkbenchConfig>(parseYaml(activeConfig.yamlBlob));
+      return parsed.execution?.maxRunMinutes ?? 90;
+    } catch {
+      return 90;
+    }
+  }, [activeConfig]);
 
   const liveRun = React.useMemo(() => pickLiveRun(runs), [runs]);
   const canStartRun = Boolean(activeConfig) && liveRun === null;
@@ -387,6 +408,9 @@ export default function RunsPage(): React.JSX.Element {
       {selectedRun ? (
         <>
           {selectedRun.status === "failed" ? <FailurePanel run={selectedRun} /> : null}
+          {selectedRun.attempts.length > 1 ? (
+            <RunAttemptsStrip attempts={selectedRun.attempts} />
+          ) : null}
           <Tabs defaultValue="timeline" className="mt-2">
             <TabsList>
               <TabsTrigger value="timeline">Timeline</TabsTrigger>
@@ -459,6 +483,19 @@ export default function RunsPage(): React.JSX.Element {
         onClose={() => setIsResumeDialogOpen(false)}
         isResuming={resumeRun.isPending}
       />
+
+      {activeProjectId && selectedRunId ? (
+        <RunFallbackDialog
+          isOpen={fallbackProposal !== null}
+          projectId={activeProjectId}
+          runId={selectedRunId}
+          maxRunMinutes={maxRunMinutes}
+          proposal={fallbackProposal}
+          onClose={() => {
+            if (selectedRunId) clearFallbackProposal(selectedRunId);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

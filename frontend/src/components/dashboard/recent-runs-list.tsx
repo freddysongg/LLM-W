@@ -21,6 +21,7 @@ function mapStatus(status: RunStatus): DotStatus {
     case "failed":
       return "failed";
     case "paused":
+    case "fallback_pending":
       return "paused";
     case "pending":
     case "cancelled":

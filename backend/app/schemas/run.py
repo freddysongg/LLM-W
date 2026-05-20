@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
+from app.schemas.run_attempt import RunAttemptResponse
+
 
 class RunCreate(BaseModel):
     config_version_id: str
@@ -40,6 +42,7 @@ class RunResponse(BaseModel):
     metric_unavailable_reasons: str | None = None
     created_at: str
     updated_at: str
+    attempts: list[RunAttemptResponse] = []
 
     model_config = {"from_attributes": True}
 

@@ -45,6 +45,7 @@ export interface UpdateProjectRequest {
 export interface ProjectStorageResponse {
   readonly projectId: string;
   readonly totalBytes: number;
+  readonly quotaBytes: number;
   readonly breakdown: StorageBreakdown;
   readonly perRun: ReadonlyArray<PerRunStorage>;
   readonly retentionPolicy: {

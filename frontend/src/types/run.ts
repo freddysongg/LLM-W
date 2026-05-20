@@ -1,4 +1,11 @@
-export type RunStatus = "pending" | "running" | "completed" | "failed" | "cancelled" | "paused";
+export type RunStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "paused"
+  | "fallback_pending";
 
 import type { DeviceType, TrainingEnvironment, ModalGpuType } from "./config";
 export type { DeviceType, TrainingEnvironment, ModalGpuType } from "./config";
@@ -32,6 +39,19 @@ export type MetricName =
   | "gpu_memory_allocated_mb"
   | "cpu_memory_used_mb";
 
+export interface RunAttempt {
+  readonly id: string;
+  readonly runId: string;
+  readonly attemptIndex: number;
+  readonly gpuType: ModalGpuType | null;
+  readonly device: DeviceType | null;
+  readonly startedAt: string;
+  readonly endedAt: string | null;
+  readonly exitReason: string | null;
+  readonly costEstimateUsd: number | null;
+  readonly createdAt: string;
+}
+
 export interface Run {
   readonly id: string;
   readonly projectId: string;
@@ -54,6 +74,7 @@ export interface Run {
   readonly environment: TrainingEnvironment | null;
   readonly modalGpuType: ModalGpuType | null;
   readonly device: DeviceType | null;
+  readonly attempts: ReadonlyArray<RunAttempt>;
 }
 
 export interface RunStage {

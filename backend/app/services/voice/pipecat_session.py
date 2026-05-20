@@ -29,7 +29,7 @@ from app.services.voice.shopping_tools import (
     build_shopping_tools_schema,
     register_shopping_handlers,
 )
-from app.services.voice.transcript_writer import TranscriptWriter
+from app.services.voice.transcript_writer import TranscriptEntry, TranscriptWriter
 
 _AUDIO_IN_SAMPLE_RATE = 16_000
 _AUDIO_OUT_SAMPLE_RATE = 24_000
@@ -130,8 +130,12 @@ def _import_pipecat_modules() -> dict[str, Any]:
         from pipecat.frames.frames import (
             EndFrame,
             ErrorFrame,
+            Frame,
             InputAudioRawFrame,
             InterimTranscriptionFrame,
+            LLMFullResponseEndFrame,
+            LLMFullResponseStartFrame,
+            LLMTextFrame,
             OutputAudioRawFrame,
             TranscriptionFrame,
         )
@@ -142,6 +146,7 @@ def _import_pipecat_modules() -> dict[str, Any]:
         from pipecat.processors.aggregators.llm_response_universal import (
             LLMContextAggregatorPair,
         )
+        from pipecat.processors.frame_processor import FrameProcessor
         from pipecat.serializers.base_serializer import FrameSerializer
         from pipecat.services.cartesia.tts import CartesiaTTSService
         from pipecat.services.deepgram.stt import DeepgramSTTService
@@ -160,6 +165,7 @@ def _import_pipecat_modules() -> dict[str, Any]:
         "PipelineTask": PipelineTask,
         "LLMContext": LLMContext,
         "LLMContextAggregatorPair": LLMContextAggregatorPair,
+        "FrameProcessor": FrameProcessor,
         "FrameSerializer": FrameSerializer,
         "CartesiaTTSService": CartesiaTTSService,
         "DeepgramSTTService": DeepgramSTTService,
@@ -168,19 +174,28 @@ def _import_pipecat_modules() -> dict[str, Any]:
         "FastAPIWebsocketTransport": FastAPIWebsocketTransport,
         "EndFrame": EndFrame,
         "ErrorFrame": ErrorFrame,
+        "Frame": Frame,
         "InputAudioRawFrame": InputAudioRawFrame,
         "InterimTranscriptionFrame": InterimTranscriptionFrame,
+        "LLMFullResponseEndFrame": LLMFullResponseEndFrame,
+        "LLMFullResponseStartFrame": LLMFullResponseStartFrame,
+        "LLMTextFrame": LLMTextFrame,
         "OutputAudioRawFrame": OutputAudioRawFrame,
         "TranscriptionFrame": TranscriptionFrame,
     }
 
 
-def _build_raw_pcm_json_serializer(*, modules: dict[str, Any]) -> Any:
+def _build_raw_pcm_json_serializer(
+    *,
+    modules: dict[str, Any],
+    assistant_committed_cls: type,
+) -> Any:
     """Build the wire serializer that matches the browser client's wire format.
 
     Outgoing: `OutputAudioRawFrame` → raw PCM16 bytes; transcript / error frames
-    → JSON envelopes with `type` + `payload`. Incoming: bytes → InputAudioRawFrame
-    at the uplink sample rate, JSON text → `EndFrame` for `session_end` envelopes.
+    → JSON envelopes with `type` + `payload`; committed assistant utterances →
+    `agent_text` JSON envelopes. Incoming: bytes → InputAudioRawFrame at the
+    uplink sample rate, JSON text → `EndFrame` for `session_end` envelopes.
     Other frames are dropped so the transport stays silent on unrelated traffic.
     """
     frame_serializer_cls = modules["FrameSerializer"]
@@ -220,6 +235,19 @@ def _build_raw_pcm_json_serializer(*, modules: dict[str, Any]) -> Any:
                         "payload": _transcript_payload(frame, is_interim=False),
                     }
                 )
+            if isinstance(frame, assistant_committed_cls):
+                return json.dumps(
+                    {
+                        "type": "agent_text",
+                        "payload": {
+                            "role": "assistant",
+                            "text": getattr(frame, "text", "") or "",
+                            "started_at": getattr(frame, "started_at", "") or "",
+                            "ended_at": getattr(frame, "ended_at", "") or "",
+                            "is_interim": False,
+                        },
+                    }
+                )
             if isinstance(frame, error_cls):
                 message = getattr(frame, "error", "") or "Pipeline error"
                 return json.dumps({"type": "error", "payload": {"message": message}})
@@ -247,10 +275,86 @@ def _build_raw_pcm_json_serializer(*, modules: dict[str, Any]) -> Any:
     return RawPcmJsonSerializer()
 
 
+def _build_assistant_transcript_observer(
+    *,
+    modules: dict[str, Any],
+    writer: TranscriptWriter,
+) -> tuple[type, type]:
+    """Return `(ObserverClass, CommittedFrameClass)` bound to a writer instance.
+
+    The observer is a `FrameProcessor` that watches the LLM response window
+    (`LLMFullResponseStartFrame` → `LLMTextFrame` chunks → `LLMFullResponseEndFrame`),
+    buffers the text deltas, then on end-of-response (a) appends a finalized
+    assistant `TranscriptEntry` to the writer and (b) emits a custom
+    `_AssistantUtteranceCommittedFrame` downstream so the wire serializer can
+    publish an `agent_text` envelope to the browser. The committed frame is
+    nested inside this factory so the serializer keeps a stable class reference
+    via `isinstance`.
+    """
+    frame_cls = modules["Frame"]
+    frame_processor_cls = modules["FrameProcessor"]
+    llm_start_cls = modules["LLMFullResponseStartFrame"]
+    llm_text_cls = modules["LLMTextFrame"]
+    llm_end_cls = modules["LLMFullResponseEndFrame"]
+
+    @dataclass
+    class _AssistantUtteranceCommittedFrame(frame_cls):
+        text: str = ""
+        started_at: str = ""
+        ended_at: str = ""
+
+    class AssistantTranscriptObserver(frame_processor_cls):
+        def __init__(self) -> None:
+            super().__init__()
+            self._buffer: list[str] = []
+            self._started_at_iso: str | None = None
+
+        async def process_frame(self, frame: Any, direction: Any) -> None:
+            await super().process_frame(frame, direction)
+            if isinstance(frame, llm_start_cls):
+                self._started_at_iso = _now_iso()
+                self._buffer = []
+                await self.push_frame(frame, direction)
+                return
+            if isinstance(frame, llm_text_cls):
+                self._buffer.append(getattr(frame, "text", "") or "")
+                await self.push_frame(frame, direction)
+                return
+            if isinstance(frame, llm_end_cls):
+                text = "".join(self._buffer)
+                ended_at_iso = _now_iso()
+                started_at_iso = self._started_at_iso or ended_at_iso
+                writer.record_transcript(
+                    TranscriptEntry(
+                        role="assistant",
+                        text=text,
+                        started_at_iso=started_at_iso,
+                        ended_at_iso=ended_at_iso,
+                        is_interim=False,
+                    )
+                )
+                await self.push_frame(frame, direction)
+                await self.push_frame(
+                    _AssistantUtteranceCommittedFrame(
+                        text=text,
+                        started_at=started_at_iso,
+                        ended_at=ended_at_iso,
+                    ),
+                    direction,
+                )
+                self._buffer = []
+                self._started_at_iso = None
+                return
+            await self.push_frame(frame, direction)
+
+    return AssistantTranscriptObserver, _AssistantUtteranceCommittedFrame
+
+
 def _build_transport(
     *,
     websocket: WebSocket,
     modules: dict[str, Any],
+    assistant_committed_cls: type,
 ) -> Any:
     transport_params = modules["FastAPIWebsocketParams"](
         audio_in_enabled=True,
@@ -259,7 +363,10 @@ def _build_transport(
         audio_out_sample_rate=_AUDIO_OUT_SAMPLE_RATE,
         add_wav_header=False,
         vad_analyzer=modules["SileroVADAnalyzer"](),
-        serializer=_build_raw_pcm_json_serializer(modules=modules),
+        serializer=_build_raw_pcm_json_serializer(
+            modules=modules,
+            assistant_committed_cls=assistant_committed_cls,
+        ),
     )
     return modules["FastAPIWebsocketTransport"](
         websocket=websocket,
@@ -272,6 +379,7 @@ def _build_pipeline(
     transport: Any,
     config: VoiceSessionConfig,
     modules: dict[str, Any],
+    assistant_observer: Any,
 ) -> tuple[Any, Any]:
     stt = modules["DeepgramSTTService"](api_key=config.deepgram_api_key)
     tts = modules["CartesiaTTSService"](
@@ -296,6 +404,7 @@ def _build_pipeline(
             stt,
             user_aggregator,
             llm,
+            assistant_observer,
             tts,
             transport.output(),
             assistant_aggregator,
@@ -324,8 +433,22 @@ async def start_voice_session(
         config_snapshot=_build_config_snapshot(config=config),
     )
     cart = CartState()
-    transport = _build_transport(websocket=websocket, modules=modules)
-    pipeline, llm = _build_pipeline(transport=transport, config=config, modules=modules)
+    observer_cls, assistant_committed_cls = _build_assistant_transcript_observer(
+        modules=modules,
+        writer=writer,
+    )
+    assistant_observer = observer_cls()
+    transport = _build_transport(
+        websocket=websocket,
+        modules=modules,
+        assistant_committed_cls=assistant_committed_cls,
+    )
+    pipeline, llm = _build_pipeline(
+        transport=transport,
+        config=config,
+        modules=modules,
+        assistant_observer=assistant_observer,
+    )
     register_shopping_handlers(llm=llm, writer=writer, cart=cart)
     task = modules["PipelineTask"](pipeline)
     runner = modules["PipelineRunner"]()

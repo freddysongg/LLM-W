@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from app.models.config_version import ConfigVersion
     from app.models.metric_point import MetricPoint
     from app.models.project import Project
+    from app.models.run_attempt import RunAttempt
     from app.models.run_stage import RunStage
     from app.models.suggestion import AISuggestion
 
@@ -80,4 +81,16 @@ class Run(Base):
         # from also issuing its own disassociation UPDATEs (which would touch the
         # same rows again and trip async lazy-load on `session.delete(run)`).
         passive_deletes="all",
+    )
+    attempts: Mapped[list[RunAttempt]] = relationship(
+        "RunAttempt",
+        back_populates="run",
+        cascade="all, delete-orphan",
+        # `lazy="selectin"` makes plain `session.get(Run, id)` and
+        # `RunResponse.model_validate(run)` work without explicit eager loading
+        # on every call site. Each load adds one extra SELECT on `run_attempts`,
+        # which is acceptable for the typical 1–4 attempts-per-run cardinality.
+        lazy="selectin",
+        passive_deletes=True,
+        order_by="RunAttempt.attempt_index",
     )

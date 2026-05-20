@@ -97,6 +97,7 @@ def test_voice_module_imports_with_pipecat_blocked() -> None:
         "pipecat.processors.aggregators",
         "pipecat.processors.aggregators.llm_context",
         "pipecat.processors.aggregators.llm_response_universal",
+        "pipecat.processors.frame_processor",
         "pipecat.serializers",
         "pipecat.serializers.base_serializer",
         "pipecat.services",
@@ -577,6 +578,31 @@ async def test_start_voice_session_constructs_pipeline_when_pipecat_available(
         def __init__(self) -> None:
             pass
 
+    class _FakeFrame:
+        def __init__(self, **kwargs: Any) -> None:
+            self.kwargs = kwargs
+
+    class _FakeLLMFullResponseStartFrame(_FakeFrame):
+        pass
+
+    class _FakeLLMTextFrame(_FakeFrame):
+        def __init__(self, *, text: str = "", **kwargs: Any) -> None:
+            super().__init__(**kwargs)
+            self.text = text
+
+    class _FakeLLMFullResponseEndFrame(_FakeFrame):
+        pass
+
+    class _FakeFrameProcessor:
+        def __init__(self) -> None:
+            self._pushed: list[Any] = []
+
+        async def process_frame(self, frame: Any, direction: Any) -> None:
+            return None
+
+        async def push_frame(self, frame: Any, direction: Any) -> None:
+            self._pushed.append(frame)
+
     class _FakeSilero:
         def __init__(self, **kwargs: Any) -> None:
             self.kwargs = kwargs
@@ -671,14 +697,21 @@ async def test_start_voice_session_constructs_pipeline_when_pipecat_available(
         "pipecat.processors.aggregators.llm_response_universal": MagicMock(
             LLMContextAggregatorPair=_FakeAggregatorPair,
         ),
+        "pipecat.processors.frame_processor": MagicMock(
+            FrameProcessor=_FakeFrameProcessor,
+        ),
         "pipecat.serializers": MagicMock(),
         "pipecat.serializers.base_serializer": MagicMock(FrameSerializer=_FakeFrameSerializer),
         "pipecat.frames": MagicMock(),
         "pipecat.frames.frames": MagicMock(
             EndFrame=_FakeEndFrame,
             ErrorFrame=_FakeErrorFrame,
+            Frame=_FakeFrame,
             InputAudioRawFrame=_FakeInputAudioFrame,
             InterimTranscriptionFrame=_FakeInterimTranscriptionFrame,
+            LLMFullResponseEndFrame=_FakeLLMFullResponseEndFrame,
+            LLMFullResponseStartFrame=_FakeLLMFullResponseStartFrame,
+            LLMTextFrame=_FakeLLMTextFrame,
             OutputAudioRawFrame=_FakeOutputAudioFrame,
             TranscriptionFrame=_FakeTranscriptionFrame,
         ),
@@ -730,6 +763,12 @@ async def test_start_voice_session_constructs_pipeline_when_pipecat_available(
         for call in fake_llm_instance.register_function.mock_calls
     }
     assert expected_tools <= registered_names
+    processors = constructed["pipeline_processors"]
+    observer_processors = [p for p in processors if isinstance(p, _FakeFrameProcessor)]
+    assert len(observer_processors) == 1
+    observer_index = processors.index(observer_processors[0])
+    assert observer_index > 0
+    assert observer_index < len(processors) - 1
 
 
 async def test_shutdown_flushes_transcript_writer(tmp_path: Path) -> None:
@@ -1064,6 +1103,15 @@ async def test_voice_service_run_session_uses_registered_handle(
     assert started_call.is_set()
 
 
+class _FakeAssistantCommittedFrame:
+    """Stand-in for `_AssistantUtteranceCommittedFrame` in serializer tests."""
+
+    def __init__(self, *, text: str, started_at: str, ended_at: str) -> None:
+        self.text = text
+        self.started_at = started_at
+        self.ended_at = ended_at
+
+
 def _serializer_fakes() -> dict[str, Any]:
     """Build a fakes dict shaped like `_import_pipecat_modules` output.
 
@@ -1122,17 +1170,29 @@ def _serializer_fakes() -> dict[str, Any]:
     }
 
 
-async def test_serializer_serialize_audio_returns_raw_bytes() -> None:
+def _build_serializer_with_fakes() -> tuple[Any, dict[str, Any]]:
+    """Construct the serializer with the shared assistant committed frame fake.
+
+    Returns the serializer plus the modules dict so tests can build frame
+    instances against the same class identities the serializer holds.
+    """
     modules = _serializer_fakes()
-    serializer = pipecat_session._build_raw_pcm_json_serializer(modules=modules)
+    serializer = pipecat_session._build_raw_pcm_json_serializer(
+        modules=modules,
+        assistant_committed_cls=_FakeAssistantCommittedFrame,
+    )
+    return serializer, modules
+
+
+async def test_serializer_serialize_audio_returns_raw_bytes() -> None:
+    serializer, modules = _build_serializer_with_fakes()
     frame = modules["OutputAudioRawFrame"](audio=b"\x01\x02\x03\x04")
     result = await serializer.serialize(frame)
     assert result == b"\x01\x02\x03\x04"
 
 
 async def test_serializer_serialize_transcription_returns_json_envelope() -> None:
-    modules = _serializer_fakes()
-    serializer = pipecat_session._build_raw_pcm_json_serializer(modules=modules)
+    serializer, modules = _build_serializer_with_fakes()
     frame = modules["TranscriptionFrame"](text="hello", user_id="user-1")
     result = await serializer.serialize(frame)
     assert isinstance(result, str)
@@ -1144,8 +1204,7 @@ async def test_serializer_serialize_transcription_returns_json_envelope() -> Non
 
 
 async def test_serializer_serialize_interim_transcription_marks_is_interim() -> None:
-    modules = _serializer_fakes()
-    serializer = pipecat_session._build_raw_pcm_json_serializer(modules=modules)
+    serializer, modules = _build_serializer_with_fakes()
     frame = modules["InterimTranscriptionFrame"](text="partial", user_id="user-1")
     body = json.loads(await serializer.serialize(frame))
     assert body["type"] == "transcript"
@@ -1154,8 +1213,7 @@ async def test_serializer_serialize_interim_transcription_marks_is_interim() -> 
 
 
 async def test_serializer_serialize_error_returns_error_envelope() -> None:
-    modules = _serializer_fakes()
-    serializer = pipecat_session._build_raw_pcm_json_serializer(modules=modules)
+    serializer, modules = _build_serializer_with_fakes()
     frame = modules["ErrorFrame"](error="things broke")
     body = json.loads(await serializer.serialize(frame))
     assert body["type"] == "error"
@@ -1163,8 +1221,7 @@ async def test_serializer_serialize_error_returns_error_envelope() -> None:
 
 
 async def test_serializer_serialize_unknown_frame_type_returns_none() -> None:
-    modules = _serializer_fakes()
-    serializer = pipecat_session._build_raw_pcm_json_serializer(modules=modules)
+    serializer, _ = _build_serializer_with_fakes()
 
     class _UnrelatedFrame:
         pass
@@ -1175,15 +1232,13 @@ async def test_serializer_serialize_unknown_frame_type_returns_none() -> None:
 
 async def test_serializer_serialize_end_frame_returns_none() -> None:
     """EndFrame is consumed by the transport lifecycle, not forwarded on the wire."""
-    modules = _serializer_fakes()
-    serializer = pipecat_session._build_raw_pcm_json_serializer(modules=modules)
+    serializer, modules = _build_serializer_with_fakes()
     result = await serializer.serialize(modules["EndFrame"]())
     assert result is None
 
 
 async def test_serializer_deserialize_bytes_returns_input_audio_frame() -> None:
-    modules = _serializer_fakes()
-    serializer = pipecat_session._build_raw_pcm_json_serializer(modules=modules)
+    serializer, modules = _build_serializer_with_fakes()
     frame = await serializer.deserialize(b"\x00\x01\x02\x03")
     assert isinstance(frame, modules["InputAudioRawFrame"])
     assert frame.audio == b"\x00\x01\x02\x03"
@@ -1193,38 +1248,167 @@ async def test_serializer_deserialize_bytes_returns_input_audio_frame() -> None:
 
 async def test_serializer_deserialize_empty_bytes_returns_none() -> None:
     """An empty audio chunk would otherwise yield a zero-length PCM frame."""
-    modules = _serializer_fakes()
-    serializer = pipecat_session._build_raw_pcm_json_serializer(modules=modules)
+    serializer, _ = _build_serializer_with_fakes()
     frame = await serializer.deserialize(b"")
     assert frame is None
 
 
 async def test_serializer_deserialize_session_end_returns_end_frame() -> None:
-    modules = _serializer_fakes()
-    serializer = pipecat_session._build_raw_pcm_json_serializer(modules=modules)
+    serializer, modules = _build_serializer_with_fakes()
     payload = json.dumps({"type": "session_end", "payload": {}})
     frame = await serializer.deserialize(payload)
     assert isinstance(frame, modules["EndFrame"])
 
 
 async def test_serializer_deserialize_unknown_envelope_type_returns_none() -> None:
-    modules = _serializer_fakes()
-    serializer = pipecat_session._build_raw_pcm_json_serializer(modules=modules)
+    serializer, _ = _build_serializer_with_fakes()
     payload = json.dumps({"type": "bogus_type", "payload": {}})
     frame = await serializer.deserialize(payload)
     assert frame is None
 
 
 async def test_serializer_deserialize_malformed_text_returns_none() -> None:
-    modules = _serializer_fakes()
-    serializer = pipecat_session._build_raw_pcm_json_serializer(modules=modules)
+    serializer, _ = _build_serializer_with_fakes()
     frame = await serializer.deserialize("not json")
     assert frame is None
 
 
 async def test_serializer_deserialize_non_object_json_returns_none() -> None:
     """JSON arrays or scalars are not valid control envelopes."""
-    modules = _serializer_fakes()
-    serializer = pipecat_session._build_raw_pcm_json_serializer(modules=modules)
+    serializer, _ = _build_serializer_with_fakes()
     frame = await serializer.deserialize(json.dumps([1, 2, 3]))
     assert frame is None
+
+
+def _observer_fakes() -> dict[str, Any]:
+    """Pipecat-shaped fakes for the assistant observer factory.
+
+    The fakes use real Python classes (not MagicMock) so the observer's
+    `isinstance` dispatch works and `@dataclass` subclasses of `Frame` build
+    cleanly.
+    """
+
+    class _FakeFrame:
+        pass
+
+    class _FakeLLMFullResponseStartFrame(_FakeFrame):
+        pass
+
+    class _FakeLLMTextFrame(_FakeFrame):
+        def __init__(self, *, text: str) -> None:
+            self.text = text
+
+    class _FakeLLMFullResponseEndFrame(_FakeFrame):
+        pass
+
+    class _FakeFrameProcessor:
+        def __init__(self) -> None:
+            self.pushed: list[Any] = []
+
+        async def process_frame(self, frame: Any, direction: Any) -> None:
+            return None
+
+        async def push_frame(self, frame: Any, direction: Any) -> None:
+            self.pushed.append(frame)
+
+    return {
+        "Frame": _FakeFrame,
+        "FrameProcessor": _FakeFrameProcessor,
+        "LLMFullResponseStartFrame": _FakeLLMFullResponseStartFrame,
+        "LLMTextFrame": _FakeLLMTextFrame,
+        "LLMFullResponseEndFrame": _FakeLLMFullResponseEndFrame,
+    }
+
+
+async def test_assistant_transcript_observer_records_utterance_on_full_response_end(
+    tmp_path: Path,
+) -> None:
+    """Buffered LLMTextFrame deltas must commit to the writer at end-of-response."""
+    modules = _observer_fakes()
+    writer = TranscriptWriter(
+        session_id="sess-obs",
+        artifact_path=tmp_path / "voice_sessions" / "sess-obs.json",
+        started_at_iso="2026-05-20T12:00:00+00:00",
+        config_snapshot={
+            "openai_model_id": "gpt-4o-mini",
+            "cartesia_voice_id": "v",
+            "stt_provider": "deepgram",
+            "tts_provider": "cartesia",
+            "system_prompt": "x",
+        },
+    )
+    observer_cls, _committed_cls = pipecat_session._build_assistant_transcript_observer(
+        modules=modules,
+        writer=writer,
+    )
+    observer = observer_cls()
+
+    direction = object()
+    await observer.process_frame(modules["LLMFullResponseStartFrame"](), direction)
+    await observer.process_frame(modules["LLMTextFrame"](text="hello "), direction)
+    await observer.process_frame(modules["LLMTextFrame"](text="there "), direction)
+    await observer.process_frame(modules["LLMTextFrame"](text="world"), direction)
+    await observer.process_frame(modules["LLMFullResponseEndFrame"](), direction)
+
+    snapshot = writer.snapshot()
+    assert len(snapshot.transcript) == 1
+    recorded = snapshot.transcript[0]
+    assert recorded.role == "assistant"
+    assert recorded.text == "hello there world"
+    assert recorded.is_interim is False
+    assert recorded.started_at_iso
+    assert recorded.ended_at_iso
+
+
+async def test_assistant_transcript_observer_emits_committed_frame_downstream(
+    tmp_path: Path,
+) -> None:
+    """The observer must push an `_AssistantUtteranceCommittedFrame` after the end frame."""
+    modules = _observer_fakes()
+    writer = TranscriptWriter(
+        session_id="sess-obs-frame",
+        artifact_path=tmp_path / "voice_sessions" / "sess-obs-frame.json",
+        started_at_iso="2026-05-20T12:00:00+00:00",
+        config_snapshot={
+            "openai_model_id": "gpt-4o-mini",
+            "cartesia_voice_id": "v",
+            "stt_provider": "deepgram",
+            "tts_provider": "cartesia",
+            "system_prompt": "x",
+        },
+    )
+    observer_cls, committed_cls = pipecat_session._build_assistant_transcript_observer(
+        modules=modules,
+        writer=writer,
+    )
+    observer = observer_cls()
+
+    direction = object()
+    await observer.process_frame(modules["LLMFullResponseStartFrame"](), direction)
+    await observer.process_frame(modules["LLMTextFrame"](text="ok"), direction)
+    await observer.process_frame(modules["LLMFullResponseEndFrame"](), direction)
+
+    committed_frames = [frame for frame in observer.pushed if isinstance(frame, committed_cls)]
+    assert len(committed_frames) == 1
+    assert committed_frames[0].text == "ok"
+    assert committed_frames[0].started_at
+    assert committed_frames[0].ended_at
+
+
+async def test_assistant_utterance_committed_frame_serializes_to_agent_text() -> None:
+    """The committed-frame class wired into the serializer factory must emit `agent_text`."""
+    serializer, _ = _build_serializer_with_fakes()
+    frame = _FakeAssistantCommittedFrame(
+        text="hello world",
+        started_at="2026-05-20T12:00:00+00:00",
+        ended_at="2026-05-20T12:00:02+00:00",
+    )
+    result = await serializer.serialize(frame)
+    assert isinstance(result, str)
+    body = json.loads(result)
+    assert body["type"] == "agent_text"
+    assert body["payload"]["role"] == "assistant"
+    assert body["payload"]["text"] == "hello world"
+    assert body["payload"]["started_at"] == "2026-05-20T12:00:00+00:00"
+    assert body["payload"]["ended_at"] == "2026-05-20T12:00:02+00:00"
+    assert body["payload"]["is_interim"] is False

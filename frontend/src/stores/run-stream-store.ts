@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { LogEntry, MetricPoint, Checkpoint } from "@/types/run";
+import type { FallbackProposedPayload } from "@/types/websocket";
 
 interface SystemResources {
   readonly gpuMemoryUsedMb: number;
@@ -33,6 +34,7 @@ const EMPTY_RUN_DATA: RunStreamData = {
 interface RunStreamStoreState {
   readonly runData: Readonly<Record<string, RunStreamData>>;
   readonly systemResources: SystemResources | null;
+  readonly fallbackProposals: Readonly<Record<string, FallbackProposedPayload>>;
 }
 
 interface RunStreamStoreActions {
@@ -46,6 +48,8 @@ interface RunStreamStoreActions {
     totalSteps: number,
   ) => void;
   setSystemResources: (resources: SystemResources) => void;
+  setFallbackProposal: (runId: string, proposal: FallbackProposedPayload) => void;
+  clearFallbackProposal: (runId: string) => void;
 }
 
 type RunStreamStore = RunStreamStoreState & RunStreamStoreActions;
@@ -60,6 +64,7 @@ function getOrEmpty(
 export const useRunStreamStore = create<RunStreamStore>()((set) => ({
   runData: {},
   systemResources: null,
+  fallbackProposals: {},
 
   appendLogs: (runId, entries) =>
     set((state) => {
@@ -114,4 +119,17 @@ export const useRunStreamStore = create<RunStreamStore>()((set) => ({
     }),
 
   setSystemResources: (resources) => set({ systemResources: resources }),
+
+  setFallbackProposal: (runId, proposal) =>
+    set((state) => ({
+      fallbackProposals: { ...state.fallbackProposals, [runId]: proposal },
+    })),
+
+  clearFallbackProposal: (runId) =>
+    set((state) => {
+      if (!(runId in state.fallbackProposals)) return {};
+      const next = { ...state.fallbackProposals };
+      delete next[runId];
+      return { fallbackProposals: next };
+    }),
 }));

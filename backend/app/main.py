@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.routes.artifacts import router as artifacts_router
+from app.api.routes.catalog import router as catalog_router
 from app.api.routes.configs import router as configs_router
 from app.api.routes.datasets import router as datasets_router
 from app.api.routes.eval import router as eval_router
@@ -21,6 +22,7 @@ from app.api.routes.runs import router as runs_router
 from app.api.routes.settings import router as settings_router
 from app.api.routes.storage import router as storage_router
 from app.api.routes.suggestions import router as suggestions_router
+from app.api.routes.user import router as user_router
 from app.api.routes.voice import router as voice_router
 from app.api.websocket.handler import router as ws_router
 from app.api.websocket.stream import connection_manager
@@ -75,6 +77,8 @@ app.include_router(eval_router)
 app.include_router(rubrics_router)
 app.include_router(mlx_serving_router)
 app.include_router(voice_router)
+app.include_router(catalog_router)
+app.include_router(user_router)
 app.include_router(ws_router)
 
 

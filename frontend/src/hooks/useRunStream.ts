@@ -12,8 +12,64 @@ import type {
   CheckpointSavedPayload,
   ProgressUpdatePayload,
   RetentionAppliedPayload,
+  FallbackProposedPayload,
+  OomDetectedPayload,
+  OomTrigger,
 } from "@/types/websocket";
-import type { MetricPoint, LogEntry, Checkpoint } from "@/types/run";
+import type { MetricPoint, LogEntry, Checkpoint, ModalGpuType, DeviceType } from "@/types/run";
+import type { ModalGpuOption } from "@/types/catalog";
+
+interface RawFallbackCandidate {
+  readonly gpu_type: string;
+  readonly label: string;
+  readonly vram_gb: number;
+  readonly rate_usd_hr: number;
+}
+
+interface RawFallbackProposedPayload {
+  readonly run_id: string;
+  readonly attempt_index: number;
+  readonly from_gpu: string;
+  readonly candidates: ReadonlyArray<RawFallbackCandidate>;
+  readonly detected_via: OomTrigger;
+  readonly preserved_volume: boolean;
+}
+
+interface RawOomDetectedPayload {
+  readonly run_id: string;
+  readonly device: string;
+  readonly exit_code: number;
+  readonly detected_via: OomTrigger;
+}
+
+function normalizeFallbackCandidate(raw: RawFallbackCandidate): ModalGpuOption {
+  return {
+    gpuType: raw.gpu_type as ModalGpuType,
+    label: raw.label,
+    vramGb: raw.vram_gb,
+    rateUsdHr: raw.rate_usd_hr,
+  };
+}
+
+function normalizeFallbackProposed(raw: RawFallbackProposedPayload): FallbackProposedPayload {
+  return {
+    runId: raw.run_id,
+    attemptIndex: raw.attempt_index,
+    fromGpu: raw.from_gpu as ModalGpuType,
+    candidates: raw.candidates.map(normalizeFallbackCandidate),
+    detectedVia: raw.detected_via,
+    preservedVolume: raw.preserved_volume,
+  };
+}
+
+function normalizeOomDetected(raw: RawOomDetectedPayload): OomDetectedPayload {
+  return {
+    runId: raw.run_id,
+    device: raw.device as DeviceType,
+    exitCode: raw.exit_code,
+    detectedVia: raw.detected_via,
+  };
+}
 
 export interface RunStreamState {
   readonly isConnected: boolean;
@@ -71,6 +127,7 @@ export function useRunStream({
     appendCheckpoint,
     setProgress,
     setSystemResources,
+    setFallbackProposal,
     runData,
     systemResources,
   } = useRunStreamStore((state) => ({
@@ -79,6 +136,7 @@ export function useRunStream({
     appendCheckpoint: state.appendCheckpoint,
     setProgress: state.setProgress,
     setSystemResources: state.setSystemResources,
+    setFallbackProposal: state.setFallbackProposal,
     runData: runId ? (state.runData[runId] ?? null) : null,
     systemResources: state.systemResources,
   }));
@@ -161,12 +219,27 @@ export function useRunStream({
             queryKey: ["projects", projectId, "runs", runId, "weight-snapshots"],
           });
         }
+        if (envelope.event === "oom_detected") {
+          const payload = normalizeOomDetected(envelope.payload as RawOomDetectedPayload);
+          toast({
+            title: "Out-of-memory detected",
+            description: `Device ${payload.device} ran out of memory (detected via ${payload.detectedVia}).`,
+            variant: "destructive",
+          });
+        }
       }
 
       if (envelope.channel === "run_state") {
         if (envelope.event === "progress_update") {
           const payload = envelope.payload as ProgressUpdatePayload;
           setProgress(runId, payload.progressPct, payload.currentStep, payload.totalSteps);
+        }
+        if (envelope.event === "fallback_proposed") {
+          const payload = normalizeFallbackProposed(envelope.payload as RawFallbackProposedPayload);
+          setFallbackProposal(runId, payload);
+          void queryClient.invalidateQueries({
+            queryKey: ["projects", projectId, "runs", runId],
+          });
         }
 
         const invalidatingEvents = new Set([
@@ -215,6 +288,7 @@ export function useRunStream({
     appendCheckpoint,
     setProgress,
     setSystemResources,
+    setFallbackProposal,
   ]);
 
   return {

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
@@ -41,6 +42,11 @@ from app.services.training_dispatcher import UnsupportedEnvironmentError
 router = APIRouter(prefix="/api/v1/projects", tags=["runs"])
 
 DbSession = Annotated[AsyncSession, Depends(get_db_session)]
+
+
+class RunFallbackRequest(BaseModel):
+    action: Literal["accept", "cancel"]
+    gpu_type: str | None = None
 
 
 @router.get("/{project_id}/runs", response_model=RunListResponse)
@@ -195,6 +201,47 @@ async def cancel_run(
         raise HTTPException(
             status_code=404,
             detail={"code": "RUN_NOT_FOUND", "message": str(exc), "details": {}},
+        ) from exc
+    except RunStateError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "RUN_STATE_ERROR", "message": str(exc), "details": {}},
+        ) from exc
+    return RunResponse.model_validate(run)
+
+
+@router.post("/{project_id}/runs/{run_id}/fallback", response_model=RunResponse)
+async def post_run_fallback(
+    project_id: str,
+    run_id: str,
+    payload: RunFallbackRequest,
+    session: DbSession,
+) -> RunResponse:
+    try:
+        if payload.action == "accept":
+            if not payload.gpu_type:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "code": "MISSING_GPU_TYPE",
+                        "message": "action='accept' requires gpu_type",
+                        "details": {},
+                    },
+                )
+            run = await orchestrator.accept_fallback(
+                session=session, run_id=run_id, gpu_type=payload.gpu_type
+            )
+        else:
+            run = await orchestrator.cancel_fallback(session=session, run_id=run_id)
+    except RunNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "RUN_NOT_FOUND", "message": str(exc), "details": {}},
+        ) from exc
+    except UnsupportedEnvironmentError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "FALLBACK_REJECTED", "message": str(exc), "details": {}},
         ) from exc
     except RunStateError as exc:
         raise HTTPException(

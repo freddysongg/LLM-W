@@ -7,7 +7,7 @@ import { NAV_GROUPS, NAV_ICON_COMPONENTS, SETTINGS_NAV_ITEM } from "@/lib/nav";
 import type { NavItem } from "@/lib/nav";
 import { useToast } from "@/hooks/use-toast";
 import { useRunStreamStore } from "@/stores/run-stream-store";
-import { CURRENT_USER } from "@/lib/current-user";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -193,9 +193,17 @@ interface SidebarFooterProps {
   readonly collapsed: boolean;
 }
 
+const PLACEHOLDER_NAME = "…";
+const PLACEHOLDER_EMAIL = "";
+const PLACEHOLDER_INITIALS = "…";
+
 function SidebarFooter({ collapsed }: SidebarFooterProps): React.JSX.Element {
   const { toast } = useToast();
-  const { name, email, initials } = CURRENT_USER;
+  const { data: currentUser, isLoading } = useCurrentUser();
+
+  const name = currentUser?.name ?? (isLoading ? PLACEHOLDER_NAME : "Unavailable");
+  const email = currentUser?.email ?? PLACEHOLDER_EMAIL;
+  const initials = currentUser?.initials ?? (isLoading ? PLACEHOLDER_INITIALS : "?");
 
   const handleShowToast = (title: string): void => {
     toast({ title });

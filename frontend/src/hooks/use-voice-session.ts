@@ -120,6 +120,32 @@ function mergeToolResult({
   });
 }
 
+interface AppendTranscriptResult {
+  readonly transcript: ReadonlyArray<TranscriptEntry>;
+  readonly cursorDelta: number;
+}
+
+function appendTranscriptEntry({
+  transcript,
+  entry,
+}: {
+  transcript: ReadonlyArray<TranscriptEntry>;
+  entry: TranscriptEntry;
+}): AppendTranscriptResult {
+  const trailing = transcript.length > 0 ? transcript[transcript.length - 1] : null;
+  const shouldReplaceTrailing =
+    !entry.isInterim &&
+    trailing !== null &&
+    trailing.role === entry.role &&
+    trailing.isInterim === true;
+  if (shouldReplaceTrailing && trailing !== null) {
+    const swapped: TranscriptEntry = { ...entry, index: trailing.index };
+    const next = transcript.slice(0, -1).concat(swapped);
+    return { transcript: next, cursorDelta: 0 };
+  }
+  return { transcript: [...transcript, entry], cursorDelta: 1 };
+}
+
 interface PlaybackQueue {
   readonly context: AudioContext;
   nextStartTime: number;
@@ -231,8 +257,12 @@ export function useVoiceSession(): UseVoiceSessionResult {
           index: transcriptCursor.current,
         });
         if (entry === null) return previous;
-        transcriptCursor.current += 1;
-        return { ...previous, transcript: [...previous.transcript, entry] };
+        const { transcript, cursorDelta } = appendTranscriptEntry({
+          transcript: previous.transcript,
+          entry,
+        });
+        transcriptCursor.current += cursorDelta;
+        return { ...previous, transcript };
       }
       if (envelope.type === "agent_text") {
         const entry = toTranscriptEntry({
@@ -240,8 +270,12 @@ export function useVoiceSession(): UseVoiceSessionResult {
           index: transcriptCursor.current,
         });
         if (entry === null) return previous;
-        transcriptCursor.current += 1;
-        return { ...previous, transcript: [...previous.transcript, entry] };
+        const { transcript, cursorDelta } = appendTranscriptEntry({
+          transcript: previous.transcript,
+          entry,
+        });
+        transcriptCursor.current += cursorDelta;
+        return { ...previous, transcript };
       }
       if (envelope.type === "tool_call") {
         const entry = toToolCallEntry({

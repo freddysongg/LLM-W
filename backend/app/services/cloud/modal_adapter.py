@@ -104,6 +104,49 @@ def _workspace_checkpoints_path(run_id: str) -> str:
     return f"{_WORKSPACE_ROOT}/runs/{run_id}/checkpoints"
 
 
+def _read_sanitized_content_hash(*, project_dir: Path) -> str | None:
+    """Return the sanitized artifact's content hash from its local manifest, if present.
+
+    The manifest is written next to `sanitized.jsonl` whenever the sanitizer
+    runs with persist=true. Absent manifest → caller must upload (no hash to
+    compare). Malformed manifest → treat as missing rather than crashing.
+    """
+    manifest_path = project_dir / "datasets" / _SANITIZED_MANIFEST_FILENAME
+    if not manifest_path.is_file():
+        return None
+    try:
+        parsed = json.loads(manifest_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    content_hash = parsed.get("content_hash")
+    if isinstance(content_hash, str) and content_hash:
+        return content_hash
+    return None
+
+
+def _remote_sanitized_hash_matches(*, volume: modal.Volume, expected_hash: str) -> bool:
+    """Return True iff the remote sanitized manifest carries the same content hash.
+
+    Best-effort: any read error means we fall through to the safer behavior of
+    re-uploading (returns False) rather than skipping an upload we should do.
+    """
+    remote_manifest = f"{_WORKSPACE_DATASETS}/{_SANITIZED_MANIFEST_FILENAME}"
+    try:
+        chunks = list(volume.read_file(remote_manifest))
+    except Exception:
+        return False
+    try:
+        raw = b"".join(chunks).decode("utf-8", errors="replace")
+        parsed = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return False
+    if not isinstance(parsed, dict):
+        return False
+    return parsed.get("content_hash") == expected_hash
+
+
 # backend/ is 4 levels up from this file (cloud/ -> services/ -> app/ -> backend/)
 _BACKEND_ROOT = Path(__file__).resolve().parents[3]
 
@@ -136,6 +179,11 @@ class TrainingProcess(Protocol):
 # sandboxes cannot run forever. Six hours matches the prior default and is the
 # fallback when no per-run budget is supplied.
 _MAX_SANDBOX_TIMEOUT_SECONDS: int = 6 * 3600
+
+# Cap on stderr tail captured for OOM detection. The detector only needs the
+# trailing message, and the orchestrator persists this string into the failure
+# reason — keeping it bounded prevents a 100MB stderr from blowing up the DB row.
+_STDERR_TAIL_MAX_BYTES: int = 4096
 
 # Packages installed into the Modal training image. `accelerate` is required by
 # the trainer's launch wrapper; `bitsandbytes` is required by QLoRA / 4-bit
@@ -181,6 +229,23 @@ class ModalTrainingAdapter:
         self._exit_code: int | None = None
         self._heartbeat_task: asyncio.Task[None] | None = None
         self._volume: modal.Volume | None = None
+        # Surface trailing stderr and any Modal-specific exception class name so
+        # the orchestrator's OOM classifier can disambiguate container-OOM kills
+        # from generic exits.
+        self._stderr_tail: str = ""
+        self._exception_type_name: str | None = None
+
+    @property
+    def last_exit_code(self) -> int | None:
+        return self._exit_code
+
+    @property
+    def last_stderr_tail(self) -> str:
+        return self._stderr_tail
+
+    @property
+    def last_exception_type_name(self) -> str | None:
+        return self._exception_type_name
 
     async def start(self) -> None:
         os.environ["MODAL_TOKEN_ID"] = self._config.modal_token_id
@@ -284,7 +349,21 @@ class ModalTrainingAdapter:
 
     async def wait(self) -> int:
         if self._process is not None:
-            self._exit_code = await self._process.wait.aio()
+            try:
+                self._exit_code = await self._process.wait.aio()
+            except Exception as exc:
+                # Modal raises typed exceptions for sandbox-level failures (e.g.
+                # OOM kills, infra timeouts). Capture the class name so the
+                # orchestrator can classify the failure without speculating on
+                # Modal's internal exception class hierarchy.
+                self._exception_type_name = type(exc).__name__
+                logger.warning(
+                    "Modal process.wait failed for run %s: %s",
+                    self._config.run_id,
+                    type(exc).__name__,
+                    exc_info=True,
+                )
+            await self._capture_stderr_tail()
         if self._heartbeat_task is not None:
             self._heartbeat_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -296,6 +375,26 @@ class ModalTrainingAdapter:
                 await self._sandbox.terminate.aio()
         return self._exit_code if self._exit_code is not None else 1
 
+    async def _capture_stderr_tail(self) -> None:
+        if self._process is None:
+            return
+        stderr_stream = getattr(self._process, "stderr", None)
+        if stderr_stream is None:
+            return
+        try:
+            chunks: list[str] = []
+            async for line in stderr_stream:
+                text = line if isinstance(line, str) else line.decode("utf-8", errors="replace")
+                chunks.append(text)
+            if chunks:
+                self._stderr_tail = "".join(chunks)[-_STDERR_TAIL_MAX_BYTES:]
+        except Exception:
+            logger.debug(
+                "Failed to read Modal stderr for run %s",
+                self._config.run_id,
+                exc_info=True,
+            )
+
     async def _upload_training_data(self, *, volume: modal.Volume) -> None:
         plan = build_modal_upload_plan(
             project_dir=self._config.project_dir,
@@ -303,8 +402,21 @@ class ModalTrainingAdapter:
         )
 
         loop = asyncio.get_running_loop()
+        local_hash = _read_sanitized_content_hash(project_dir=self._config.project_dir)
 
         def _sync_upload() -> None:
+            # On retry, the sandbox is new but the named Volume persists. Skip
+            # re-uploading the sanitized artifact if its content hash matches the
+            # one already on the volume — uploads are network-expensive and the
+            # artifact is immutable per spec.
+            if local_hash is not None and _remote_sanitized_hash_matches(
+                volume=volume, expected_hash=local_hash
+            ):
+                logger.info(
+                    "Skipping sanitized artifact upload for run %s — volume hash matches",
+                    self._config.run_id,
+                )
+                return
             with volume.batch_upload() as batch:
                 for local, remote in plan.files:
                     batch.put_file(str(local), remote)

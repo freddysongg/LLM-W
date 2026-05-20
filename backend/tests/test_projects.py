@@ -136,3 +136,22 @@ async def test_get_project_storage(client: AsyncClient, tmp_path, monkeypatch) -
     assert "breakdown" in body
     assert "per_run" in body
     assert "retention_policy" in body
+    assert body["quota_bytes"] == 250 * 1024 * 1024 * 1024
+
+
+async def test_get_project_storage_quota_override(
+    client: AsyncClient, tmp_path, monkeypatch
+) -> None:
+    from app.core import config as cfg_module
+    monkeypatch.setattr(cfg_module.settings, "projects_dir", tmp_path)
+    custom_quota = 100 * 1024 * 1024 * 1024
+    monkeypatch.setattr(cfg_module.settings, "project_storage_quota_bytes", custom_quota)
+
+    create_resp = await client.post(
+        "/api/v1/projects", json={"name": "quota-override-test"}
+    )
+    project_id = create_resp.json()["id"]
+
+    response = await client.get(f"/api/v1/projects/{project_id}/storage")
+    assert response.status_code == 200
+    assert response.json()["quota_bytes"] == custom_quota

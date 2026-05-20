@@ -23,6 +23,7 @@ interface RawRetentionPolicy {
 interface RawProjectStorageResponse {
   readonly project_id: string;
   readonly total_bytes: number;
+  readonly quota_bytes: number;
   readonly breakdown: Record<string, RawStorageCategoryDetail>;
   readonly per_run: ReadonlyArray<RawRunStorageSummary>;
   readonly retention_policy: RawRetentionPolicy;
@@ -61,6 +62,7 @@ function normalizeProjectStorage(raw: RawProjectStorageResponse): ProjectStorage
   return {
     projectId: raw.project_id,
     totalBytes: raw.total_bytes,
+    quotaBytes: raw.quota_bytes,
     breakdown: {
       checkpoints: normalizeCategoryDetail(raw.breakdown.checkpoints),
       logs: normalizeCategoryDetail(raw.breakdown.logs),

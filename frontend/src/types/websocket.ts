@@ -1,5 +1,8 @@
-import type { MetricName, RunStatus, StageName } from "./run";
+import type { MetricName, RunStatus, StageName, ModalGpuType, DeviceType } from "./run";
 import type { ArtifactType } from "./artifact";
+import type { ModalGpuOption } from "./catalog";
+
+export type OomTrigger = "modal_exception" | "stderr_regex" | "exit_code";
 
 export type WebSocketChannel = "run_state" | "metrics" | "logs" | "system" | "eval";
 export type LogSeverity = "debug" | "info" | "warning" | "error" | "critical";
@@ -113,6 +116,22 @@ export interface ArtifactCreatedPayload {
   readonly runId: string;
   readonly artifactType: ArtifactType;
   readonly path: string;
+}
+
+export interface FallbackProposedPayload {
+  readonly runId: string;
+  readonly attemptIndex: number;
+  readonly fromGpu: ModalGpuType;
+  readonly candidates: ReadonlyArray<ModalGpuOption>;
+  readonly detectedVia: OomTrigger;
+  readonly preservedVolume: boolean;
+}
+
+export interface OomDetectedPayload {
+  readonly runId: string;
+  readonly device: DeviceType;
+  readonly exitCode: number;
+  readonly detectedVia: OomTrigger;
 }
 
 export type ClientMessageType = "subscribe" | "unsubscribe" | "ping";

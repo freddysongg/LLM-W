@@ -22,6 +22,13 @@ from app.core.events import event_bus
 from app.core.exceptions import (
     ConfigVersionNotFoundError,
     ProjectNotFoundError,
+    RunNotFoundError,
+    RunStateError,
+)
+from app.core.modal_catalog import (
+    MODAL_GPU_CATALOG,
+    get_modal_gpu_option,
+    get_modal_gpu_rate_usd_per_second,
 )
 from app.models.artifact import Artifact
 from app.models.config_version import ConfigVersion
@@ -29,12 +36,14 @@ from app.models.metric_point import MetricPoint
 from app.models.model_profile import ModelProfile
 from app.models.project import Project
 from app.models.run import Run
+from app.models.run_attempt import RunAttempt
 from app.models.run_stage import RunStage
 from app.models.weight_snapshot import WeightSnapshot
 from app.schemas.run import RunCreate, RunResponse
 from app.schemas.workbench_config import ExecutionConfig
 from app.services import settings_service, suggestion_service
 from app.services.config_service import serialize_config_yaml_snapshot
+from app.services.oom_detector import detect_oom
 from app.services.storage_manager import (
     apply_retention_after_checkpoint,
     run_project_cleanup,
@@ -49,18 +58,6 @@ from app.services.training_dispatcher import (
 # rejected at run-creation time so a misconfigured budget can't silently rack up
 # a multi-hundred-dollar cloud bill. See plan.md "Cloud Budget Defaults".
 _MAX_ALLOWED_COST_USD: float = 5.0
-
-# Modal-published USD-per-second GPU rates (rounded from the per-hour pricing on
-# https://modal.com/pricing as of 2025). Used to compute Run.cost_usd at terminal
-# transitions. Keys mirror ExecutionConfig.modal_gpu_type literals.
-_GPU_USD_PER_SECOND: dict[str, float] = {
-    "t4": 0.000164,
-    "a10": 0.000306,
-    "l40s": 0.000542,
-    "a100-40gb": 0.000900,
-    "a100-80gb": 0.001067,
-    "h100": 0.001442,
-}
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +135,7 @@ async def list_runs(*, session: AsyncSession, project_id: str) -> list[Run]:
 async def get_run(*, session: AsyncSession, run_id: str) -> Run:
     run = await session.get(Run, run_id)
     if run is None:
-        raise KeyError(f"Run not found: {run_id}")
+        raise RunNotFoundError(run_id)
     return run
 
 
@@ -251,6 +248,22 @@ async def create_run(
         )
         session.add(stage_row)
 
+    # Seed attempt index 0 — the OOM-fallback machinery uses this row as the
+    # cost-window anchor for the run's first try. Subsequent attempts are added
+    # via accept_fallback when the user (or auto strategy) picks a larger GPU.
+    initial_attempt = RunAttempt(
+        id=str(uuid.uuid4()),
+        run_id=run_id,
+        attempt_index=0,
+        gpu_type=(
+            execution_cfg.modal_gpu_type if execution_cfg.environment == "modal" else None
+        ),
+        device=execution_cfg.device,
+        started_at=now,
+        created_at=now,
+    )
+    session.add(initial_attempt)
+
     await session.commit()
     await session.refresh(run)
 
@@ -350,20 +363,33 @@ def _validate_execution_for_run(*, execution: ExecutionConfig) -> None:
     # sandbox timeout, since the sandbox can run for the full `max_run_minutes`
     # window regardless of what the user estimated. Reject when that ceiling
     # exceeds the cap so a slow H100 config can't outspend the budget.
-    gpu_rate = _GPU_USD_PER_SECOND.get(execution.modal_gpu_type, 0.0)
-    worst_case_cost_usd = execution.max_run_minutes * 60 * gpu_rate
-    if worst_case_cost_usd > _MAX_ALLOWED_COST_USD:
-        raise UnsupportedEnvironmentError(
-            f"Worst-case spend for modal_gpu_type='{execution.modal_gpu_type}' over "
-            f"max_run_minutes={execution.max_run_minutes} is "
-            f"${worst_case_cost_usd:.2f}, which exceeds the hard cap of "
-            f"${_MAX_ALLOWED_COST_USD}. Lower max_run_minutes or choose a cheaper GPU."
-        )
+    _enforce_worst_case_cost_cap(
+        gpu_type=execution.modal_gpu_type,
+        max_run_minutes=execution.max_run_minutes,
+    )
 
     if settings_service.get_modal_credentials() is None:
         raise UnsupportedEnvironmentError(
             "Modal training requires modal_token_id and modal_token_secret to be "
             "configured under workbench settings before launching a cloud run."
+        )
+
+
+def _enforce_worst_case_cost_cap(*, gpu_type: str, max_run_minutes: int) -> None:
+    """Reject GPU + timeout pairs whose worst-case spend exceeds the hard cap.
+
+    Used by the launch-time validator and the OOM-fallback accept path: both
+    must hold the same ceiling so the user can't escape the budget by retrying
+    on a pricier card.
+    """
+    gpu_rate = get_modal_gpu_rate_usd_per_second(gpu_type=gpu_type)
+    worst_case_cost_usd = max_run_minutes * 60 * gpu_rate
+    if worst_case_cost_usd > _MAX_ALLOWED_COST_USD:
+        raise UnsupportedEnvironmentError(
+            f"Worst-case spend for modal_gpu_type='{gpu_type}' over "
+            f"max_run_minutes={max_run_minutes} is "
+            f"${worst_case_cost_usd:.2f}, which exceeds the hard cap of "
+            f"${_MAX_ALLOWED_COST_USD}. Lower max_run_minutes or choose a cheaper GPU."
         )
 
 
@@ -501,7 +527,7 @@ def _compute_run_cost(
     wall_clock_s = max(0.0, (ended - started).total_seconds())
     if execution.environment != "modal":
         return (wall_clock_s, 0.0)
-    rate = _GPU_USD_PER_SECOND.get(execution.modal_gpu_type, 0.0)
+    rate = get_modal_gpu_rate_usd_per_second(gpu_type=execution.modal_gpu_type)
     return (wall_clock_s, wall_clock_s * rate)
 
 
@@ -1207,6 +1233,10 @@ async def _run_trainer_subprocess(
             else:
                 captured_failure_reason = f"Trainer process exited with code {proc.returncode}"
 
+        proc_exit_code = proc.returncode if proc.returncode is not None else -1
+        modal_stderr_tail, modal_exception_type = _extract_modal_failure_details(proc=proc)
+        effective_stderr_tail = modal_stderr_tail or stderr_output
+
         now = datetime.now(UTC).isoformat()
         started_iso = await _load_run_started_iso(run_id=run_id)
         wall_clock_s, cost_usd = (0.0, 0.0)
@@ -1275,6 +1305,19 @@ async def _run_trainer_subprocess(
                 },
             )
         else:
+            handled_by_fallback = await _handle_trainer_oom(
+                run_id=run_id,
+                project_id=project_id,
+                execution=execution_cfg,
+                exit_code=proc_exit_code,
+                stderr_tail=effective_stderr_tail,
+                exception_type_name=modal_exception_type,
+            )
+            if handled_by_fallback:
+                # OOM fallback owns the terminal state from here — either it
+                # transitioned the run to fallback_pending and emitted a WS
+                # event, or it failed the run with oom_chain_exhausted itself.
+                return
             await _mark_pending_stages_skipped(run_id=run_id)
             await _update_run_status(
                 run_id=run_id,
@@ -1315,6 +1358,486 @@ async def _run_trainer_subprocess(
         )
         async with async_session_factory() as session:
             await _run_final_retention_sweep(session=session, project_id=project_id)
+
+
+def _extract_modal_failure_details(*, proc: object) -> tuple[str, str | None]:
+    """Pull (stderr_tail, exception_type_name) off a Modal-backed TrainingProcess.
+
+    Returns empty/None for local subprocesses or any handle that doesn't expose
+    the Modal-specific attributes — the existing stderr capture above already
+    covers those paths.
+    """
+    adapter = getattr(proc, "adapter", None)
+    if adapter is None:
+        return ("", None)
+    stderr_tail_attr = getattr(adapter, "last_stderr_tail", "")
+    exception_type_attr = getattr(adapter, "last_exception_type_name", None)
+    stderr_tail = stderr_tail_attr if isinstance(stderr_tail_attr, str) else ""
+    exception_type = exception_type_attr if isinstance(exception_type_attr, str) else None
+    return (stderr_tail, exception_type)
+
+
+def _load_fallback_settings(*, execution: ExecutionConfig) -> tuple[list[str], str]:
+    fallback = execution.modal_oom_fallback
+    chain_str: list[str] = list(fallback.chain)
+    return (chain_str, fallback.strategy)
+
+
+def _filter_fallback_candidates(
+    *,
+    chain: list[str],
+    max_run_minutes: int,
+    exclude_gpu_type: str | None,
+) -> list[object]:
+    """Return GPU options from the fallback chain that pass cost-cap + de-dup checks.
+
+    `exclude_gpu_type` is the currently-failed GPU; we never recommend the same
+    GPU as the next attempt. Unknown GPU types in the chain are silently dropped
+    (the Pydantic Literal would reject typos at config load time anyway).
+    """
+    candidates: list[object] = []
+    for gpu_type in chain:
+        if exclude_gpu_type is not None and gpu_type == exclude_gpu_type:
+            continue
+        option = get_modal_gpu_option(gpu_type=gpu_type)
+        if option is None:
+            continue
+        worst_case = max_run_minutes * 60 * (option.rate_usd_hr / 3600.0)
+        if worst_case > _MAX_ALLOWED_COST_USD:
+            continue
+        candidates.append(option)
+    return candidates
+
+
+def _serialize_gpu_option(*, option: object) -> dict[str, Any]:
+    return {
+        "gpu_type": getattr(option, "gpu_type", ""),
+        "label": getattr(option, "label", ""),
+        "vram_gb": getattr(option, "vram_gb", 0),
+        "rate_usd_hr": getattr(option, "rate_usd_hr", 0.0),
+    }
+
+
+async def _load_current_attempt(*, session: AsyncSession, run_id: str) -> RunAttempt | None:
+    """Return the highest-indexed attempt for a run (its current attempt)."""
+    result = await session.execute(
+        select(RunAttempt)
+        .where(RunAttempt.run_id == run_id)
+        .order_by(RunAttempt.attempt_index.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def _close_attempt_with_reason(
+    *,
+    session: AsyncSession,
+    attempt: RunAttempt,
+    execution: ExecutionConfig,
+    exit_reason: str,
+) -> None:
+    now = datetime.now(UTC).isoformat()
+    attempt.ended_at = now
+    attempt.exit_reason = exit_reason
+    started = datetime.fromisoformat(attempt.started_at)
+    ended = datetime.fromisoformat(now)
+    wall_clock_s = max(0.0, (ended - started).total_seconds())
+    if execution.environment == "modal" and attempt.gpu_type is not None:
+        rate = get_modal_gpu_rate_usd_per_second(gpu_type=attempt.gpu_type)
+        attempt.cost_estimate_usd = wall_clock_s * rate
+    else:
+        attempt.cost_estimate_usd = 0.0
+
+
+async def _publish_local_oom_detected(
+    *,
+    run_id: str,
+    project_id: str,
+    device: str,
+    exit_code: int,
+    detected_via: str | None,
+) -> None:
+    await event_bus.publish(
+        event_type=f"project.{project_id}.ws",
+        payload={
+            "channel": "system",
+            "event": "oom_detected",
+            "runId": run_id,
+            "timestamp": datetime.now(UTC).isoformat(),
+            "payload": {
+                "run_id": run_id,
+                "device": device,
+                "exit_code": exit_code,
+                "detected_via": detected_via,
+            },
+        },
+    )
+
+
+async def _fail_run_with_oom_reason(
+    *,
+    run_id: str,
+    project_id: str,
+    failure_reason: str,
+    publish_run_failed: bool,
+) -> None:
+    await _mark_pending_stages_skipped(run_id=run_id)
+    await _update_run_status(
+        run_id=run_id,
+        status="failed",
+        failure_reason=failure_reason,
+        failure_stage=None,
+    )
+    async with async_session_factory() as session:
+        await _run_final_retention_sweep(session=session, project_id=project_id)
+    if publish_run_failed:
+        await event_bus.publish(
+            event_type=f"project.{project_id}.ws",
+            payload={
+                "channel": "run_state",
+                "event": "run_failed",
+                "runId": run_id,
+                "timestamp": datetime.now(UTC).isoformat(),
+                "payload": {
+                    "runId": run_id,
+                    "failureReason": failure_reason,
+                    "failureStage": None,
+                    "lastStep": 0,
+                    "costUsd": 0.0,
+                    "wallClockS": 0.0,
+                },
+            },
+        )
+
+
+async def _close_failed_attempt(*, run_id: str, execution: ExecutionConfig) -> RunAttempt | None:
+    async with async_session_factory() as session:
+        attempt = await _load_current_attempt(session=session, run_id=run_id)
+        if attempt is not None:
+            await _close_attempt_with_reason(
+                session=session,
+                attempt=attempt,
+                execution=execution,
+                exit_reason="oom",
+            )
+        await session.commit()
+    return attempt
+
+
+async def _transition_to_fallback_pending(*, run_id: str) -> bool:
+    async with async_session_factory() as session:
+        run = await session.get(Run, run_id)
+        if run is None:
+            return False
+        run.status = "fallback_pending"
+        run.updated_at = datetime.now(UTC).isoformat()
+        await session.commit()
+    return True
+
+
+async def _auto_accept_first_candidate(*, run_id: str, gpu_type: str) -> None:
+    if not await _transition_to_fallback_pending(run_id=run_id):
+        return
+    async with async_session_factory() as session:
+        await accept_fallback(session=session, run_id=run_id, gpu_type=gpu_type)
+
+
+async def _publish_fallback_proposed(
+    *,
+    run_id: str,
+    project_id: str,
+    execution: ExecutionConfig,
+    attempt: RunAttempt | None,
+    candidates: list[object],
+    detected_via: str | None,
+) -> None:
+    await event_bus.publish(
+        event_type=f"project.{project_id}.ws",
+        payload={
+            "channel": "run_state",
+            "event": "fallback_proposed",
+            "runId": run_id,
+            "timestamp": datetime.now(UTC).isoformat(),
+            "payload": {
+                "run_id": run_id,
+                "attempt_index": attempt.attempt_index if attempt is not None else 0,
+                "from_gpu": execution.modal_gpu_type,
+                "candidates": [_serialize_gpu_option(option=opt) for opt in candidates],
+                "detected_via": detected_via,
+                "preserved_volume": True,
+            },
+        },
+    )
+
+
+async def _handle_trainer_oom(
+    *,
+    run_id: str,
+    project_id: str,
+    execution: ExecutionConfig,
+    exit_code: int,
+    stderr_tail: str,
+    exception_type_name: str | None,
+) -> bool:
+    """Classify a trainer failure and trigger the fallback flow when applicable.
+
+    Returns True if the failure was identified as OOM and consumed by the
+    fallback machinery (either by transitioning to fallback_pending, auto-
+    accepting the next GPU, or terminating the run with chain_exhausted). When
+    it returns False the caller continues down the existing generic-failure
+    path with no state changes.
+    """
+    device = execution.device if execution.environment != "modal" else "modal"
+    detection = detect_oom(
+        device=device,
+        exit_code=exit_code,
+        stderr_tail=stderr_tail,
+        exception_type_name=exception_type_name,
+    )
+    if not detection.is_oom:
+        return False
+
+    if execution.environment != "modal":
+        # Local OOM detection is observation-only per spec — there is no
+        # fallback chain on the host. Emit a system-channel event so the UI
+        # can surface a toast, then return False to let the generic failure
+        # path mark the run failed.
+        await _publish_local_oom_detected(
+            run_id=run_id,
+            project_id=project_id,
+            device=device,
+            exit_code=exit_code,
+            detected_via=detection.trigger,
+        )
+        return False
+
+    chain, strategy = _load_fallback_settings(execution=execution)
+    attempt = await _close_failed_attempt(run_id=run_id, execution=execution)
+
+    if strategy == "disabled":
+        await _fail_run_with_oom_reason(
+            run_id=run_id,
+            project_id=project_id,
+            failure_reason="oom",
+            publish_run_failed=False,
+        )
+        return True
+
+    candidates = _filter_fallback_candidates(
+        chain=chain,
+        max_run_minutes=execution.max_run_minutes,
+        exclude_gpu_type=execution.modal_gpu_type,
+    )
+    if not candidates:
+        await _fail_run_with_oom_reason(
+            run_id=run_id,
+            project_id=project_id,
+            failure_reason="oom_chain_exhausted",
+            publish_run_failed=True,
+        )
+        return True
+
+    if strategy == "auto":
+        chosen = candidates[0]
+        await _auto_accept_first_candidate(
+            run_id=run_id,
+            gpu_type=str(getattr(chosen, "gpu_type", "")),
+        )
+        return True
+
+    # strategy == "ask": surface candidates and pause the run.
+    if not await _transition_to_fallback_pending(run_id=run_id):
+        return True
+    await _publish_fallback_proposed(
+        run_id=run_id,
+        project_id=project_id,
+        execution=execution,
+        attempt=attempt,
+        candidates=candidates,
+        detected_via=detection.trigger,
+    )
+    # TODO(oom-recovery): stale fallback_pending runs >N hours auto-fail —
+    # remove when [recovery worker is added].
+    return True
+
+
+def _validate_fallback_gpu_choice(*, run: Run, gpu_type: str, max_run_minutes: int) -> None:
+    if not any(option.gpu_type == gpu_type for option in MODAL_GPU_CATALOG):
+        raise UnsupportedEnvironmentError(
+            f"Unsupported Modal GPU type for fallback: '{gpu_type}'. "
+            f"Expected one of: {', '.join(option.gpu_type for option in MODAL_GPU_CATALOG)}."
+        )
+    if gpu_type == run.modal_gpu_type:
+        raise UnsupportedEnvironmentError(
+            f"Fallback GPU '{gpu_type}' is the same as the GPU that just OOM'd. "
+            "Pick a different option from the proposed candidates."
+        )
+    _enforce_worst_case_cost_cap(gpu_type=gpu_type, max_run_minutes=max_run_minutes)
+
+
+async def _next_attempt_index(*, session: AsyncSession, run_id: str) -> int:
+    result = await session.execute(
+        select(RunAttempt.attempt_index)
+        .where(RunAttempt.run_id == run_id)
+        .order_by(RunAttempt.attempt_index.desc())
+        .limit(1)
+    )
+    current = result.scalar_one_or_none()
+    return 0 if current is None else current + 1
+
+
+def _load_execution_cfg_from_config_version(*, config_version: ConfigVersion) -> ExecutionConfig:
+    raw_config: dict[str, object] = yaml.safe_load(config_version.yaml_blob) or {}
+    execution_raw = raw_config.get("execution", {})
+    return ExecutionConfig.model_validate(
+        execution_raw if isinstance(execution_raw, dict) else {}
+    )
+
+
+def _spawn_trainer_task(
+    *,
+    run_id: str,
+    project_id: str,
+    config_path: Path,
+    project_dir: Path,
+    resume_from_checkpoint: str | None,
+    task_name: str,
+) -> None:
+    task = asyncio.create_task(
+        _run_trainer_subprocess(
+            run_id=run_id,
+            project_id=project_id,
+            config_path=config_path,
+            project_dir=project_dir,
+            resume_from_checkpoint=resume_from_checkpoint,
+        ),
+        name=task_name,
+    )
+    _active_tasks[run_id] = task
+
+    def _on_task_done(completed: asyncio.Task[None]) -> None:
+        _active_tasks.pop(run_id, None)
+        _log_background_task_exception(completed)
+
+    task.add_done_callback(_on_task_done)
+
+
+async def accept_fallback(*, session: AsyncSession, run_id: str, gpu_type: str) -> Run:
+    """Promote a fallback_pending run to running with a new GPU choice.
+
+    Re-runs the cost-cap gate against the new GPU so the operator cannot escape
+    the budget by retrying on a pricier card. Spawns the trainer subprocess
+    again via the same orchestration task path as create_run.
+    """
+    run = await get_run(session=session, run_id=run_id)
+    if run.status != "fallback_pending":
+        raise RunStateError(run_id=run_id, action="accept_fallback", current_status=run.status)
+
+    config_version = await session.get(ConfigVersion, run.config_version_id)
+    if config_version is None:
+        raise ConfigVersionNotFoundError(run.config_version_id)
+    execution_cfg = _load_execution_cfg_from_config_version(config_version=config_version)
+
+    _validate_fallback_gpu_choice(
+        run=run,
+        gpu_type=gpu_type,
+        max_run_minutes=execution_cfg.max_run_minutes,
+    )
+
+    project = await session.get(Project, run.project_id)
+    if project is None:
+        raise ProjectNotFoundError(run.project_id)
+
+    now = datetime.now(UTC).isoformat()
+    next_index = await _next_attempt_index(session=session, run_id=run_id)
+    session.add(
+        RunAttempt(
+            id=str(uuid.uuid4()),
+            run_id=run_id,
+            attempt_index=next_index,
+            gpu_type=gpu_type,
+            device=run.environment,
+            started_at=now,
+            created_at=now,
+        )
+    )
+
+    run.modal_gpu_type = gpu_type
+    run.status = "running"
+    run.updated_at = now
+    # Reset the run-level cost anchor so the next attempt's `stage_enter` write
+    # of `started_at` represents the new attempt's window, not the failed first
+    # attempt's. Cost is reported per-attempt via RunAttempt.cost_estimate_usd;
+    # Run.cost_usd is the rolling total across attempts.
+    run.started_at = None
+    await session.commit()
+
+    project_dir = Path(project.directory_path)
+    config_path = _resolve_config_path(config_version=config_version, project_dir=project_dir)
+    _spawn_trainer_task(
+        run_id=run_id,
+        project_id=run.project_id,
+        config_path=config_path,
+        project_dir=project_dir,
+        resume_from_checkpoint=run.last_checkpoint_path,
+        task_name=f"trainer-fallback-{run_id}",
+    )
+
+    await session.refresh(run)
+    return run
+
+
+async def cancel_fallback(*, session: AsyncSession, run_id: str) -> Run:
+    """Abort a fallback_pending run when the user declines further retries."""
+    run = await get_run(session=session, run_id=run_id)
+    if run.status != "fallback_pending":
+        raise RunStateError(run_id=run_id, action="cancel_fallback", current_status=run.status)
+
+    config_version = await session.get(ConfigVersion, run.config_version_id)
+    if config_version is None:
+        raise ConfigVersionNotFoundError(run.config_version_id)
+
+    execution_cfg = _load_execution_cfg_from_config_version(config_version=config_version)
+
+    attempt = await _load_current_attempt(session=session, run_id=run_id)
+    if attempt is not None and attempt.ended_at is None:
+        await _close_attempt_with_reason(
+            session=session,
+            attempt=attempt,
+            execution=execution_cfg,
+            exit_reason="oom_user_cancelled",
+        )
+
+    now = datetime.now(UTC).isoformat()
+    run.status = "failed"
+    run.failure_reason = "oom_user_cancelled"
+    run.completed_at = now
+    run.updated_at = now
+    await session.commit()
+
+    await _mark_pending_stages_skipped(run_id=run_id)
+
+    await session.refresh(run)
+
+    await event_bus.publish(
+        event_type=f"project.{run.project_id}.ws",
+        payload={
+            "channel": "run_state",
+            "event": "run_failed",
+            "runId": run_id,
+            "timestamp": now,
+            "payload": {
+                "runId": run_id,
+                "failureReason": "oom_user_cancelled",
+                "failureStage": None,
+                "lastStep": run.current_step,
+                "costUsd": run.cost_usd,
+                "wallClockS": run.wall_clock_s,
+            },
+        },
+    )
+
+    return run
 
 
 async def cancel_run(*, session: AsyncSession, run_id: str) -> Run:

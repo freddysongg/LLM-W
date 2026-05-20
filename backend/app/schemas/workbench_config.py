@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ProjectConfig(BaseModel):
@@ -110,6 +110,13 @@ class AIAssistantConfig(BaseModel):
     auto_analyze_on_completion: bool = True
 
 
+class ModalFallbackConfig(BaseModel):
+    chain: list[Literal["t4", "a10", "l40s", "a100-40gb", "a100-80gb", "h100"]] = Field(
+        default_factory=lambda: ["l40s", "a100-40gb", "a100-80gb"]
+    )
+    strategy: Literal["ask", "auto", "disabled"] = "ask"
+
+
 class ExecutionConfig(BaseModel):
     device: Literal["auto", "cuda", "mps", "cpu"] = "auto"
     max_memory_gb: float | None = None
@@ -119,6 +126,7 @@ class ExecutionConfig(BaseModel):
     max_run_minutes: int = 90
     max_estimated_cost_usd: float = 3.0
     data_policy: Literal["local_raw", "sanitized_cloud"] = "local_raw"
+    modal_oom_fallback: ModalFallbackConfig = Field(default_factory=ModalFallbackConfig)
 
 
 class CheckpointRetentionConfig(BaseModel):

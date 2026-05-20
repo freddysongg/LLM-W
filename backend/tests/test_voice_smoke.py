@@ -52,8 +52,12 @@ def _install_fake_pipecat_modules(monkeypatch: pytest.MonkeyPatch) -> None:
         "pipecat.frames.frames": MagicMock(
             EndFrame=MagicMock(),
             ErrorFrame=MagicMock(),
+            Frame=MagicMock(),
             InputAudioRawFrame=MagicMock(),
             InterimTranscriptionFrame=MagicMock(),
+            LLMFullResponseEndFrame=MagicMock(),
+            LLMFullResponseStartFrame=MagicMock(),
+            LLMTextFrame=MagicMock(),
             OutputAudioRawFrame=MagicMock(),
             TranscriptionFrame=MagicMock(),
         ),
@@ -68,6 +72,9 @@ def _install_fake_pipecat_modules(monkeypatch: pytest.MonkeyPatch) -> None:
         ),
         "pipecat.processors.aggregators.llm_response_universal": MagicMock(
             LLMContextAggregatorPair=MagicMock(),
+        ),
+        "pipecat.processors.frame_processor": MagicMock(
+            FrameProcessor=MagicMock(),
         ),
         "pipecat.serializers": MagicMock(),
         "pipecat.serializers.base_serializer": MagicMock(FrameSerializer=MagicMock()),

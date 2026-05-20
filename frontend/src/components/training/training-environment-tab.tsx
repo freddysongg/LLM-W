@@ -8,6 +8,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { useModalGpus } from "@/hooks/useCatalog";
 import type { DataPolicy, ModalGpuType, TrainingEnvironment } from "@/types/config";
 import type { TrainingFormSlice, TrainingFormUpdate } from "@/components/training/training-form";
 
@@ -21,22 +22,9 @@ interface ProviderOption {
   readonly label: string;
 }
 
-interface GpuTypeOption {
-  readonly value: ModalGpuType;
-  readonly label: string;
-}
-
 const PROVIDER_OPTIONS: ReadonlyArray<ProviderOption> = [
   { value: "modal", label: "modal" },
   { value: "local", label: "local" },
-];
-
-const GPU_TYPE_OPTIONS: ReadonlyArray<GpuTypeOption> = [
-  { value: "a100-40gb", label: "a100-40gb" },
-  { value: "a100-80gb", label: "a100-80gb" },
-  { value: "h100", label: "h100" },
-  { value: "a10", label: "a10g" },
-  { value: "t4", label: "t4" },
 ];
 
 function policyForEnvironment(environment: TrainingEnvironment): DataPolicy {
@@ -50,6 +38,7 @@ export function TrainingEnvironmentTab({
   const { execution } = slice;
   const provider = execution.environment;
   const isModal = provider === "modal";
+  const { data: gpuOptions, isLoading: isLoadingGpuOptions } = useModalGpus();
 
   return (
     <Card>
@@ -97,23 +86,29 @@ export function TrainingEnvironmentTab({
               <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-ink-3">
                 GPU type
               </span>
-              <Select
-                value={execution.modalGpuType ?? "a100-40gb"}
-                onValueChange={(value) =>
-                  onChange({ execution: { modalGpuType: value as ModalGpuType } })
-                }
-              >
-                <SelectTrigger className="w-60">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {GPU_TYPE_OPTIONS.map(({ value, label }) => (
-                    <SelectItem key={value} value={value}>
-                      {label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {gpuOptions === undefined ? (
+                <div className="font-mono text-[10.5px] text-ink-3">
+                  {isLoadingGpuOptions ? "Loading GPU catalog…" : "GPU catalog unavailable."}
+                </div>
+              ) : (
+                <Select
+                  value={execution.modalGpuType ?? "a100-40gb"}
+                  onValueChange={(value) =>
+                    onChange({ execution: { modalGpuType: value as ModalGpuType } })
+                  }
+                >
+                  <SelectTrigger className="w-60">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {gpuOptions.map(({ gpuType, label }) => (
+                      <SelectItem key={gpuType} value={gpuType}>
+                        {label.toLowerCase()}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
             <div className="font-mono text-[10.5px] text-ink-3">
               Data policy: <span className="text-ink-1">sanitized_cloud</span>. Raw datasets are not

@@ -37,6 +37,7 @@ function bucketFor(status: RunStatus): PipelineBucket {
       return "queued";
     case "running":
     case "paused":
+    case "fallback_pending":
       return "running";
     case "completed":
       return "completed";

@@ -14,6 +14,7 @@ from app.models.project import Project
 from app.models.rubric import Rubric
 from app.models.rubric_version import RubricVersion
 from app.models.run import Run
+from app.models.run_attempt import RunAttempt
 from app.models.run_stage import RunStage
 from app.models.storage_record import StorageRecord
 from app.models.suggestion import AISuggestion
@@ -35,6 +36,7 @@ __all__ = [
     "Rubric",
     "RubricVersion",
     "Run",
+    "RunAttempt",
     "RunStage",
     "StorageRecord",
     "WeightSnapshot",
