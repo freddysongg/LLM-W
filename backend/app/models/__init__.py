@@ -10,6 +10,7 @@ from app.models.eval_case import EvalCase
 from app.models.eval_run import EvalRun
 from app.models.metric_point import MetricPoint
 from app.models.model_profile import ModelProfile
+from app.models.notification import Notification
 from app.models.project import Project
 from app.models.rubric import Rubric
 from app.models.rubric_version import RubricVersion
@@ -32,6 +33,7 @@ __all__ = [
     "EvalRun",
     "MetricPoint",
     "ModelProfile",
+    "Notification",
     "Project",
     "Rubric",
     "RubricVersion",

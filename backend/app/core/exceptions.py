@@ -154,6 +154,12 @@ class VoiceSessionNotFoundError(Exception):
         self.session_id = session_id
 
 
+class NotificationNotFoundError(Exception):
+    def __init__(self, notification_id: str) -> None:
+        super().__init__(f"Notification not found: {notification_id}")
+        self.notification_id = notification_id
+
+
 class MissingServingModelIdError(Exception):
     """Raised when a serve request omits serving_model_id and the project config has none."""
 
