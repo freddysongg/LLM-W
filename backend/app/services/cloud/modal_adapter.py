@@ -77,7 +77,12 @@ class ModalUploadPlan:
 _MODAL_UPLOAD_STAGING_DIR = ".modal-uploads"
 
 
-def _rewrite_config_for_modal_upload(*, src_config_path: Path, dst_path: Path) -> None:
+def _rewrite_config_for_modal_upload(
+    *,
+    src_config_path: Path,
+    dst_path: Path,
+    normalized: bool | None = None,
+) -> None:
     """Write a copy of the config whose dataset section points at the uploaded
     sanitized artifact.
 
@@ -86,6 +91,10 @@ def _rewrite_config_for_modal_upload(*, src_config_path: Path, dst_path: Path) -
     at a host path that does not exist in the Modal sandbox, and a
     `huggingface` config would re-download the raw dataset, bypassing the
     `sanitized_cloud` data policy.
+
+    `normalized` reflects the sanitizer manifest's `normalized` flag. Only when
+    `normalized is True` do we force `format="openai"` — otherwise the original
+    format is preserved (the sanitizer wrote rows in the source schema).
     """
     raw = yaml.safe_load(src_config_path.read_text(encoding="utf-8")) or {}
     if not isinstance(raw, dict):
@@ -95,12 +104,14 @@ def _rewrite_config_for_modal_upload(*, src_config_path: Path, dst_path: Path) -
     dataset_section = raw.get("dataset", {})
     if not isinstance(dataset_section, dict):
         dataset_section = {}
-    raw["dataset"] = {
+    rewritten_dataset: dict[str, object] = {
         **dataset_section,
         "source": "local_jsonl",
         "dataset_id": f"{_WORKSPACE_DATASETS}/{_SANITIZED_DATASET_FILENAME}",
-        "format": "openai",
     }
+    if normalized is True:
+        rewritten_dataset["format"] = "openai"
+    raw["dataset"] = rewritten_dataset
     dst_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = dst_path.with_suffix(dst_path.suffix + ".tmp")
     tmp_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
@@ -126,7 +137,12 @@ def build_modal_upload_plan(*, project_dir: Path, config_path: Path) -> ModalUpl
     # instead of carrying the host's raw source. The remote name continues to
     # match the original so the trainer's --config-path argument is unchanged.
     staging_path = project_dir / _MODAL_UPLOAD_STAGING_DIR / config_path.name
-    _rewrite_config_for_modal_upload(src_config_path=config_path, dst_path=staging_path)
+    normalized_flag = _read_sanitized_normalized_flag(project_dir=project_dir)
+    _rewrite_config_for_modal_upload(
+        src_config_path=config_path,
+        dst_path=staging_path,
+        normalized=normalized_flag,
+    )
 
     files: list[tuple[Path, str]] = [
         (staging_path, f"{_WORKSPACE_CONFIGS}/{config_path.name}"),
@@ -165,6 +181,26 @@ def _read_sanitized_content_hash(*, project_dir: Path) -> str | None:
     if isinstance(content_hash, str) and content_hash:
         return content_hash
     return None
+
+
+def _read_sanitized_normalized_flag(*, project_dir: Path) -> bool | None:
+    """Return the sanitizer manifest's `normalized` boolean if present.
+
+    Returns None when the manifest is missing, malformed, or the key is absent
+    or non-boolean. Callers treat None as "do not assume openai shape" so the
+    rewritten config preserves the user's original `dataset.format`.
+    """
+    manifest_path = project_dir / "datasets" / _SANITIZED_MANIFEST_FILENAME
+    if not manifest_path.is_file():
+        return None
+    try:
+        parsed = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    value = parsed.get("normalized")
+    return value if isinstance(value, bool) else None
 
 
 def _remote_sanitized_hash_matches(*, volume: modal.Volume, expected_hash: str) -> bool:

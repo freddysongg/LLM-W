@@ -236,6 +236,10 @@ def test_build_modal_upload_plan_uploads_rewritten_config_pointing_at_sanitized(
     datasets_dir = project_dir / "datasets"
     datasets_dir.mkdir(parents=True)
     (datasets_dir / "sanitized.jsonl").write_text('{"messages":[]}\n')
+    # Manifest with normalized=true triggers the format=openai rewrite below.
+    (datasets_dir / "sanitized.meta.json").write_text(
+        '{"content_hash": "abc", "normalized": true}', encoding="utf-8"
+    )
 
     configs_dir = project_dir / "configs"
     configs_dir.mkdir(parents=True)
@@ -320,6 +324,117 @@ def test_rewrite_config_for_modal_upload_handles_missing_dataset_section(
     rewritten = _yaml.safe_load(dst.read_text(encoding="utf-8"))
     assert rewritten["dataset"]["source"] == "local_jsonl"
     assert rewritten["project"]["name"] == "demo"
+
+
+def _write_modal_rewrite_fixture(
+    *,
+    project_dir: Path,
+    manifest_payload: str | None,
+    original_format: str = "sharegpt",
+) -> Path:
+    """Helper: set up a project with a sanitized artifact, optional manifest, and
+    a HuggingFace-source config; return the config path. Used by the four
+    manifest-driven rewrite tests below."""
+    import yaml as _yaml
+
+    datasets_dir = project_dir / "datasets"
+    datasets_dir.mkdir(parents=True)
+    (datasets_dir / "sanitized.jsonl").write_text('{"messages":[]}\n', encoding="utf-8")
+    if manifest_payload is not None:
+        (datasets_dir / "sanitized.meta.json").write_text(manifest_payload, encoding="utf-8")
+
+    configs_dir = project_dir / "configs"
+    configs_dir.mkdir(parents=True)
+    config_path = configs_dir / "run.yaml"
+    config_path.write_text(
+        _yaml.safe_dump(
+            {
+                "dataset": {
+                    "source": "huggingface",
+                    "dataset_id": "HuggingFaceH4/ultrachat_200k",
+                    "format": original_format,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    return config_path
+
+
+def _read_rewritten_dataset(*, plan_files: tuple[tuple[Path, str], ...]) -> dict[str, object]:
+    import yaml as _yaml
+
+    staged_path, _ = next(
+        (local, remote) for local, remote in plan_files if ".modal-uploads" in str(local)
+    )
+    parsed = _yaml.safe_load(staged_path.read_text(encoding="utf-8"))
+    assert isinstance(parsed, dict)
+    dataset = parsed["dataset"]
+    assert isinstance(dataset, dict)
+    return dataset
+
+
+def test_rewrite_sets_format_openai_when_manifest_says_normalized(tmp_path: Path) -> None:
+    """A manifest carrying normalized=true means the sanitizer rewrote rows into
+    openai's `messages` shape, so the remote trainer must read them with
+    `format=openai` regardless of the original config's format."""
+    from app.services.cloud.modal_adapter import build_modal_upload_plan
+
+    project_dir = tmp_path / "p1"
+    config_path = _write_modal_rewrite_fixture(
+        project_dir=project_dir,
+        manifest_payload='{"content_hash": "abc", "normalized": true}',
+    )
+
+    plan = build_modal_upload_plan(project_dir=project_dir, config_path=config_path)
+    dataset = _read_rewritten_dataset(plan_files=plan.files)
+    assert dataset["format"] == "openai"
+
+
+def test_rewrite_preserves_original_format_when_manifest_says_not_normalized(
+    tmp_path: Path,
+) -> None:
+    """normalized=false means the sanitizer left rows in the source schema, so
+    the rewrite must preserve the user's original `dataset.format` value."""
+    from app.services.cloud.modal_adapter import build_modal_upload_plan
+
+    project_dir = tmp_path / "p1"
+    config_path = _write_modal_rewrite_fixture(
+        project_dir=project_dir,
+        manifest_payload='{"content_hash": "abc", "normalized": false}',
+    )
+
+    plan = build_modal_upload_plan(project_dir=project_dir, config_path=config_path)
+    dataset = _read_rewritten_dataset(plan_files=plan.files)
+    assert dataset["format"] == "sharegpt"
+
+
+def test_rewrite_preserves_original_format_when_manifest_missing(tmp_path: Path) -> None:
+    """No manifest at all → conservative fallback preserves the original format."""
+    from app.services.cloud.modal_adapter import build_modal_upload_plan
+
+    project_dir = tmp_path / "p1"
+    config_path = _write_modal_rewrite_fixture(project_dir=project_dir, manifest_payload=None)
+
+    plan = build_modal_upload_plan(project_dir=project_dir, config_path=config_path)
+    dataset = _read_rewritten_dataset(plan_files=plan.files)
+    assert dataset["format"] == "sharegpt"
+
+
+def test_rewrite_preserves_original_format_when_normalized_key_absent(tmp_path: Path) -> None:
+    """A manifest without the normalized key (older sanitizer output) must not
+    silently force openai — fall back to preserving the original format."""
+    from app.services.cloud.modal_adapter import build_modal_upload_plan
+
+    project_dir = tmp_path / "p1"
+    config_path = _write_modal_rewrite_fixture(
+        project_dir=project_dir,
+        manifest_payload='{"content_hash": "abc"}',
+    )
+
+    plan = build_modal_upload_plan(project_dir=project_dir, config_path=config_path)
+    dataset = _read_rewritten_dataset(plan_files=plan.files)
+    assert dataset["format"] == "sharegpt"
 
 
 def test_validate_execution_rejects_modal_without_credentials() -> None:
