@@ -200,3 +200,84 @@ async def test_close_current_attempt_records_zero_cost_for_local_run(
     async with patched_session_factory() as session:
         attempt = await session.get(RunAttempt, "r1-a1")
         assert attempt.cost_estimate_usd == 0.0
+
+
+async def test_sum_attempt_wall_clock_s_returns_zero_for_missing_run(
+    patched_session_factory: async_sessionmaker[Any],
+) -> None:
+    assert await orchestrator._sum_attempt_wall_clock_s(run_id="missing") == 0.0
+
+
+async def test_sum_attempt_wall_clock_s_skips_open_attempts(
+    patched_session_factory: async_sessionmaker[Any],
+) -> None:
+    """An open attempt (ended_at IS NULL) must not contribute mid-flight wall-clock.
+
+    The seed creates one closed attempt (5-minute window) and one still-open one.
+    The rollup must return only the closed attempt's duration.
+    """
+    await _seed_run_with_failed_then_open_attempt(
+        factory=patched_session_factory, run_id="r1", prior_cost_usd=0.0
+    )
+
+    total = await orchestrator._sum_attempt_wall_clock_s(run_id="r1")
+    # The seed's closed attempt has started_at == ended_at → 0.0 seconds.
+    # The open attempt is skipped. Total must be exactly 0.0.
+    assert total == 0.0
+
+
+async def test_sum_attempt_wall_clock_s_sums_closed_attempts(
+    patched_session_factory: async_sessionmaker[Any],
+) -> None:
+    """Two closed attempts: 30s + 90s = 120s."""
+    started_zero = datetime(2026, 5, 19, 12, 0, 0, tzinfo=UTC).isoformat()
+    async with patched_session_factory() as session:
+        session.add(
+            Run(
+                id="r1",
+                project_id="p1",
+                config_version_id="cv1",
+                status="completed",
+                modal_gpu_type="a10",
+                environment="modal",
+                device="cuda",
+                created_at=started_zero,
+                updated_at=started_zero,
+            )
+        )
+        session.add(
+            RunAttempt(
+                id="r1-a0",
+                run_id="r1",
+                attempt_index=0,
+                gpu_type="a10",
+                device="cuda",
+                started_at=started_zero,
+                ended_at=(datetime.fromisoformat(started_zero) + timedelta(seconds=30)).isoformat(),
+                exit_reason="oom",
+                cost_estimate_usd=0.0,
+                created_at=started_zero,
+            )
+        )
+        session.add(
+            RunAttempt(
+                id="r1-a1",
+                run_id="r1",
+                attempt_index=1,
+                gpu_type="a10",
+                device="cuda",
+                started_at=(
+                    datetime.fromisoformat(started_zero) + timedelta(seconds=60)
+                ).isoformat(),
+                ended_at=(
+                    datetime.fromisoformat(started_zero) + timedelta(seconds=150)
+                ).isoformat(),
+                exit_reason="completed",
+                cost_estimate_usd=0.0,
+                created_at=started_zero,
+            )
+        )
+        await session.commit()
+
+    total = await orchestrator._sum_attempt_wall_clock_s(run_id="r1")
+    assert total == 120.0

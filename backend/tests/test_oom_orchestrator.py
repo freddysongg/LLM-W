@@ -686,6 +686,11 @@ async def test_strategy_disabled_publishes_rolled_up_attempt_cost(
         assert run.cost_usd is not None
         assert run.cost_usd > 0.0
         assert failed[0]["payload"]["costUsd"] == run.cost_usd
+        # Wall-clock rollup mirrors the cost rollup: the closed attempt's
+        # duration must land in both the run row and the WS envelope, not 0.
+        assert run.wall_clock_s is not None
+        assert run.wall_clock_s > 0.0
+        assert failed[0]["payload"]["wallClockS"] == run.wall_clock_s
 
 
 async def test_local_oom_emits_system_event_but_does_not_trigger_fallback(

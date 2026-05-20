@@ -451,20 +451,6 @@ def _load_execution_config(*, config_path: Path) -> ExecutionConfig:
     return ExecutionConfig.model_validate(execution_dict)
 
 
-async def _load_run_started_iso(*, run_id: str) -> str | None:
-    """Return the canonical run-start ISO timestamp used as the cost-meter anchor.
-
-    Prefers `Run.started_at` (written on the first `stage_enter` event, i.e. when
-    the trainer actually entered a stage) and falls back to `Run.created_at` for
-    runs that crashed before any stage was reported.
-    """
-    async with async_session_factory() as session:
-        run = await session.get(Run, run_id)
-        if run is None:
-            return None
-        return run.started_at or run.created_at
-
-
 async def _update_run_status(
     *,
     run_id: str,
@@ -514,28 +500,6 @@ async def _update_run_status(
         if started_at is not None and run.started_at is None:
             run.started_at = started_at
         await session.commit()
-
-
-def _compute_run_cost(
-    *,
-    execution: ExecutionConfig,
-    started_iso: str,
-    ended_iso: str,
-) -> tuple[float, float]:
-    """Return (wall_clock_seconds, cost_usd) for a terminal run.
-
-    Cost is zero for local execution. For Modal runs, cost is the elapsed wall
-    clock seconds multiplied by the published per-second GPU rate. Wall clock
-    is clamped at zero to absorb clock skew that would otherwise produce a
-    negative cost.
-    """
-    started = datetime.fromisoformat(started_iso)
-    ended = datetime.fromisoformat(ended_iso)
-    wall_clock_s = max(0.0, (ended - started).total_seconds())
-    if execution.environment != "modal":
-        return (wall_clock_s, 0.0)
-    rate = get_modal_gpu_rate_usd_per_second(gpu_type=execution.modal_gpu_type)
-    return (wall_clock_s, wall_clock_s * rate)
 
 
 async def _update_stage(
@@ -1252,23 +1216,17 @@ async def _run_trainer_subprocess(
         effective_stderr_tail = modal_stderr_tail or stderr_output
 
         now = datetime.now(UTC).isoformat()
-        started_iso = await _load_run_started_iso(run_id=run_id)
-        wall_clock_s = 0.0
-        if started_iso is not None:
-            wall_clock_s, _ = _compute_run_cost(
-                execution=execution_cfg,
-                started_iso=started_iso,
-                ended_iso=now,
-            )
 
         if terminal_status == "completed":
-            # Close the current attempt FIRST so its cost lands in run_attempts,
-            # then read the rolling total across all attempts. Without this,
-            # `Run.cost_usd` would drop the cost of any failed fallback attempt.
+            # Close the current attempt FIRST so its cost and wall-clock land in
+            # run_attempts, then read the rolling totals across all attempts.
+            # Without this ordering, both `Run.cost_usd` and `Run.wall_clock_s`
+            # would drop the contribution of any failed fallback attempt.
             await _close_current_attempt(
                 run_id=run_id, execution=execution_cfg, exit_reason="completed"
             )
             cost_usd = await _sum_attempt_costs(run_id=run_id)
+            wall_clock_s = await _sum_attempt_wall_clock_s(run_id=run_id)
             await _mark_pending_stages_skipped(run_id=run_id)
             await _update_run_status(
                 run_id=run_id,
@@ -1306,6 +1264,7 @@ async def _run_trainer_subprocess(
                 run_id=run_id, execution=execution_cfg, exit_reason="cancelled"
             )
             cost_usd = await _sum_attempt_costs(run_id=run_id)
+            wall_clock_s = await _sum_attempt_wall_clock_s(run_id=run_id)
             await _mark_pending_stages_skipped(run_id=run_id)
             await _update_run_status(
                 run_id=run_id,
@@ -1347,6 +1306,7 @@ async def _run_trainer_subprocess(
                 run_id=run_id, execution=execution_cfg, exit_reason="failed"
             )
             cost_usd = await _sum_attempt_costs(run_id=run_id)
+            wall_clock_s = await _sum_attempt_wall_clock_s(run_id=run_id)
             await _mark_pending_stages_skipped(run_id=run_id)
             await _update_run_status(
                 run_id=run_id,
@@ -1492,6 +1452,29 @@ async def _sum_attempt_costs(*, run_id: str) -> float:
         return sum((cost or 0.0) for cost in result.scalars().all())
 
 
+async def _sum_attempt_wall_clock_s(*, run_id: str) -> float:
+    """Return total wall-clock seconds across all closed RunAttempt rows.
+
+    Mirrors `_sum_attempt_costs`: called after `_close_current_attempt`, so the
+    current attempt's `started_at`/`ended_at` are present and contribute. Open
+    attempts (ended_at is None) are skipped to avoid mid-flight bias.
+    """
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(RunAttempt.started_at, RunAttempt.ended_at).where(
+                RunAttempt.run_id == run_id
+            )
+        )
+        total = 0.0
+        for started_at, ended_at in result.all():
+            if ended_at is None:
+                continue
+            started = datetime.fromisoformat(started_at)
+            ended = datetime.fromisoformat(ended_at)
+            total += max(0.0, (ended - started).total_seconds())
+        return total
+
+
 async def _close_current_attempt(
     *, run_id: str, execution: ExecutionConfig, exit_reason: str
 ) -> None:
@@ -1539,10 +1522,12 @@ async def _fail_run_with_oom_reason(
     publish_run_failed: bool,
 ) -> None:
     # Callers (disabled strategy, chain exhausted, abandoned-fallback sweep)
-    # have already closed the current attempt with its `cost_estimate_usd`, so
-    # the rolling total across attempts is meaningful here. Reporting 0 would
-    # under-bill any Modal attempts the user already paid for.
+    # have already closed the current attempt with its `cost_estimate_usd` and
+    # `ended_at`, so both rolling totals across attempts are meaningful here.
+    # Reporting zero would under-bill Modal attempts the user already paid for
+    # and lose the wall-clock contribution of every closed attempt.
     cost_usd = await _sum_attempt_costs(run_id=run_id)
+    wall_clock_s = await _sum_attempt_wall_clock_s(run_id=run_id)
     await _mark_pending_stages_skipped(run_id=run_id)
     await _update_run_status(
         run_id=run_id,
@@ -1550,6 +1535,7 @@ async def _fail_run_with_oom_reason(
         failure_reason=failure_reason,
         failure_stage=None,
         cost_usd=cost_usd,
+        wall_clock_s=wall_clock_s,
     )
     async with async_session_factory() as session:
         await _run_final_retention_sweep(session=session, project_id=project_id)
@@ -1567,7 +1553,7 @@ async def _fail_run_with_oom_reason(
                     "failureStage": None,
                     "lastStep": 0,
                     "costUsd": cost_usd,
-                    "wallClockS": 0.0,
+                    "wallClockS": wall_clock_s,
                 },
             },
         )

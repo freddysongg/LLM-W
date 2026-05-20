@@ -538,52 +538,6 @@ def test_execution_summary_round_trip() -> None:
     }
 
 
-def test_compute_run_cost_local_is_free() -> None:
-    cfg = ExecutionConfig.model_validate({"environment": "local"})
-    started = "2026-05-19T12:00:00+00:00"
-    ended = "2026-05-19T12:10:00+00:00"
-    wall_clock_s, cost_usd = orchestrator._compute_run_cost(
-        execution=cfg, started_iso=started, ended_iso=ended
-    )
-    assert wall_clock_s == 600.0
-    assert cost_usd == 0.0
-
-
-def test_compute_run_cost_modal_a10_uses_published_rate() -> None:
-    cfg = ExecutionConfig.model_validate(
-        {
-            "environment": "modal",
-            "modal_gpu_type": "a10",
-            "data_policy": "sanitized_cloud",
-        }
-    )
-    started = "2026-05-19T12:00:00+00:00"
-    ended = "2026-05-19T12:01:00+00:00"
-    wall_clock_s, cost_usd = orchestrator._compute_run_cost(
-        execution=cfg, started_iso=started, ended_iso=ended
-    )
-    assert wall_clock_s == 60.0
-    # 60s × $0.000306/s = $0.01836; use pytest.approx to avoid float jitter.
-    assert cost_usd == pytest.approx(60.0 * 0.000306)
-
-
-def test_compute_run_cost_clock_skew_clamps_to_zero() -> None:
-    cfg = ExecutionConfig.model_validate(
-        {
-            "environment": "modal",
-            "modal_gpu_type": "h100",
-            "data_policy": "sanitized_cloud",
-        }
-    )
-    started = "2026-05-19T12:00:10+00:00"
-    ended = "2026-05-19T12:00:00+00:00"
-    wall_clock_s, cost_usd = orchestrator._compute_run_cost(
-        execution=cfg, started_iso=started, ended_iso=ended
-    )
-    assert wall_clock_s == 0.0
-    assert cost_usd == 0.0
-
-
 async def test_dispatch_training_modal_without_credentials_raises(tmp_path: Path) -> None:
     cfg_path = tmp_path / "config.yaml"
     cfg_path.write_text(
@@ -885,54 +839,6 @@ async def patched_session_factory(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
         yield factory
     finally:
         await engine.dispose()
-
-
-async def test_load_run_started_iso_returns_started_at_when_present(
-    patched_session_factory,
-) -> None:
-    async with patched_session_factory() as session:
-        session.add(
-            Run(
-                id="r1",
-                project_id="p1",
-                config_version_id="cv1",
-                status="running",
-                started_at="2026-05-19T12:00:00+00:00",
-                created_at="2026-05-19T11:30:00+00:00",
-                updated_at="2026-05-19T12:00:00+00:00",
-            )
-        )
-        await session.commit()
-
-    iso = await orchestrator._load_run_started_iso(run_id="r1")
-    assert iso == "2026-05-19T12:00:00+00:00"
-
-
-async def test_load_run_started_iso_falls_back_to_created_at_when_null(
-    patched_session_factory,
-) -> None:
-    async with patched_session_factory() as session:
-        session.add(
-            Run(
-                id="r1",
-                project_id="p1",
-                config_version_id="cv1",
-                status="pending",
-                created_at="2026-05-19T11:30:00+00:00",
-                updated_at="2026-05-19T11:30:00+00:00",
-            )
-        )
-        await session.commit()
-
-    iso = await orchestrator._load_run_started_iso(run_id="r1")
-    assert iso == "2026-05-19T11:30:00+00:00"
-
-
-async def test_load_run_started_iso_returns_none_for_missing_run(
-    patched_session_factory,
-) -> None:
-    iso = await orchestrator._load_run_started_iso(run_id="nope")
-    assert iso is None
 
 
 async def test_process_trainer_event_stage_enter_populates_started_at(
