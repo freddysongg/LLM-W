@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { useAppStore } from "@/stores/app-store";
 import { useRunStreamStore } from "@/stores/run-stream-store";
 import { denormalizeYamlConfig, normalizeYamlConfig } from "@/lib/yaml-config";
-import type { SaveConfigRequest, WorkbenchConfig } from "@/types/config";
+import type { DataPolicy, SaveConfigRequest, WorkbenchConfig } from "@/types/config";
 import {
   useCancelRun,
   useCheckpoints,
@@ -114,15 +114,23 @@ export async function maybeCreateOverrideConfig({
   const parsed = normalizeYamlConfig<WorkbenchConfig>(parseYaml(activeConfig.yamlBlob));
   const currentEnv = parsed.execution.environment;
   const currentGpu = parsed.execution.modalGpuType;
+  const currentDataPolicy = parsed.execution.dataPolicy;
   // Backend ExecutionConfig.modal_gpu_type is a non-nullable Literal with
   // default "a10"; serializing null would invalidate the config. When the
   // target environment is local, preserve the existing GPU (or fall back to
   // the same default the backend would apply) so the field stays valid.
   const targetGpu: ModalGpuType =
     environment === "modal" && modalGpuType !== null ? modalGpuType : (currentGpu ?? "a10");
+  // Backend _validate_execution_for_run rejects modal + local_raw outright.
+  // When the picker promotes a local config to modal, force the cloud policy
+  // so the launch survives validation; when reverting to local, leave the
+  // saved policy alone (local_raw is the local-default).
+  const targetDataPolicy: DataPolicy =
+    environment === "modal" ? "sanitized_cloud" : (currentDataPolicy ?? "local_raw");
   const envChanged = currentEnv !== environment;
   const gpuChanged = environment === "modal" && currentGpu !== targetGpu;
-  if (!envChanged && !gpuChanged) {
+  const dataPolicyChanged = currentDataPolicy !== targetDataPolicy;
+  if (!envChanged && !gpuChanged && !dataPolicyChanged) {
     return null;
   }
   const patched: WorkbenchConfig = {
@@ -131,6 +139,7 @@ export async function maybeCreateOverrideConfig({
       ...parsed.execution,
       environment,
       modalGpuType: targetGpu,
+      dataPolicy: targetDataPolicy,
     },
   };
   const patchedYaml = stringifyYaml(denormalizeYamlConfig(patched));

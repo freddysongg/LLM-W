@@ -11,9 +11,22 @@ execution:
   num_workers: 0
   environment: local
   modal_gpu_type: null
+  data_policy: local_raw
 `.trim();
 
 const MODAL_YAML = `
+project:
+  name: demo
+execution:
+  device: cuda
+  max_memory_gb: null
+  num_workers: 0
+  environment: modal
+  modal_gpu_type: a10
+  data_policy: sanitized_cloud
+`.trim();
+
+const MODAL_YAML_WITHOUT_DATA_POLICY = `
 project:
   name: demo
 execution:
@@ -71,7 +84,7 @@ describe("maybeCreateOverrideConfig", () => {
     expect(mock).not.toHaveBeenCalled();
   });
 
-  it("saves a new version when environment changes (local→modal)", async () => {
+  it("saves a new version when environment changes (local→modal) and forces sanitized_cloud", async () => {
     const { mock, fn } = makeSaveConfig();
     const result = await maybeCreateOverrideConfig({
       projectId: "p1",
@@ -86,6 +99,41 @@ describe("maybeCreateOverrideConfig", () => {
     const patched = parseYaml(call.request.yamlContent);
     expect(patched.execution.environment).toBe("modal");
     expect(patched.execution.modal_gpu_type).toBe("h100");
+    // Backend _validate_execution_for_run rejects modal + local_raw outright,
+    // so the override must rewrite data_policy to sanitized_cloud on switch.
+    expect(patched.execution.data_policy).toBe("sanitized_cloud");
+  });
+
+  it("rewrites a modal config that is missing data_policy", async () => {
+    const { mock, fn } = makeSaveConfig();
+    const result = await maybeCreateOverrideConfig({
+      projectId: "p1",
+      activeConfig: { id: "cv1", yamlBlob: MODAL_YAML_WITHOUT_DATA_POLICY },
+      environment: "modal",
+      modalGpuType: "a10",
+      saveConfig: fn,
+    });
+    expect(result).toBe("cv-new");
+    const call = mock.mock.calls[0][0] as SaveConfigCall;
+    const patched = parseYaml(call.request.yamlContent);
+    expect(patched.execution.data_policy).toBe("sanitized_cloud");
+  });
+
+  it("preserves local_raw when reverting modal→local", async () => {
+    const { mock, fn } = makeSaveConfig();
+    await maybeCreateOverrideConfig({
+      projectId: "p1",
+      activeConfig: { id: "cv1", yamlBlob: MODAL_YAML },
+      environment: "local",
+      modalGpuType: null,
+      saveConfig: fn,
+    });
+    const call = mock.mock.calls[0][0] as SaveConfigCall;
+    const patched = parseYaml(call.request.yamlContent);
+    // The saved config had sanitized_cloud (modal); reverting to local keeps
+    // whatever the user had previously declared — we don't downgrade to
+    // local_raw because that decision belongs to the dataset/policy editor.
+    expect(patched.execution.data_policy).toBe("sanitized_cloud");
   });
 
   it("preserves modal_gpu_type when switching modal→local", async () => {
