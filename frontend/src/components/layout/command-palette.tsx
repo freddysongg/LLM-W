@@ -13,7 +13,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app-store";
 import { useToast } from "@/hooks/use-toast";
-import { useRuns } from "@/hooks/useRuns";
+import { useRecentRuns } from "@/hooks/useRuns";
 import { NAV_GROUPS, SETTINGS_NAV_ITEM } from "@/lib/nav";
 import { STORAGE_KEYS, THEME_VALUES, type Theme } from "@/lib/theme-init";
 import { Kbd } from "@/components/ui/kbd";
@@ -262,10 +262,9 @@ export function CommandPalette(): React.JSX.Element {
   const isOpen = useAppStore((state) => state.isCommandPaletteOpen);
   const setCommandPaletteOpen = useAppStore((state) => state.setCommandPaletteOpen);
   const setTweaksPanelOpen = useAppStore((state) => state.setTweaksPanelOpen);
-  const activeProjectId = useAppStore((state) => state.activeProjectId) ?? "";
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { data: runs } = useRuns({ projectId: activeProjectId });
+  const { data: runs } = useRecentRuns({ limit: 10 });
   const activeRunId = findActiveRunId(runs);
 
   const handleClose = React.useCallback((): void => {

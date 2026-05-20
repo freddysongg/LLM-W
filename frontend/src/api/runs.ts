@@ -299,6 +299,15 @@ export async function fetchRuns({ projectId }: { projectId: string }): Promise<R
   return raw.items.map(normalizeRun);
 }
 
+export async function fetchRecentRuns({
+  limit = 10,
+}: {
+  limit?: number;
+} = {}): Promise<ReadonlyArray<Run>> {
+  const raw = await fetchApi<RawRunListResponse>({ path: `/runs?limit=${limit}` });
+  return raw.items.map(normalizeRun);
+}
+
 export async function fetchRun({
   projectId,
   runId,

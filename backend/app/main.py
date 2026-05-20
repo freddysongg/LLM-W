@@ -20,6 +20,7 @@ from app.api.routes.notifications import router as notifications_router
 from app.api.routes.projects import router as projects_router
 from app.api.routes.rubrics import router as rubrics_router
 from app.api.routes.runs import router as runs_router
+from app.api.routes.runs_global import router as runs_global_router
 from app.api.routes.settings import router as settings_router
 from app.api.routes.storage import router as storage_router
 from app.api.routes.suggestions import router as suggestions_router
@@ -73,6 +74,7 @@ app.include_router(models_router)
 app.include_router(datasets_router)
 app.include_router(settings_router)
 app.include_router(runs_router)
+app.include_router(runs_global_router)
 app.include_router(artifacts_router)
 app.include_router(storage_router)
 app.include_router(suggestions_router)
