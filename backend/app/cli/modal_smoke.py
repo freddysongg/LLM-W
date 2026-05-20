@@ -9,7 +9,6 @@ import uuid
 from pathlib import Path
 
 from app.services import settings_service
-from app.services.cloud.modal_adapter import ModalAdapterConfig, ModalTrainingAdapter
 
 _EXIT_OK = 0
 _EXIT_ERROR = 1
@@ -51,6 +50,12 @@ def register_subcommand(*, subparsers: argparse._SubParsersAction) -> None:
 
 
 async def run(*, args: argparse.Namespace) -> int:
+    # Deferred so `from app.cli import modal_smoke` does not transitively load
+    # `modal` — the optional cloud extra is only required to actually run this
+    # subcommand, mirroring the lazy-import contract on training_dispatcher,
+    # mlx_serving, and pipecat_session.
+    from app.services.cloud.modal_adapter import ModalAdapterConfig, ModalTrainingAdapter
+
     credentials = settings_service.get_modal_credentials()
     if credentials is None:
         print(
