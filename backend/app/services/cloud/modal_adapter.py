@@ -136,6 +136,28 @@ def _workspace_checkpoints_path(run_id: str) -> str:
     return f"{_WORKSPACE_ROOT}/runs/{run_id}/checkpoints"
 
 
+def translate_workspace_path(*, raw_path: str, project_dir: Path) -> str:
+    """Map a Modal sandbox path under /workspace to its host-side mirror.
+
+    The remote trainer emits checkpoint and artifact paths rooted at
+    ``/workspace`` because that's what it sees inside the Modal container.
+    ``_download_checkpoints`` materializes those files under
+    ``{project_dir}/runs/{run_id}/...`` after the run completes, so the DB row
+    that gets written from the event must already carry the eventual host path
+    — otherwise host-side consumers (MLX serving, merged-model creation,
+    resume-from-checkpoint) look under ``/workspace`` on a machine that has no
+    such directory.
+
+    Non-workspace paths pass through unchanged so this is safe to apply
+    indiscriminately to every event with a ``path`` field.
+    """
+    workspace_prefix = f"{_WORKSPACE_ROOT}/"
+    if not raw_path.startswith(workspace_prefix):
+        return raw_path
+    suffix = raw_path[len(workspace_prefix) :]
+    return str(project_dir / suffix)
+
+
 def _read_sanitized_content_hash(*, project_dir: Path) -> str | None:
     """Return the sanitized artifact's content hash from its local manifest, if present.
 
@@ -360,6 +382,7 @@ class ModalTrainingAdapter:
                     continue
                 try:
                     parsed: dict[str, object] = json.loads(stripped)
+                    self._rewrite_event_paths(event=parsed)
                     return parsed
                 except json.JSONDecodeError:
                     return {
@@ -372,6 +395,24 @@ class ModalTrainingAdapter:
             except (StopAsyncIteration, StopIteration):
                 self._stdout_aiter = None
                 return None
+
+    def _rewrite_event_paths(self, *, event: dict[str, object]) -> None:
+        """Translate any /workspace paths in checkpoint/artifact events in place.
+
+        The orchestrator persists ``event["path"]`` directly into
+        ``runs.last_checkpoint_path`` (checkpoint) or the artifacts table
+        (artifact). Rewriting here means every downstream consumer reads the
+        eventual host path rather than the unreachable sandbox path.
+        """
+        if event.get("type") not in ("checkpoint", "artifact"):
+            return
+        raw_path = event.get("path")
+        if not isinstance(raw_path, str):
+            return
+        event["path"] = translate_workspace_path(
+            raw_path=raw_path,
+            project_dir=self._config.project_dir,
+        )
 
     async def cancel(self) -> None:
         self._is_terminated = True
