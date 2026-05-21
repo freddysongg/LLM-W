@@ -378,12 +378,40 @@ export default function DatasetsPage(): React.JSX.Element {
   };
 
   const handleIngestSubmit = (): void => {
-    const resolvedSource = resolveIngestSource(addDraft.sourceMode);
-    setActiveDialog(null);
-    // TODO(datasets-realign): wire to real ingestion API -- remove when /api/v1/datasets/ingest lands; today users must still use the inline Dataset configuration form on the page
-    toast({
-      title: "Dataset queued for ingest",
-      description: `${resolvedSource} · ${addDraft.path || "<path>"}`,
+    const trimmedPath = addDraft.path.trim();
+    if (!trimmedPath) return;
+    const request: DatasetResolveRequest = {
+      source: resolveIngestSource(addDraft.sourceMode),
+      datasetId: trimmedPath,
+      subset: null,
+      trainSplit: "train",
+      evalSplit: null,
+      format: addDraft.format,
+      formatMapping: null,
+      maxSamples: null,
+      trainRatio: null,
+      valRatio: null,
+      testRatio: null,
+    };
+    resolveDataset.mutate(request, {
+      onSuccess: (resolvedProfile) => {
+        setActiveDialog(null);
+        setAddDraft(DEFAULT_ADD_DRAFT);
+        toast({
+          title: "Dataset resolved",
+          description: `${resolvedProfile.datasetId} · ${formatRowCount(resolvedProfile.totalRows)} rows`,
+        });
+      },
+      onError: (cause) => {
+        toast({
+          title: "Resolve failed",
+          description: describeApiError({
+            cause,
+            fallback: "Could not resolve dataset.",
+          }),
+          variant: "destructive",
+        });
+      },
     });
   };
 
@@ -667,6 +695,7 @@ export default function DatasetsPage(): React.JSX.Element {
       <AddDatasetDialog
         isOpen={activeDialog === "add"}
         draft={addDraft}
+        isPending={resolveDataset.isPending}
         onDraftChange={setAddDraft}
         onCancel={() => setActiveDialog(null)}
         onIngest={handleIngestSubmit}
@@ -761,6 +790,7 @@ export default function DatasetsPage(): React.JSX.Element {
 interface AddDatasetDialogProps {
   readonly isOpen: boolean;
   readonly draft: AddDatasetDraft;
+  readonly isPending: boolean;
   readonly onDraftChange: (next: AddDatasetDraft) => void;
   readonly onCancel: () => void;
   readonly onIngest: () => void;
@@ -769,6 +799,7 @@ interface AddDatasetDialogProps {
 function AddDatasetDialog({
   isOpen,
   draft,
+  isPending,
   onDraftChange,
   onCancel,
   onIngest,
@@ -859,9 +890,9 @@ function AddDatasetDialog({
           <Button variant="outline" onClick={onCancel}>
             Cancel
           </Button>
-          <Button variant="primary" onClick={onIngest}>
+          <Button variant="primary" onClick={onIngest} disabled={isPending || !draft.path.trim()}>
             <Download className="size-3" aria-hidden="true" />
-            Ingest
+            {isPending ? "Resolving…" : "Ingest"}
           </Button>
         </DialogFooter>
       </DialogContent>
