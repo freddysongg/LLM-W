@@ -83,7 +83,11 @@ function statusMatches({
 function pickLiveRun(runs: ReadonlyArray<Run>): Run | null {
   return (
     runs.find(
-      (run) => run.status === "running" || run.status === "pending" || run.status === "paused",
+      (run) =>
+        run.status === "running" ||
+        run.status === "pending" ||
+        run.status === "paused" ||
+        run.status === "fallback_pending",
     ) ?? null
   );
 }
@@ -255,6 +259,22 @@ export default function RunsPage(): React.JSX.Element {
 
   const liveRun = React.useMemo(() => pickLiveRun(runs), [runs]);
   const canStartRun = Boolean(activeConfig) && liveRun === null;
+
+  React.useEffect(() => {
+    if (!activeConfig?.yamlBlob) return;
+    try {
+      const parsed = normalizeYamlConfig<WorkbenchConfig>(parseYaml(activeConfig.yamlBlob));
+      const configuredEnv = parsed.execution?.environment;
+      const configuredGpu = parsed.execution?.modalGpuType ?? null;
+      if (configuredEnv === "local" || configuredEnv === "modal") {
+        setEnvironment(configuredEnv);
+      }
+      setModalGpuType(configuredGpu);
+    } catch {
+      // Malformed config — leave the picker at its current value rather than
+      // forcing it to the local default and creating a silent override on Start.
+    }
+  }, [activeConfig?.id, activeConfig?.yamlBlob]);
 
   React.useEffect(() => {
     if (liveRun && !selectedRunId) {
