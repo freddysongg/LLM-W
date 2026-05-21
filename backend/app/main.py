@@ -25,6 +25,7 @@ from app.api.routes.runs import router as runs_router
 from app.api.routes.runs_global import router as runs_global_router
 from app.api.routes.settings import router as settings_router
 from app.api.routes.storage import router as storage_router
+from app.api.routes.suggestion_chat import router as suggestion_chat_router
 from app.api.routes.suggestions import router as suggestions_router
 from app.api.routes.user import router as user_router
 from app.api.routes.voice import router as voice_router
@@ -80,6 +81,7 @@ app.include_router(runs_global_router)
 app.include_router(artifacts_router)
 app.include_router(storage_router)
 app.include_router(suggestions_router)
+app.include_router(suggestion_chat_router)
 app.include_router(eval_router)
 app.include_router(rubrics_router)
 app.include_router(mlx_serving_router)

@@ -8,6 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { ActionCard } from "./action-card";
 import { EvidenceList } from "./evidence-list";
+import { SuggestionChatPanel } from "./suggestion-chat-panel";
 
 interface SuggestionDetailProps {
   readonly suggestion: AISuggestion;
@@ -87,8 +88,10 @@ export function SuggestionDetail({
   onReject,
 }: SuggestionDetailProps): React.JSX.Element {
   const { toast } = useToast();
+  const [isChatOpen, setIsChatOpen] = React.useState<boolean>(false);
   const {
     id,
+    projectId,
     status,
     rationale,
     expectedEffect,
@@ -102,6 +105,10 @@ export function SuggestionDetail({
   const canAct = status === "pending";
   const variant = severityVariant(riskLevel);
   const bulletColor = severityBulletColor(riskLevel);
+
+  React.useEffect(() => {
+    setIsChatOpen(false);
+  }, [id]);
 
   const actions = React.useMemo(() => {
     return Object.entries(configDiff).map(([key, change], index) => ({
@@ -213,19 +220,22 @@ export function SuggestionDetail({
           claude-sonnet-4-5 · offline analysis
         </span>
         <Button
-          variant="outline"
+          variant={isChatOpen ? "primary" : "outline"}
           size="sm"
-          onClick={() =>
-            toast({
-              title: "Ask Claude",
-              description: "Conversational follow-up is not yet wired.",
-            })
-          }
+          onClick={() => setIsChatOpen((open) => !open)}
+          aria-expanded={isChatOpen}
         >
           <MessageSquare aria-hidden="true" />
-          Ask Claude
+          {isChatOpen ? "Hide chat" : "Ask Claude"}
         </Button>
       </CardFooter>
+      {isChatOpen ? (
+        <SuggestionChatPanel
+          projectId={projectId}
+          suggestionId={id}
+          onClose={() => setIsChatOpen(false)}
+        />
+      ) : null}
     </Card>
   );
 }

@@ -20,6 +20,7 @@ from app.models.run_attempt import RunAttempt
 from app.models.run_stage import RunStage
 from app.models.storage_record import StorageRecord
 from app.models.suggestion import AISuggestion
+from app.models.suggestion_chat_message import SuggestionChatMessage
 from app.models.weight_snapshot import WeightSnapshot
 
 __all__ = [
@@ -43,5 +44,6 @@ __all__ = [
     "RunAttempt",
     "RunStage",
     "StorageRecord",
+    "SuggestionChatMessage",
     "WeightSnapshot",
 ]
