@@ -14,6 +14,7 @@ from app.api.routes.configs import router as configs_router
 from app.api.routes.datasets import router as datasets_router
 from app.api.routes.eval import router as eval_router
 from app.api.routes.health import router as health_router
+from app.api.routes.merged_models import router as merged_models_router
 from app.api.routes.mlx_serving import router as mlx_serving_router
 from app.api.routes.models import router as models_router
 from app.api.routes.notifications import router as notifications_router
@@ -81,6 +82,7 @@ app.include_router(suggestions_router)
 app.include_router(eval_router)
 app.include_router(rubrics_router)
 app.include_router(mlx_serving_router)
+app.include_router(merged_models_router)
 app.include_router(voice_router)
 app.include_router(catalog_router)
 app.include_router(user_router)

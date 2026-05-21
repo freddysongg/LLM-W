@@ -8,6 +8,7 @@ from app.models.decision_log import DecisionLog
 from app.models.eval_call import EvalCall
 from app.models.eval_case import EvalCase
 from app.models.eval_run import EvalRun
+from app.models.merged_model import MergedModel
 from app.models.metric_point import MetricPoint
 from app.models.model_profile import ModelProfile
 from app.models.notification import Notification
@@ -31,6 +32,7 @@ __all__ = [
     "EvalCall",
     "EvalCase",
     "EvalRun",
+    "MergedModel",
     "MetricPoint",
     "ModelProfile",
     "Notification",
