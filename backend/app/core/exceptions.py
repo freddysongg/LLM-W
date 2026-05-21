@@ -93,6 +93,16 @@ class NoCheckpointError(Exception):
         self.run_id = run_id
 
 
+class ModalResumeUnsupportedError(Exception):
+    def __init__(self, run_id: str) -> None:
+        super().__init__(
+            "Resuming a Modal-trained run is not supported: each Modal sandbox "
+            "uses a per-run Volume that does not mount the parent run's "
+            f"checkpoint (parent run: {run_id}). Start a fresh run instead."
+        )
+        self.run_id = run_id
+
+
 class CheckpointNotFoundError(Exception):
     def __init__(self, checkpoint_id: str) -> None:
         super().__init__(f"Checkpoint not found: {checkpoint_id}")

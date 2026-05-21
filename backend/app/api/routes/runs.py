@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db_session
 from app.core.exceptions import (
     ConfigVersionNotFoundError,
+    ModalResumeUnsupportedError,
     NoCheckpointError,
     ProjectNotFoundError,
     RunNotFoundError,
@@ -309,6 +310,15 @@ async def resume_run(
         raise HTTPException(
             status_code=409,
             detail={"code": "NO_CHECKPOINT", "message": str(exc), "details": {}},
+        ) from exc
+    except ModalResumeUnsupportedError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "MODAL_RESUME_UNSUPPORTED",
+                "message": str(exc),
+                "details": {"run_id": exc.run_id},
+            },
         ) from exc
 
 
