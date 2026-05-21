@@ -444,12 +444,27 @@ def test_perform_merge_does_not_eagerly_import_peft_or_transformers() -> None:
     Importing the service must not pull in peft or transformers — both live
     behind the `training` optional extra and aren't installed on base/local
     installs that only want to read merged-model metadata.
+
+    Run in a subprocess so the sys.modules assertion stays honest in a polluted
+    test session: trainer- and eval-stage tests in the same suite import
+    transformers eagerly, and once the parent process has them cached, an
+    in-process check on sys.modules cannot prove the contract.
     """
+    import subprocess
     import sys
 
-    import app.services.merged_models_service as ms
-
-    assert "peft" not in ms.__dict__
-    assert "transformers" not in ms.__dict__
-    assert "peft" not in sys.modules
-    assert "transformers" not in sys.modules
+    probe = (
+        "import app.services.merged_models_service as ms\n"
+        "import sys\n"
+        "assert 'peft' not in ms.__dict__, 'peft eagerly bound on module'\n"
+        "assert 'transformers' not in ms.__dict__, 'transformers eagerly bound on module'\n"
+        "assert 'peft' not in sys.modules, 'peft eagerly imported'\n"
+        "assert 'transformers' not in sys.modules, 'transformers eagerly imported'\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, f"stdout={result.stdout!r}\nstderr={result.stderr!r}"

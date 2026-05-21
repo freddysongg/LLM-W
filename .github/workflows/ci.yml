@@ -31,13 +31,7 @@ jobs:
         run: ruff check app/ tests/
 
       - name: pytest
-        run: |
-          pytest tests/ \
-            --ignore=tests/test_retention_hooks.py \
-            --ignore=tests/test_trainer_accelerate.py \
-            --ignore=tests/test_trainer_rank_aware.py \
-            --ignore=tests/test_final_eval_stage.py \
-            -q
+        run: pytest tests/ -q
 
   frontend:
     name: frontend
