@@ -44,6 +44,7 @@ class DatasetProfile(BaseModel):
     dataset_id: str
     source: Literal["huggingface", "local_jsonl", "local_csv", "custom"]
     format: str
+    format_tag: Literal["chatml", "alpaca", "paired"] | None = None
     total_rows: int
     split_counts: SplitCounts
     detected_fields: list[str]
@@ -51,6 +52,12 @@ class DatasetProfile(BaseModel):
     quality_warnings: list[QualityWarning]
     duplicate_count: int
     malformed_count: int
+    # Reserved for the held-out / frozen eval split count once that concept is
+    # materialized end-to-end. Today no such tracking exists, so the resolver
+    # always emits 0; the frontend reads this field instead of hardcoding the
+    # placeholder so the wire is in place for the future signal.
+    frozen_eval_splits: int = 0
+    eval_leakage_count: int = 0
     resolved_at: str
 
 

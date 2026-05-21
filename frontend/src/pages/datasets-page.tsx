@@ -11,6 +11,7 @@ import { useDatasetSamples, usePreviewTransform } from "@/hooks/useDatasetSample
 import { useToast } from "@/hooks/use-toast";
 import { describeApiError } from "@/lib/api-error";
 import type {
+  DatasetFormatTag,
   DatasetProfile,
   DatasetResolveRequest,
   PreviewTransformResponse,
@@ -69,6 +70,7 @@ type AddSourceOption = "huggingface" | "upload-file";
 interface LibraryEntry {
   readonly name: string;
   readonly format: DatasetFormat;
+  readonly formatTag: DatasetFormatTag | null;
   readonly source: DatasetSource;
   readonly rows: string;
   readonly size: string;
@@ -216,10 +218,11 @@ function buildLibraryEntries({ profile }: BuildLibraryParams): ReadonlyArray<Lib
     {
       name: profile.datasetId,
       format: profile.format,
+      formatTag: profile.formatTag,
       source: profile.source,
       rows: formatRowCount(profile.totalRows),
       size: estimateSizeLabel(profile.totalRows),
-      isFrozen: false,
+      isFrozen: profile.frozenEvalSplits > 0,
       isActive: true,
     },
   ];
@@ -299,7 +302,6 @@ export default function DatasetsPage(): React.JSX.Element {
     null,
   );
   const [activeDialog, setActiveDialog] = React.useState<DialogKind>(null);
-  // TODO(datasets-realign): backend profile has no format taxonomy matching chatml/alpaca/paired -- remove when /api/v1/datasets/profile returns a dataset-format tag aligned with mock filter
   const [formatFilter, setFormatFilter] = React.useState<LibraryFormatFilter>("all");
   const [addDraft, setAddDraft] = React.useState<AddDatasetDraft>(DEFAULT_ADD_DRAFT);
   const [splitDraft, setSplitDraft] = React.useState<SplitDraft>(DEFAULT_SPLIT_DRAFT);
@@ -431,7 +433,10 @@ export default function DatasetsPage(): React.JSX.Element {
     [profile],
   );
 
-  const filteredLibraryEntries = libraryEntries;
+  const filteredLibraryEntries = React.useMemo(() => {
+    if (formatFilter === "all") return libraryEntries;
+    return libraryEntries.filter((entry) => entry.formatTag === formatFilter);
+  }, [libraryEntries, formatFilter]);
   const activeEntryName = filteredLibraryEntries[0]?.name ?? null;
 
   if (!activeProjectId) {
@@ -457,8 +462,7 @@ export default function DatasetsPage(): React.JSX.Element {
         max: tokenStats.max,
       }).toLocaleString()
     : "—";
-  // TODO(datasets-realign): frozen eval split count has no backing field -- remove when DatasetProfile exposes frozenEvalSplits
-  const frozenEvalSplitCount = 0;
+  const frozenEvalSplitCount = profile?.frozenEvalSplits ?? 0;
 
   const inspectCode = profile
     ? JSON.stringify(
@@ -485,6 +489,7 @@ export default function DatasetsPage(): React.JSX.Element {
           <p className="font-mono text-[11px] text-ink-3">
             {libraryEntries.length} dataset{libraryEntries.length === 1 ? "" : "s"} · {sizeLabel}{" "}
             total · {frozenEvalSplitCount} frozen eval split
+            {frozenEvalSplitCount === 1 ? "" : "s"}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -747,15 +752,7 @@ export default function DatasetsPage(): React.JSX.Element {
                     { key: "Malformed", value: profile.malformedCount.toLocaleString() },
                     {
                       key: "Leakage",
-                      value: (
-                        <span
-                          className="text-ink-3"
-                          title="pending backend signal"
-                          // TODO(datasets-realign): wire leakage signal -- remove when DatasetProfile exposes an evalLeakageCount field
-                        >
-                          —
-                        </span>
-                      ),
+                      value: profile.evalLeakageCount.toLocaleString(),
                     },
                   ]}
                 />

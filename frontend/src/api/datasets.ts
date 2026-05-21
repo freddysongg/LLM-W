@@ -1,4 +1,5 @@
 import type {
+  DatasetFormatTag,
   DatasetProfile,
   DatasetResolveRequest,
   DatasetSamplesResponse,
@@ -19,6 +20,7 @@ interface RawDatasetProfile {
   readonly dataset_id: string;
   readonly source: string;
   readonly format: string;
+  readonly format_tag: string | null;
   readonly total_rows: number;
   readonly split_counts: {
     readonly train: number | null;
@@ -41,7 +43,16 @@ interface RawDatasetProfile {
   }>;
   readonly duplicate_count: number;
   readonly malformed_count: number;
+  readonly frozen_eval_splits: number;
+  readonly eval_leakage_count: number;
   readonly resolved_at: string;
+}
+
+function coerceFormatTag(raw: string | null): DatasetFormatTag | null {
+  if (raw === "chatml" || raw === "alpaca" || raw === "paired") {
+    return raw;
+  }
+  return null;
 }
 
 interface RawPreviewTransformResponse {
@@ -55,6 +66,7 @@ function normalizeProfile(raw: RawDatasetProfile): DatasetProfile {
     datasetId: raw.dataset_id,
     source: raw.source as DatasetProfile["source"],
     format: raw.format as DatasetProfile["format"],
+    formatTag: coerceFormatTag(raw.format_tag),
     totalRows: raw.total_rows,
     splitCounts: {
       train: raw.split_counts.train,
@@ -66,6 +78,8 @@ function normalizeProfile(raw: RawDatasetProfile): DatasetProfile {
     qualityWarnings: raw.quality_warnings,
     duplicateCount: raw.duplicate_count,
     malformedCount: raw.malformed_count,
+    frozenEvalSplits: raw.frozen_eval_splits,
+    evalLeakageCount: raw.eval_leakage_count,
     resolvedAt: raw.resolved_at,
   };
 }

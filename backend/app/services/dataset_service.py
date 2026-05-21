@@ -57,6 +57,39 @@ def _detect_format(rows: list[dict[str, Any]]) -> str:
     return "default"
 
 
+def _derive_format_tag(
+    detected_format: str,
+) -> Literal["chatml", "alpaca", "paired"] | None:
+    """Bucket the detected format into the coarse taxonomy the UI filters on."""
+    if detected_format in ("openai", "sharegpt"):
+        return "chatml"
+    if detected_format == "alpaca":
+        return "alpaca"
+    if detected_format == "default":
+        return "paired"
+    return None
+
+
+def _compute_eval_leakage(
+    *, rows: list[dict[str, Any]], split_counts: SplitCounts
+) -> int:
+    """Count rows that appear in both the train and validation slices.
+
+    Relies on the stacked-rows convention used by the resolver: train rows come
+    first, then validation rows. Returns 0 when either slice is absent or empty
+    — in the ratio-split path no per-row assignment is materialized, so a real
+    leakage check is structurally impossible and 0 is the honest answer.
+    """
+    if split_counts.train is None or split_counts.validation is None:
+        return 0
+    if split_counts.train <= 0 or split_counts.validation <= 0:
+        return 0
+    train_end = split_counts.train
+    val_end = train_end + split_counts.validation
+    train_hashes = {_compute_row_hash(row) for row in rows[:train_end]}
+    return sum(1 for row in rows[train_end:val_end] if _compute_row_hash(row) in train_hashes)
+
+
 def _collect_fields(rows: list[dict[str, Any]]) -> list[str]:
     seen: set[str] = set()
     for row in rows[:100]:  # Sample first 100 for field detection
@@ -350,6 +383,7 @@ async def resolve_dataset(
         dataset_id=request.dataset_id,
         source=request.source,
         format=detected_format,
+        format_tag=_derive_format_tag(detected_format),
         total_rows=len(rows),
         split_counts=split_counts,
         detected_fields=detected_fields,
@@ -357,6 +391,7 @@ async def resolve_dataset(
         quality_warnings=quality_warnings,
         duplicate_count=duplicate_count,
         malformed_count=malformed_count,
+        eval_leakage_count=_compute_eval_leakage(rows=rows, split_counts=split_counts),
         resolved_at=datetime.now(UTC).isoformat(),
     )
 

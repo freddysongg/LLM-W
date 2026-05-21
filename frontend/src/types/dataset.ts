@@ -26,10 +26,13 @@ export interface DatasetSample {
   readonly row: Record<string, unknown>;
 }
 
+export type DatasetFormatTag = "chatml" | "alpaca" | "paired";
+
 export interface DatasetProfile {
   readonly datasetId: string;
   readonly source: DatasetSource;
   readonly format: DatasetFormat;
+  readonly formatTag: DatasetFormatTag | null;
   readonly totalRows: number;
   readonly splitCounts: SplitCounts;
   readonly detectedFields: ReadonlyArray<string>;
@@ -37,6 +40,8 @@ export interface DatasetProfile {
   readonly qualityWarnings: ReadonlyArray<QualityWarning>;
   readonly duplicateCount: number;
   readonly malformedCount: number;
+  readonly frozenEvalSplits: number;
+  readonly evalLeakageCount: number;
   readonly resolvedAt: string;
 }
 
