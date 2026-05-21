@@ -206,6 +206,57 @@ async def test_create_merges_writes_disk_and_persists_row(
     assert rows[0].file_path == body["file_path"]
 
 
+async def test_create_uses_run_config_snapshot_not_current_active(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the project's active config has moved on, merge must still read the
+    run's frozen config — the adapter is tied to the base it trained against."""
+    import uuid
+
+    _stub_perform_merge(monkeypatch)
+    project_id = await _seed_project(
+        db_session, tmp_path=tmp_path, base_model_id="Qwen/Qwen2.5-1.5B"
+    )
+    checkpoint = tmp_path / "runs" / "r1" / "checkpoint-final"
+    checkpoint.mkdir(parents=True)
+    run_id = await _seed_run(
+        db_session,
+        project_id=project_id,
+        last_checkpoint_path=str(checkpoint),
+    )
+
+    new_config_id = str(uuid.uuid4())
+    db_session.add(
+        ConfigVersion(
+            id=new_config_id,
+            project_id=project_id,
+            version_number=2,
+            yaml_blob=_make_config_yaml(base_model_id="meta-llama/Llama-3.2-3B"),
+            yaml_hash="hash-2",
+            source_tag="user",
+            created_at="2026-05-19T12:00:00+00:00",
+        )
+    )
+    project = (
+        await db_session.execute(
+            select(Project).where(Project.id == project_id)
+        )
+    ).scalar_one()
+    project.active_config_version_id = new_config_id
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/v1/projects/{project_id}/merged-models",
+        json={"source_run_id": run_id},
+    )
+    body = resp.json()
+    assert resp.status_code == 201, body
+    assert body["base_model_id"] == "Qwen/Qwen2.5-1.5B"
+
+
 async def test_create_returns_422_when_run_has_no_checkpoint(
     client: AsyncClient,
     db_session: AsyncSession,

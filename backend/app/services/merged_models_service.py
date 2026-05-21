@@ -96,28 +96,30 @@ async def _load_merged(
     return merged
 
 
-async def _get_active_base_model_id(
-    *, session: AsyncSession, project: Project
+async def _get_run_base_model_id(
+    *, session: AsyncSession, run: Run
 ) -> str:
-    if project.active_config_version_id is None:
-        raise ConfigVersionNotFoundError(
-            f"no active config for project {project.id}"
-        )
+    """Resolve the base model from the run's frozen config snapshot.
+
+    peft adapters are tied to the specific base they were trained against. If
+    the project's active config has moved on since the run completed, that
+    later base may have a different architecture or weight shape and the
+    merge would silently produce an invalid checkpoint. Reading the run's
+    own `config_version_id` keeps the merge faithful to what was trained.
+    """
     result = await session.execute(
-        select(ConfigVersion).where(
-            ConfigVersion.id == project.active_config_version_id
-        )
+        select(ConfigVersion).where(ConfigVersion.id == run.config_version_id)
     )
     config = result.scalar_one_or_none()
     if config is None:
-        raise ConfigVersionNotFoundError(project.active_config_version_id)
+        raise ConfigVersionNotFoundError(run.config_version_id)
     parsed: dict[str, Any] = yaml.safe_load(config.yaml_blob) or {}
     model_section = parsed.get("model", {}) if isinstance(parsed, dict) else {}
     base_model_id = (
         model_section.get("model_id") if isinstance(model_section, dict) else None
     )
     if not isinstance(base_model_id, str) or not base_model_id:
-        raise MissingBaseModelError(project.id)
+        raise MissingBaseModelError(run.project_id)
     return base_model_id
 
 
@@ -176,7 +178,7 @@ async def merge_run_into_base(
     if run.last_checkpoint_path is None:
         raise NoCheckpointError(source_run_id)
     adapter_path = Path(run.last_checkpoint_path)
-    base_model_id = await _get_active_base_model_id(session=session, project=project)
+    base_model_id = await _get_run_base_model_id(session=session, run=run)
 
     merged_id = str(uuid.uuid4())
     output_path = Path(project.directory_path) / "merged" / merged_id
