@@ -4,10 +4,14 @@ from fastapi import APIRouter
 
 from app.core.llm_catalog import LLM_MODEL_CATALOG
 from app.core.modal_catalog import MODAL_GPU_CATALOG
-from app.core.model_registry import MODEL_REGISTRY
 from app.schemas.catalog import ModalGpuCatalogResponse, ModalGpuOptionResponse
 from app.schemas.llm_catalog import LlmCatalogResponse, LlmModelOptionResponse
-from app.schemas.model_registry import ModelRegistryEntryResponse, ModelRegistryResponse
+from app.schemas.model_registry import (
+    ModelRegistryEntryResponse,
+    ModelRegistryResponse,
+    RegisterModelEntryRequest,
+)
+from app.services import model_registry_service
 
 router = APIRouter(prefix="/api/v1/catalog", tags=["catalog"])
 
@@ -28,6 +32,11 @@ async def list_llm_models() -> LlmCatalogResponse:
 
 @router.get("/model-registry", response_model=ModelRegistryResponse)
 async def list_model_registry() -> ModelRegistryResponse:
-    return ModelRegistryResponse(
-        entries=[ModelRegistryEntryResponse.model_validate(entry) for entry in MODEL_REGISTRY]
-    )
+    return ModelRegistryResponse(entries=model_registry_service.list_entries())
+
+
+@router.post("/model-registry", response_model=ModelRegistryEntryResponse, status_code=201)
+async def register_model_entry(
+    payload: RegisterModelEntryRequest,
+) -> ModelRegistryEntryResponse:
+    return model_registry_service.register_entry(request=payload)

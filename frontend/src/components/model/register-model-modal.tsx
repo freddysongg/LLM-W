@@ -19,26 +19,21 @@ import {
 } from "@/components/ui/select";
 import { Callout } from "@/components/shared/callout";
 import { cn } from "@/lib/utils";
-
-type RegisterSource = "hf" | "local" | "s3";
-type RegisterDtype = "bfloat16" | "float16" | "float32" | "int8" | "int4";
-
-interface RegisterModelDraft {
-  readonly source: RegisterSource;
-  readonly path: string;
-  readonly name: string;
-  readonly dtype: RegisterDtype;
-  readonly isPinned: boolean;
-}
+import type {
+  RegisterModelDtype,
+  RegisterModelEntryRequest,
+  RegisterModelSource,
+} from "@/types/model-registry";
 
 interface RegisterModelModalProps {
   readonly isOpen: boolean;
+  readonly isPending: boolean;
   readonly onOpenChange: (open: boolean) => void;
-  readonly onRegister: (draft: RegisterModelDraft) => void;
+  readonly onRegister: (draft: RegisterModelEntryRequest) => void;
 }
 
 interface SourceOption {
-  readonly value: RegisterSource;
+  readonly value: RegisterModelSource;
   readonly label: string;
 }
 
@@ -48,7 +43,7 @@ const SOURCE_OPTIONS: ReadonlyArray<SourceOption> = [
   { value: "s3", label: "S3 / GCS" },
 ];
 
-const DTYPE_OPTIONS: ReadonlyArray<RegisterDtype> = [
+const DTYPE_OPTIONS: ReadonlyArray<RegisterModelDtype> = [
   "bfloat16",
   "float16",
   "float32",
@@ -56,19 +51,19 @@ const DTYPE_OPTIONS: ReadonlyArray<RegisterDtype> = [
   "int4",
 ];
 
-const PATH_LABEL: Record<RegisterSource, string> = {
+const PATH_LABEL: Record<RegisterModelSource, string> = {
   hf: "HF repo",
   local: "Path",
   s3: "Bucket URI",
 };
 
-const PATH_PLACEHOLDER: Record<RegisterSource, string> = {
+const PATH_PLACEHOLDER: Record<RegisterModelSource, string> = {
   hf: "Qwen/Qwen2.5-1.5B",
   local: "/models/qwen2.5-1.5b",
   s3: "s3://bucket/models/…",
 };
 
-const INITIAL_DRAFT: RegisterModelDraft = {
+const INITIAL_DRAFT: RegisterModelEntryRequest = {
   source: "hf",
   path: "",
   name: "",
@@ -78,15 +73,20 @@ const INITIAL_DRAFT: RegisterModelDraft = {
 
 export function RegisterModelModal({
   isOpen,
+  isPending,
   onOpenChange,
   onRegister,
 }: RegisterModelModalProps): React.JSX.Element {
-  const [draft, setDraft] = React.useState<RegisterModelDraft>(INITIAL_DRAFT);
+  const [draft, setDraft] = React.useState<RegisterModelEntryRequest>(INITIAL_DRAFT);
+
+  React.useEffect(() => {
+    if (!isOpen) {
+      setDraft(INITIAL_DRAFT);
+    }
+  }, [isOpen]);
 
   const handleSubmit = (): void => {
     onRegister(draft);
-    setDraft(INITIAL_DRAFT);
-    onOpenChange(false);
   };
 
   return (
@@ -174,7 +174,7 @@ export function RegisterModelModal({
               <Select
                 value={draft.dtype}
                 onValueChange={(value) =>
-                  setDraft((d) => ({ ...d, dtype: value as RegisterDtype }))
+                  setDraft((d) => ({ ...d, dtype: value as RegisterModelDtype }))
                 }
               >
                 <SelectTrigger id="register-dtype">
@@ -218,11 +218,15 @@ export function RegisterModelModal({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isPending}>
             Cancel
           </Button>
-          <Button variant="primary" onClick={handleSubmit}>
-            Register
+          <Button
+            variant="primary"
+            onClick={handleSubmit}
+            disabled={isPending || !draft.path.trim() || !draft.name.trim()}
+          >
+            {isPending ? "Registering…" : "Register"}
           </Button>
         </DialogFooter>
       </DialogContent>

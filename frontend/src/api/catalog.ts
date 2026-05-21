@@ -1,7 +1,7 @@
 import type { ModalGpuOption } from "@/types/catalog";
 import type { ModalGpuType } from "@/types/config";
 import type { LlmCatalogProvider, LlmModelOption } from "@/types/llm-catalog";
-import type { ModelRegistryEntry } from "@/types/model-registry";
+import type { ModelRegistryEntry, RegisterModelEntryRequest } from "@/types/model-registry";
 import { ApiError, fetchApi } from "./client";
 
 interface RawModalGpuOption {
@@ -92,11 +92,13 @@ export async function fetchLlmModels(): Promise<ReadonlyArray<LlmModelOption>> {
 
 interface RawModelRegistryEntry {
   readonly name: string;
-  readonly params: string;
-  readonly context: string;
-  readonly license: string;
   readonly source: string;
   readonly is_pinned: boolean;
+  readonly params: string | null;
+  readonly context: string | null;
+  readonly license: string | null;
+  readonly path: string | null;
+  readonly dtype: string | null;
 }
 
 interface RawModelRegistryResponse {
@@ -106,15 +108,36 @@ interface RawModelRegistryResponse {
 function normalizeRegistryEntry(raw: RawModelRegistryEntry): ModelRegistryEntry {
   return {
     name: raw.name,
+    source: raw.source,
+    isPinned: raw.is_pinned,
     params: raw.params,
     context: raw.context,
     license: raw.license,
-    source: raw.source,
-    isPinned: raw.is_pinned,
+    path: raw.path,
+    dtype: raw.dtype,
   };
 }
 
 export async function fetchModelRegistry(): Promise<ReadonlyArray<ModelRegistryEntry>> {
   const raw = await fetchApi<RawModelRegistryResponse>({ path: "/catalog/model-registry" });
   return raw.entries.map(normalizeRegistryEntry);
+}
+
+export async function registerModelEntry({
+  request,
+}: {
+  request: RegisterModelEntryRequest;
+}): Promise<ModelRegistryEntry> {
+  const raw = await fetchApi<RawModelRegistryEntry>({
+    path: "/catalog/model-registry",
+    method: "POST",
+    body: {
+      name: request.name,
+      source: request.source,
+      path: request.path,
+      dtype: request.dtype,
+      is_pinned: request.isPinned,
+    },
+  });
+  return normalizeRegistryEntry(raw);
 }

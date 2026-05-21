@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Brain, Download, ExternalLink, Layers, Plus, Star, Trash2 } from "lucide-react";
 import { useAppStore } from "@/stores/app-store";
 import { useModelProfile, useModelArchitecture, useResolveModel } from "@/hooks/useModelProfile";
-import { useModelRegistry } from "@/hooks/useCatalog";
+import { useModelRegistry, useRegisterModelEntry } from "@/hooks/useCatalog";
 import {
   useCreateMergedModel,
   useDeleteMergedModel,
@@ -11,7 +11,7 @@ import {
 } from "@/hooks/useMergedModels";
 import { useRuns } from "@/hooks/useRuns";
 import type { ModelArchitectureResponse, ModelProfile } from "@/types/model";
-import type { ModelRegistryEntry } from "@/types/model-registry";
+import type { ModelRegistryEntry, RegisterModelEntryRequest } from "@/types/model-registry";
 import type { MergedModel } from "@/types/merged-model";
 import type { Run } from "@/types/run";
 import { ModelSourceSelector } from "@/components/model/model-source-selector";
@@ -146,6 +146,7 @@ export default function ModelsPage(): React.JSX.Element {
   const { data: architecture } = useModelArchitecture({ projectId });
   const { data: registryEntries, isLoading: isLoadingRegistry } = useModelRegistry();
   const registry: ReadonlyArray<ModelRegistryEntry> = registryEntries ?? [];
+  const registerModelEntry = useRegisterModelEntry();
   const resolveModel = useResolveModel();
   const { data: mergedModels, isLoading: isLoadingMergedModels } = useMergedModels({
     projectId,
@@ -175,8 +176,26 @@ export default function ModelsPage(): React.JSX.Element {
     });
   };
 
-  const handleRegister = (): void => {
-    toast({ title: "Model registered", description: "Registry entry added (stub)." });
+  const handleRegister = (draft: RegisterModelEntryRequest): void => {
+    registerModelEntry.mutate(draft, {
+      onSuccess: (entry) => {
+        setIsRegisterOpen(false);
+        toast({
+          title: "Model registered",
+          description: `${entry.name} · ${entry.source} · ${entry.path ?? ""}`.trim(),
+        });
+      },
+      onError: (cause) => {
+        toast({
+          title: "Register failed",
+          description: describeApiError({
+            cause,
+            fallback: "Could not persist the registry entry.",
+          }),
+          variant: "destructive",
+        });
+      },
+    });
   };
 
   const handleOpenMergeDialog = (): void => {
@@ -470,9 +489,9 @@ export default function ModelsPage(): React.JSX.Element {
                         <div className="truncate font-mono text-[12px] text-ink-1">
                           {model.name}
                         </div>
-                        <RunRowCell>{model.params}</RunRowCell>
-                        <RunRowCell>{model.context}</RunRowCell>
-                        <RunRowCell>{model.license}</RunRowCell>
+                        <RunRowCell>{model.params ?? "—"}</RunRowCell>
+                        <RunRowCell>{model.context ?? "—"}</RunRowCell>
+                        <RunRowCell>{model.license ?? "—"}</RunRowCell>
                         <RunRowCell>{model.source}</RunRowCell>
                         <div className="flex items-center justify-end gap-1">
                           <Button
@@ -616,6 +635,7 @@ export default function ModelsPage(): React.JSX.Element {
 
       <RegisterModelModal
         isOpen={isRegisterOpen}
+        isPending={registerModelEntry.isPending}
         onOpenChange={setIsRegisterOpen}
         onRegister={handleRegister}
       />

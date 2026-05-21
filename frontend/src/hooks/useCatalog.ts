@@ -1,9 +1,20 @@
-import { useQuery, type UseQueryResult } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type UseMutationResult,
+  type UseQueryResult,
+} from "@tanstack/react-query";
 
-import { fetchLlmModels, fetchModalGpus, fetchModelRegistry } from "@/api/catalog";
+import {
+  fetchLlmModels,
+  fetchModalGpus,
+  fetchModelRegistry,
+  registerModelEntry,
+} from "@/api/catalog";
 import type { ModalGpuOption } from "@/types/catalog";
 import type { LlmModelOption } from "@/types/llm-catalog";
-import type { ModelRegistryEntry } from "@/types/model-registry";
+import type { ModelRegistryEntry, RegisterModelEntryRequest } from "@/types/model-registry";
 
 export const MODAL_GPUS_KEY = ["catalog", "modal-gpus"] as const;
 export const LLM_MODELS_KEY = ["catalog", "llm-models"] as const;
@@ -31,5 +42,19 @@ export function useModelRegistry(): UseQueryResult<ReadonlyArray<ModelRegistryEn
     queryKey: MODEL_REGISTRY_KEY,
     queryFn: fetchModelRegistry,
     staleTime: CATALOG_STALE_TIME_MS,
+  });
+}
+
+export function useRegisterModelEntry(): UseMutationResult<
+  ModelRegistryEntry,
+  Error,
+  RegisterModelEntryRequest
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (request: RegisterModelEntryRequest) => registerModelEntry({ request }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: MODEL_REGISTRY_KEY });
+    },
   });
 }
