@@ -46,6 +46,7 @@ import { CopyForAI } from "@/components/shared/copy-for-ai";
 import { buildModelPrompt } from "@/lib/ai-copy-prompts";
 import { useToast } from "@/hooks/use-toast";
 import { describeApiError } from "@/lib/api-error";
+import { deriveMergedName } from "@/lib/merged-models";
 import { cn } from "@/lib/utils";
 
 type ModelsTab = "active" | "registry" | "merged";
@@ -77,18 +78,6 @@ function formatRelativeTime(iso: string): string {
   if (deltaMs < 3_600_000) return `${Math.round(deltaMs / 60_000)}m ago`;
   if (deltaMs < 86_400_000) return `${Math.round(deltaMs / 3_600_000)}h ago`;
   return `${Math.round(deltaMs / 86_400_000)}d ago`;
-}
-
-function deriveMergedName({
-  baseModelId,
-  adapterStep,
-}: {
-  readonly baseModelId: string;
-  readonly adapterStep: number | null;
-}): string {
-  const baseLabel = baseModelId.includes("/") ? baseModelId.split("/").pop() : baseModelId;
-  const suffix = adapterStep !== null ? `-step${adapterStep}` : "";
-  return `${baseLabel}-merged${suffix}`;
 }
 
 function describeAdapter({

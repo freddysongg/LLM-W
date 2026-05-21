@@ -3,6 +3,7 @@ import { Archive, Download, MoreHorizontal, Trash2 } from "lucide-react";
 import type { Artifact } from "@/types/artifact";
 import { useAppStore } from "@/stores/app-store";
 import { useArtifacts, useDeleteArtifact, useCleanupArtifacts } from "@/hooks/useArtifacts";
+import { useCreateMergedModel } from "@/hooks/useMergedModels";
 import { useProjectStorage, useCleanupStorage } from "@/hooks/useStorage";
 import { useLockEntered } from "@/hooks/use-lock-entered";
 import { useToast } from "@/hooks/use-toast";
@@ -28,6 +29,8 @@ import { StatusDot } from "@/components/shared/status-dot";
 import { RunRow, RunRowActions, RunRowCell } from "@/components/shared/run-row";
 import { SliderRow } from "@/components/shared/slider-row";
 import { getArtifactDownloadUrl } from "@/api/artifacts";
+import { describeApiError } from "@/lib/api-error";
+import { deriveMergedName } from "@/lib/merged-models";
 import { cn } from "@/lib/utils";
 
 type ArtifactsTab = "checkpoints" | "exports" | "storage";
@@ -74,8 +77,10 @@ interface CheckpointRowProps {
   readonly projectId: string;
   readonly isSelected: boolean;
   readonly isDeleting: boolean;
+  readonly isMerging: boolean;
   readonly onSelect: (artifactId: string) => void;
   readonly onDelete: (artifactId: string) => void;
+  readonly onMerge: (runId: string) => void;
 }
 
 function CheckpointRow({
@@ -83,8 +88,10 @@ function CheckpointRow({
   projectId,
   isSelected,
   isDeleting,
+  isMerging,
   onSelect,
   onDelete,
+  onMerge,
 }: CheckpointRowProps): React.JSX.Element {
   const { id, runId, filePath, fileSizeBytes, createdAt, isRetained, metadata } = artifact;
   const stepValue = typeof metadata?.step === "number" ? metadata.step : null;
@@ -130,12 +137,13 @@ function CheckpointRow({
         <Button
           variant="outline"
           size="sm"
+          disabled={isMerging}
           onClick={(event) => {
             event.stopPropagation();
-            toast({ title: "Merge", description: "Merging adapter is not yet wired." });
+            onMerge(runId);
           }}
         >
-          Merge
+          {isMerging ? "Merging…" : "Merge"}
         </Button>
       </div>
       <RunRowActions>
@@ -330,6 +338,8 @@ export default function ArtifactsPage(): React.JSX.Element {
   const deleteMutation = useDeleteArtifact();
   const cleanupArtifactsMutation = useCleanupArtifacts();
   const cleanupStorageMutation = useCleanupStorage();
+  const createMergedModel = useCreateMergedModel({ projectId });
+  const { toast } = useToast();
 
   const checkpoints = React.useMemo(
     () => allArtifacts.filter((candidate) => candidate.artifactType === "checkpoint"),
@@ -366,6 +376,34 @@ export default function ArtifactsPage(): React.JSX.Element {
   const handleStorageCleanup = (): void => {
     if (!projectId) return;
     cleanupStorageMutation.mutate({ projectId });
+  };
+
+  const handleMerge = (runId: string): void => {
+    if (!projectId) return;
+    createMergedModel.mutate(
+      { sourceRunId: runId },
+      {
+        onSuccess: (merged) => {
+          toast({
+            title: "Merged model created",
+            description: `${deriveMergedName({
+              baseModelId: merged.baseModelId,
+              adapterStep: merged.adapterStep,
+            })} · ${formatBytes(merged.fileSizeBytes)}`,
+          });
+        },
+        onError: (cause) => {
+          toast({
+            title: "Merge failed",
+            description: describeApiError({
+              cause,
+              fallback: "Merging the adapter into the base model failed.",
+            }),
+            variant: "destructive",
+          });
+        },
+      },
+    );
   };
 
   if (!activeProjectId) {
@@ -475,8 +513,10 @@ export default function ArtifactsPage(): React.JSX.Element {
                   projectId={projectId}
                   isSelected={selectedArtifactId === artifact.id}
                   isDeleting={deleteMutation.isPending}
+                  isMerging={createMergedModel.isPending}
                   onSelect={setSelectedArtifactId}
                   onDelete={handleDelete}
+                  onMerge={handleMerge}
                 />
               ))}
             </Card>
