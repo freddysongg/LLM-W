@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Archive, Download, MoreHorizontal, Trash2 } from "lucide-react";
+import { Archive, Download, Trash2 } from "lucide-react";
 import type { Artifact } from "@/types/artifact";
 import { useAppStore } from "@/stores/app-store";
 import { useArtifacts, useDeleteArtifact, useCleanupArtifacts } from "@/hooks/useArtifacts";
@@ -36,7 +36,7 @@ import { cn } from "@/lib/utils";
 type ArtifactsTab = "checkpoints" | "exports" | "storage";
 
 const CHECKPOINT_GRID = "18px 1fr 100px 80px 100px 200px 40px";
-const EXPORT_GRID = "22px minmax(0, 1fr) 120px 110px 110px 120px";
+const EXPORT_GRID = "22px minmax(0, 1fr) 120px 110px";
 
 const EXPORT_TYPES = new Set([
   "metric_export",
@@ -202,7 +202,6 @@ interface ExportRowProps {
 
 function ExportRow({ artifact, isSelected, onSelect }: ExportRowProps): React.JSX.Element {
   const { id, artifactType, filePath, fileSizeBytes, createdAt } = artifact;
-  const { toast } = useToast();
 
   return (
     <RunRow
@@ -222,22 +221,6 @@ function ExportRow({ artifact, isSelected, onSelect }: ExportRowProps): React.JS
       </div>
       <RunRowCell align="end">{formatBytes(fileSizeBytes)}</RunRowCell>
       <RunRowCell align="end">{formatRelative(createdAt)}</RunRowCell>
-      <div />
-      <div className="flex items-center justify-end gap-1.5">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={(event) => {
-            event.stopPropagation();
-            toast({ title: "Re-export", description: "Re-export flow is not yet wired." });
-          }}
-        >
-          Re-export
-        </Button>
-        <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="More actions">
-          <MoreHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
-        </Button>
-      </div>
     </RunRow>
   );
 }
@@ -539,8 +522,6 @@ export default function ArtifactsPage(): React.JSX.Element {
                 <RunRowCell>file · format</RunRowCell>
                 <RunRowCell align="end">size</RunRowCell>
                 <RunRowCell align="end">age</RunRowCell>
-                <span />
-                <RunRowCell align="end">actions</RunRowCell>
               </RunRow>
               {exports.map((artifact) => (
                 <ExportRow

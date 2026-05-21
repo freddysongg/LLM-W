@@ -282,14 +282,6 @@ export default function ModelsPage(): React.JSX.Element {
           {profile && architecture && (
             <CopyForAI buildPrompt={() => buildModelPrompt({ profile, architecture })} />
           )}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => toast({ title: "Pull from HuggingFace", description: "Coming soon." })}
-          >
-            <Download className="size-3" aria-hidden="true" />
-            Pull from HF
-          </Button>
           <Button variant="primary" size="sm" onClick={() => setIsRegisterOpen(true)}>
             <Plus className="size-3" aria-hidden="true" />
             Register
