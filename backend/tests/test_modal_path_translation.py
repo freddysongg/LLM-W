@@ -5,6 +5,7 @@ from pathlib import Path
 from app.services.cloud.modal_adapter import (
     ModalAdapterConfig,
     ModalTrainingAdapter,
+    translate_host_path_to_workspace,
     translate_workspace_path,
 )
 
@@ -95,3 +96,90 @@ def test_rewrite_event_paths_tolerates_missing_or_non_string_path(tmp_path: Path
     non_string: dict[str, object] = {"type": "checkpoint", "path": 42}
     adapter._rewrite_event_paths(event=non_string)
     assert non_string["path"] == 42
+
+
+def test_translate_host_path_to_workspace_round_trips_with_forward_helper(
+    tmp_path: Path,
+) -> None:
+    workspace = "/workspace/runs/r1/checkpoints/checkpoint-100"
+
+    host_path = translate_workspace_path(raw_path=workspace, project_dir=tmp_path)
+    rewound = translate_host_path_to_workspace(
+        host_path=host_path, project_dir=tmp_path
+    )
+
+    assert rewound == workspace
+
+
+def test_translate_host_path_to_workspace_passes_through_unknown_paths(
+    tmp_path: Path,
+) -> None:
+    assert (
+        translate_host_path_to_workspace(
+            host_path="/Users/other-project/runs/r1/checkpoints/checkpoint-50",
+            project_dir=tmp_path,
+        )
+        == "/Users/other-project/runs/r1/checkpoints/checkpoint-50"
+    )
+    assert (
+        translate_host_path_to_workspace(host_path="", project_dir=tmp_path) == ""
+    )
+
+
+def test_translate_host_path_to_workspace_handles_trailing_slash_project_dir(
+    tmp_path: Path,
+) -> None:
+    project_dir = Path(str(tmp_path) + "/")
+    host_path = str(tmp_path / "runs/r1/checkpoints/checkpoint-7")
+
+    assert (
+        translate_host_path_to_workspace(host_path=host_path, project_dir=project_dir)
+        == "/workspace/runs/r1/checkpoints/checkpoint-7"
+    )
+
+
+def test_build_trainer_cmd_translates_host_resume_back_to_workspace(
+    tmp_path: Path,
+) -> None:
+    """An OOM fallback retry threads ``run.last_checkpoint_path`` (a host-mirror
+    path) back into a new Modal sandbox. The cmd must point the trainer at the
+    in-container /workspace path so the per-run Volume read succeeds — passing
+    the host path verbatim would dereference a directory that does not exist
+    inside the sandbox.
+    """
+    host_resume = str(tmp_path / "runs/r1/checkpoints/checkpoint-100")
+    config = ModalAdapterConfig(
+        run_id="r1",
+        config_path=Path("/tmp/configs/run.yaml"),
+        project_dir=tmp_path,
+        gpu_type="a10",
+        modal_token_id="token-id",
+        modal_token_secret="token-secret",
+        heartbeat_path=Path("/tmp/heartbeat.json"),
+        resume_from_checkpoint=host_resume,
+    )
+    adapter = ModalTrainingAdapter(config=config)
+
+    cmd = adapter._build_trainer_cmd()
+
+    resume_index = cmd.index("--resume-from-checkpoint")
+    assert cmd[resume_index + 1] == "/workspace/runs/r1/checkpoints/checkpoint-100"
+
+
+def test_build_trainer_cmd_omits_resume_flag_when_not_provided(
+    tmp_path: Path,
+) -> None:
+    config = ModalAdapterConfig(
+        run_id="r1",
+        config_path=Path("/tmp/configs/run.yaml"),
+        project_dir=tmp_path,
+        gpu_type="a10",
+        modal_token_id="token-id",
+        modal_token_secret="token-secret",
+        heartbeat_path=Path("/tmp/heartbeat.json"),
+    )
+    adapter = ModalTrainingAdapter(config=config)
+
+    cmd = adapter._build_trainer_cmd()
+
+    assert "--resume-from-checkpoint" not in cmd

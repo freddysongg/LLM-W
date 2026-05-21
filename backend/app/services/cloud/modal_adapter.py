@@ -158,6 +158,27 @@ def translate_workspace_path(*, raw_path: str, project_dir: Path) -> str:
     return str(project_dir / suffix)
 
 
+def translate_host_path_to_workspace(*, host_path: str, project_dir: Path) -> str:
+    """Inverse of ``translate_workspace_path`` — rewrite a host-mirror path
+    back to the ``/workspace`` path the Modal sandbox sees.
+
+    Stored ``run.last_checkpoint_path`` rows have been translated to the host
+    mirror by ``translate_workspace_path``, but an OOM fallback retry mounts
+    the same per-run Volume in a fresh sandbox and the trainer's
+    ``--resume-from-checkpoint`` argument needs the in-container path. Passing
+    the host path verbatim would dereference ``/Users/.../runs/...`` inside the
+    container, where that directory does not exist.
+
+    Paths outside the project directory pass through unchanged so this is safe
+    to apply unconditionally to any threaded checkpoint path.
+    """
+    project_str = str(project_dir).rstrip("/") + "/"
+    if not host_path.startswith(project_str):
+        return host_path
+    suffix = host_path[len(project_str) :]
+    return f"{_WORKSPACE_ROOT}/{suffix}"
+
+
 def _read_sanitized_content_hash(*, project_dir: Path) -> str | None:
     """Return the sanitized artifact's content hash from its local manifest, if present.
 
@@ -318,6 +339,30 @@ class ModalTrainingAdapter:
     def last_exception_type_name(self) -> str | None:
         return self._exception_type_name
 
+    def _build_trainer_cmd(self) -> list[str]:
+        config_name = self._config.config_path.name
+        cmd: list[str] = [
+            "python",
+            "-u",
+            "-m",
+            "app.services.trainer",
+            "--run-id",
+            self._config.run_id,
+            "--config-path",
+            f"{_WORKSPACE_CONFIGS}/{config_name}",
+            "--project-dir",
+            _WORKSPACE_ROOT,
+            "--heartbeat-interval",
+            str(self._config.heartbeat_interval_seconds),
+        ]
+        if self._config.resume_from_checkpoint is not None:
+            workspace_resume = translate_host_path_to_workspace(
+                host_path=self._config.resume_from_checkpoint,
+                project_dir=self._config.project_dir,
+            )
+            cmd += ["--resume-from-checkpoint", workspace_resume]
+        return cmd
+
     async def start(self) -> None:
         os.environ["MODAL_TOKEN_ID"] = self._config.modal_token_id
         os.environ["MODAL_TOKEN_SECRET"] = self._config.modal_token_secret
@@ -348,23 +393,7 @@ class ModalTrainingAdapter:
             timeout=timeout_seconds,
         )
 
-        config_name = self._config.config_path.name
-        cmd = [
-            "python",
-            "-u",
-            "-m",
-            "app.services.trainer",
-            "--run-id",
-            self._config.run_id,
-            "--config-path",
-            f"{_WORKSPACE_CONFIGS}/{config_name}",
-            "--project-dir",
-            _WORKSPACE_ROOT,
-            "--heartbeat-interval",
-            str(self._config.heartbeat_interval_seconds),
-        ]
-        if self._config.resume_from_checkpoint is not None:
-            cmd += ["--resume-from-checkpoint", self._config.resume_from_checkpoint]
+        cmd = self._build_trainer_cmd()
 
         self._process = await self._sandbox.exec.aio(*cmd)
         self._stdout_aiter = self._process.stdout.__aiter__()
