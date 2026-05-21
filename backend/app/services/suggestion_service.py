@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -21,7 +22,7 @@ from app.models.project import Project
 from app.models.suggestion import AISuggestion
 from app.schemas.config_version import ConfigVersionCreate
 from app.schemas.suggestion import SuggestionListResponse, SuggestionResponse
-from app.services import config_service, notifications_service
+from app.services import ai_rule_settings_service, config_service, notifications_service
 from app.services.ai_recommender import AISuggestionCreate, build_engine
 from app.services.settings_service import get_raw_api_key, get_settings
 
@@ -193,12 +194,18 @@ async def generate_suggestions(
         base_url=current_settings.ai_base_url,
     )
 
+    rule_settings = ai_rule_settings_service.get_rule_settings(
+        project_dir=Path(project.directory_path)
+    )
+    disabled_rules = ai_rule_settings_service.disabled_rule_names(rule_settings)
+
     creates = await engine.generate_recommendations(
         config=config,
         run_metrics=run_metrics,
         dataset_profile={},
         comparison_data=None,
         notes=notes,
+        disabled_rules=disabled_rules,
     )
 
     stored = []

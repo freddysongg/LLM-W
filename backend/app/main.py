@@ -8,6 +8,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.api.routes.ai_rule_settings import router as ai_rule_settings_router
 from app.api.routes.artifacts import router as artifacts_router
 from app.api.routes.catalog import router as catalog_router
 from app.api.routes.configs import router as configs_router
@@ -87,6 +88,7 @@ app.include_router(voice_router)
 app.include_router(catalog_router)
 app.include_router(user_router)
 app.include_router(notifications_router)
+app.include_router(ai_rule_settings_router)
 app.include_router(ws_router)
 
 

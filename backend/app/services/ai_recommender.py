@@ -21,6 +21,7 @@ class RecommendationEngine(ABC):
         dataset_profile: dict[str, Any],
         comparison_data: dict[str, Any] | None,
         notes: str | None,
+        disabled_rules: set[str] | None = None,
     ) -> list[AISuggestionCreate]: ...
 
     @abstractmethod
@@ -36,8 +37,11 @@ class RuleBasedEngine(RecommendationEngine):
         dataset_profile: dict[str, Any],
         comparison_data: dict[str, Any] | None,
         notes: str | None,
+        disabled_rules: set[str] | None = None,
     ) -> list[AISuggestionCreate]:
-        return evaluate_rules(metrics=run_metrics, config=config)
+        return evaluate_rules(
+            metrics=run_metrics, config=config, disabled_rules=disabled_rules
+        )
 
     async def health_check(self) -> bool:
         return True
@@ -232,7 +236,9 @@ class CloudLLMEngine(RecommendationEngine):
         dataset_profile: dict[str, Any],
         comparison_data: dict[str, Any] | None,
         notes: str | None,
+        disabled_rules: set[str] | None = None,
     ) -> list[AISuggestionCreate]:
+        del disabled_rules
         config_yaml = yaml.dump(config, default_flow_style=False, allow_unicode=True)
         prompt = _build_prompt(
             config_yaml=config_yaml,
