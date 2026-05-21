@@ -1,11 +1,10 @@
 import { NavLink } from "react-router-dom";
-import { ChevronRight, Settings, LogOut } from "lucide-react";
+import { ChevronRight, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app-store";
 import type { NavGroupKey } from "@/stores/app-store";
 import { NAV_GROUPS, NAV_ICON_COMPONENTS, SETTINGS_NAV_ITEM } from "@/lib/nav";
 import type { NavItem } from "@/lib/nav";
-import { useToast } from "@/hooks/use-toast";
 import { useRunStreamStore } from "@/stores/run-stream-store";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import {
@@ -198,16 +197,11 @@ const PLACEHOLDER_EMAIL = "";
 const PLACEHOLDER_INITIALS = "…";
 
 function SidebarFooter({ collapsed }: SidebarFooterProps): React.JSX.Element {
-  const { toast } = useToast();
   const { data: currentUser, isLoading } = useCurrentUser();
 
   const name = currentUser?.name ?? (isLoading ? PLACEHOLDER_NAME : "Unavailable");
   const email = currentUser?.email ?? PLACEHOLDER_EMAIL;
   const initials = currentUser?.initials ?? (isLoading ? PLACEHOLDER_INITIALS : "?");
-
-  const handleShowToast = (title: string): void => {
-    toast({ title });
-  };
 
   return (
     <div
@@ -255,14 +249,6 @@ function SidebarFooter({ collapsed }: SidebarFooterProps): React.JSX.Element {
               <Settings className="h-4 w-4" />
               <span>Settings</span>
             </NavLink>
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            onSelect={() => handleShowToast("Signed out — stubbed")}
-            className="text-danger focus:text-danger"
-          >
-            <LogOut className="h-4 w-4" />
-            <span>Sign out</span>
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

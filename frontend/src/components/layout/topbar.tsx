@@ -11,8 +11,6 @@ import {
   ArrowRight,
   Plus,
   BookOpen,
-  Terminal,
-  Star,
   ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -101,7 +99,6 @@ function ProjectChip({ projects, activeProject }: ProjectChipProps): React.JSX.E
 
   const handleNewProject = (): void => {
     navigate("/projects");
-    toast({ title: "New project — stubbed" });
   };
 
   return (
@@ -266,15 +263,6 @@ function HelpMenu(): React.JSX.Element {
         <DropdownMenuItem onSelect={handleOpenDocs}>
           <BookOpen className="h-4 w-4" />
           <span>Documentation</span>
-        </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => handleShowToast("Keyboard shortcuts — stubbed")}>
-          <Terminal className="h-4 w-4" />
-          <span>Keyboard shortcuts</span>
-          <span className="ml-auto font-mono text-[10px] text-ink-4">?</span>
-        </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => handleShowToast("Changelog — stubbed")}>
-          <Star className="h-4 w-4" />
-          <span>Changelog</span>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={() => handleShowToast("Opened support form")}>
