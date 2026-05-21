@@ -20,10 +20,8 @@ _DEFAULT_SMOKE_CONFIG = Path(__file__).resolve().parents[2] / "configs" / "modal
 _DEFAULT_TIMEOUT_SECONDS = 600
 
 _SEED_SANITIZED_ROW = {
-    "messages": [
-        {"role": "user", "content": "modal smoke check"},
-        {"role": "assistant", "content": "ok"},
-    ]
+    "prompt": "modal smoke check",
+    "response": "ok",
 }
 
 
@@ -54,7 +52,11 @@ def _seed_sanitized_artifact(*, project_dir: Path) -> None:
         "content_hash": content_hash,
         "total_rows": 1,
         "source_format": "default",
-        "normalized": True,
+        # Smoke seed pairs the prompt/response row above with normalized=false
+        # so build_modal_upload_plan accepts it. A normalized=true seed would
+        # be rejected by NormalizedArtifactUnsupportedError because the trainer
+        # does not yet consume the OpenAI messages shape.
+        "normalized": False,
         "redaction_counts": {},
         "total_redactions": 0,
         "split_counts": {"train": 1, "val": 0, "test": 0},

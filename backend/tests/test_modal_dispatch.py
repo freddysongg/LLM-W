@@ -247,7 +247,12 @@ def test_build_modal_upload_plan_uploads_rewritten_config_pointing_at_sanitized(
 ) -> None:
     """The uploaded config must replace the host's dataset.source / dataset_id
     with the path of the uploaded sanitized artifact so the remote trainer
-    doesn't try to load host paths or bypass sanitized_cloud by fetching HF."""
+    doesn't try to load host paths or bypass sanitized_cloud by fetching HF.
+
+    Uses normalize=false because the trainer-side tokenization stage does not
+    yet handle the OpenAI messages shape that normalize=true produces — the
+    upload planner refuses that combination explicitly in a separate test.
+    """
     import yaml as _yaml
 
     from app.services.cloud.modal_adapter import build_modal_upload_plan
@@ -255,10 +260,9 @@ def test_build_modal_upload_plan_uploads_rewritten_config_pointing_at_sanitized(
     project_dir = tmp_path / "p1"
     datasets_dir = project_dir / "datasets"
     datasets_dir.mkdir(parents=True)
-    (datasets_dir / "sanitized.jsonl").write_text('{"messages":[]}\n')
-    # Manifest with normalized=true triggers the format=openai rewrite below.
+    (datasets_dir / "sanitized.jsonl").write_text('{"prompt":"hi","response":"yo"}\n')
     (datasets_dir / "sanitized.meta.json").write_text(
-        '{"content_hash": "abc", "normalized": true}', encoding="utf-8"
+        '{"content_hash": "abc", "normalized": false}', encoding="utf-8"
     )
 
     configs_dir = project_dir / "configs"
@@ -296,10 +300,49 @@ def test_build_modal_upload_plan_uploads_rewritten_config_pointing_at_sanitized(
     rewritten = _yaml.safe_load(uploaded_path.read_text(encoding="utf-8"))
     assert rewritten["dataset"]["source"] == "local_jsonl"
     assert rewritten["dataset"]["dataset_id"] == "/workspace/datasets/sanitized.jsonl"
-    assert rewritten["dataset"]["format"] == "openai"
+    # normalize=false → the original dataset format must be preserved so the
+    # trainer reads input_field/target_field against the source schema.
+    assert rewritten["dataset"]["format"] == "sharegpt"
     # The user's other config sections must survive the rewrite intact.
     assert rewritten["project"]["name"] == "demo"
     assert rewritten["execution"]["environment"] == "modal"
+
+
+def test_build_modal_upload_plan_rejects_normalized_artifact(tmp_path: Path) -> None:
+    """A normalized sanitized artifact pairs with messages-only rows that the
+    trainer's tokenization stage cannot consume. Surfacing the incompatibility
+    here fails fast with an actionable message instead of letting the run die
+    mid-tokenization on the remote side."""
+    import yaml as _yaml
+
+    from app.services.cloud.modal_adapter import (
+        NormalizedArtifactUnsupportedError,
+        build_modal_upload_plan,
+    )
+
+    project_dir = tmp_path / "p1"
+    datasets_dir = project_dir / "datasets"
+    datasets_dir.mkdir(parents=True)
+    (datasets_dir / "sanitized.jsonl").write_text('{"messages":[]}\n')
+    (datasets_dir / "sanitized.meta.json").write_text(
+        '{"content_hash": "abc", "normalized": true}', encoding="utf-8"
+    )
+
+    configs_dir = project_dir / "configs"
+    configs_dir.mkdir(parents=True)
+    config_path = configs_dir / "run-foo.yaml"
+    config_path.write_text(
+        _yaml.safe_dump(
+            {
+                "dataset": {"source": "huggingface", "dataset_id": "x"},
+                "execution": {"environment": "modal"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(NormalizedArtifactUnsupportedError, match="normalize=false"):
+        build_modal_upload_plan(project_dir=project_dir, config_path=config_path)
 
 
 def test_build_modal_upload_plan_does_not_upload_configs_directory(tmp_path: Path) -> None:
@@ -394,23 +437,6 @@ def _read_rewritten_dataset(*, plan_files: tuple[tuple[Path, str], ...]) -> dict
     return dataset
 
 
-def test_rewrite_sets_format_openai_when_manifest_says_normalized(tmp_path: Path) -> None:
-    """A manifest carrying normalized=true means the sanitizer rewrote rows into
-    openai's `messages` shape, so the remote trainer must read them with
-    `format=openai` regardless of the original config's format."""
-    from app.services.cloud.modal_adapter import build_modal_upload_plan
-
-    project_dir = tmp_path / "p1"
-    config_path = _write_modal_rewrite_fixture(
-        project_dir=project_dir,
-        manifest_payload='{"content_hash": "abc", "normalized": true}',
-    )
-
-    plan = build_modal_upload_plan(project_dir=project_dir, config_path=config_path)
-    dataset = _read_rewritten_dataset(plan_files=plan.files)
-    assert dataset["format"] == "openai"
-
-
 def test_rewrite_preserves_original_format_when_manifest_says_not_normalized(
     tmp_path: Path,
 ) -> None:
@@ -471,9 +497,11 @@ def test_rewrite_preserves_train_eval_split_and_ratios(tmp_path: Path) -> None:
     project_dir = tmp_path / "p1"
     datasets_dir = project_dir / "datasets"
     datasets_dir.mkdir(parents=True)
-    (datasets_dir / "sanitized.jsonl").write_text('{"messages":[]}\n', encoding="utf-8")
+    (datasets_dir / "sanitized.jsonl").write_text(
+        '{"prompt":"x","response":"y"}\n', encoding="utf-8"
+    )
     (datasets_dir / "sanitized.meta.json").write_text(
-        '{"content_hash": "abc", "normalized": true}', encoding="utf-8"
+        '{"content_hash": "abc", "normalized": false}', encoding="utf-8"
     )
 
     configs_dir = project_dir / "configs"
