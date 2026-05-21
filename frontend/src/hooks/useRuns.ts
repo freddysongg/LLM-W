@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   fetchRuns,
   fetchRun,
+  fetchRecentRuns,
   createRun,
   deleteRun,
   cancelRun,
@@ -17,12 +18,21 @@ import type { MetricsParams, LogsParams } from "@/types/run";
 const RUNS_KEY = (projectId: string) => ["projects", projectId, "runs"] as const;
 const RUN_KEY = (projectId: string, runId: string) =>
   ["projects", projectId, "runs", runId] as const;
+const RECENT_RUNS_KEY = ["runs", "recent"] as const;
 
 export function useRuns({ projectId }: { projectId: string }) {
   return useQuery({
     queryKey: RUNS_KEY(projectId),
     queryFn: () => fetchRuns({ projectId }),
     enabled: Boolean(projectId),
+    refetchInterval: 5000,
+  });
+}
+
+export function useRecentRuns({ limit = 10 }: { limit?: number } = {}) {
+  return useQuery({
+    queryKey: [...RECENT_RUNS_KEY, limit] as const,
+    queryFn: () => fetchRecentRuns({ limit }),
     refetchInterval: 5000,
   });
 }

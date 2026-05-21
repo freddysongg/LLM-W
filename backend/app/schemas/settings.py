@@ -35,6 +35,12 @@ class AITestResponse(BaseModel):
     model_id: str
 
 
+class ModalTestRequest(BaseModel):
+    default_gpu_type: str | None = None
+
+
 class ModalTestResponse(BaseModel):
     success: bool
     message: str
+    gpu_type_valid: bool | None = None
+    resolved_gpu_spec: str | None = None

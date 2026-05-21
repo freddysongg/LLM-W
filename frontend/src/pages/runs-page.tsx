@@ -1,7 +1,11 @@
 import * as React from "react";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { GitCompare, Play } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAppStore } from "@/stores/app-store";
+import { useRunStreamStore } from "@/stores/run-stream-store";
+import { denormalizeYamlConfig, normalizeYamlConfig } from "@/lib/yaml-config";
+import type { DataPolicy, SaveConfigRequest, WorkbenchConfig } from "@/types/config";
 import {
   useCancelRun,
   useCheckpoints,
@@ -14,7 +18,7 @@ import {
   useRunStages,
   useRuns,
 } from "@/hooks/useRuns";
-import { useActiveConfig } from "@/hooks/useConfigs";
+import { useActiveConfig, useSaveConfig } from "@/hooks/useConfigs";
 import { useSettings } from "@/hooks/useSettings";
 import { useRunStream } from "@/hooks/useRunStream";
 import { useToast } from "@/hooks/use-toast";
@@ -28,6 +32,8 @@ import { LiveMetricsCharts } from "@/components/runs/live-metrics-charts";
 import { LogStream } from "@/components/runs/log-stream";
 import { ResumeFromCheckpointDialog } from "@/components/runs/resume-from-checkpoint-dialog";
 import { RunActions } from "@/components/runs/run-actions";
+import { RunAttemptsStrip } from "@/components/runs/run-attempts-strip";
+import { RunFallbackDialog } from "@/components/runs/run-fallback-dialog";
 import { RunList } from "@/components/runs/run-list";
 import { RunTimeline } from "@/components/runs/run-timeline";
 import { StageDetailPanel } from "@/components/runs/stage-detail-panel";
@@ -77,7 +83,11 @@ function statusMatches({
 function pickLiveRun(runs: ReadonlyArray<Run>): Run | null {
   return (
     runs.find(
-      (run) => run.status === "running" || run.status === "pending" || run.status === "paused",
+      (run) =>
+        run.status === "running" ||
+        run.status === "pending" ||
+        run.status === "paused" ||
+        run.status === "fallback_pending",
     ) ?? null
   );
 }
@@ -86,6 +96,66 @@ function countByStatus(runs: ReadonlyArray<Run>, predicate: (run: Run) => boolea
   let total = 0;
   for (const run of runs) if (predicate(run)) total += 1;
   return total;
+}
+
+interface MaybeCreateOverrideParams {
+  readonly projectId: string;
+  readonly activeConfig: { readonly id: string; readonly yamlBlob: string };
+  readonly environment: TrainingEnvironment;
+  readonly modalGpuType: ModalGpuType | null;
+  readonly saveConfig: (params: {
+    readonly request: SaveConfigRequest;
+  }) => Promise<{ readonly id: string }>;
+}
+
+export async function maybeCreateOverrideConfig({
+  projectId,
+  activeConfig,
+  environment,
+  modalGpuType,
+  saveConfig,
+}: MaybeCreateOverrideParams): Promise<string | null> {
+  const parsed = normalizeYamlConfig<WorkbenchConfig>(parseYaml(activeConfig.yamlBlob));
+  const currentEnv = parsed.execution.environment;
+  const currentGpu = parsed.execution.modalGpuType;
+  const currentDataPolicy = parsed.execution.dataPolicy;
+  // Backend ExecutionConfig.modal_gpu_type is a non-nullable Literal with
+  // default "a10"; serializing null would invalidate the config. When the
+  // target environment is local, preserve the existing GPU (or fall back to
+  // the same default the backend would apply) so the field stays valid.
+  const targetGpu: ModalGpuType =
+    environment === "modal" && modalGpuType !== null ? modalGpuType : (currentGpu ?? "a10");
+  // Backend _validate_execution_for_run rejects modal + local_raw outright.
+  // When the picker promotes a local config to modal, force the cloud policy
+  // so the launch survives validation; when reverting to local, leave the
+  // saved policy alone (local_raw is the local-default).
+  const targetDataPolicy: DataPolicy =
+    environment === "modal" ? "sanitized_cloud" : (currentDataPolicy ?? "local_raw");
+  const envChanged = currentEnv !== environment;
+  const gpuChanged = environment === "modal" && currentGpu !== targetGpu;
+  const dataPolicyChanged = currentDataPolicy !== targetDataPolicy;
+  if (!envChanged && !gpuChanged && !dataPolicyChanged) {
+    return null;
+  }
+  const patched: WorkbenchConfig = {
+    ...parsed,
+    execution: {
+      ...parsed.execution,
+      environment,
+      modalGpuType: targetGpu,
+      dataPolicy: targetDataPolicy,
+    },
+  };
+  const patchedYaml = stringifyYaml(denormalizeYamlConfig(patched));
+  const newVersion = await saveConfig({
+    request: {
+      projectId,
+      yamlContent: patchedYaml,
+      sourceTag: "user",
+      sourceDetail: "runs-page environment override",
+    },
+  });
+  return newVersion.id;
 }
 
 export default function RunsPage(): React.JSX.Element {
@@ -170,9 +240,41 @@ export default function RunsPage(): React.JSX.Element {
   const createRunMutation = useCreateRun();
 
   const { data: activeConfig } = useActiveConfig({ projectId: activeProjectId ?? "" });
+  const saveConfig = useSaveConfig({ projectId: activeProjectId ?? "" });
+
+  const { fallbackProposal, clearFallbackProposal } = useRunStreamStore((state) => ({
+    fallbackProposal: selectedRunId ? (state.fallbackProposals[selectedRunId] ?? null) : null,
+    clearFallbackProposal: state.clearFallbackProposal,
+  }));
+
+  const maxRunMinutes = React.useMemo<number>(() => {
+    if (!activeConfig?.yamlBlob) return 90;
+    try {
+      const parsed = normalizeYamlConfig<WorkbenchConfig>(parseYaml(activeConfig.yamlBlob));
+      return parsed.execution?.maxRunMinutes ?? 90;
+    } catch {
+      return 90;
+    }
+  }, [activeConfig]);
 
   const liveRun = React.useMemo(() => pickLiveRun(runs), [runs]);
   const canStartRun = Boolean(activeConfig) && liveRun === null;
+
+  React.useEffect(() => {
+    if (!activeConfig?.yamlBlob) return;
+    try {
+      const parsed = normalizeYamlConfig<WorkbenchConfig>(parseYaml(activeConfig.yamlBlob));
+      const configuredEnv = parsed.execution?.environment;
+      const configuredGpu = parsed.execution?.modalGpuType ?? null;
+      if (configuredEnv === "local" || configuredEnv === "modal") {
+        setEnvironment(configuredEnv);
+      }
+      setModalGpuType(configuredGpu);
+    } catch {
+      // Malformed config — leave the picker at its current value rather than
+      // forcing it to the local default and creating a silent override on Start.
+    }
+  }, [activeConfig?.id, activeConfig?.yamlBlob]);
 
   React.useEffect(() => {
     if (liveRun && !selectedRunId) {
@@ -193,10 +295,40 @@ export default function RunsPage(): React.JSX.Element {
   const streamingCount = countByStatus(runs, (run) => run.status === "running");
   const pausedCount = countByStatus(runs, (run) => run.status === "paused");
 
-  const handleStartRun = (): void => {
+  const handleStartRun = async (): Promise<void> => {
     if (!activeProjectId || !activeConfig) return;
+    if (environment === "modal" && modalGpuType === null) {
+      toast({
+        title: "Pick a GPU first",
+        description: "Modal runs require a GPU tier.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    let configVersionId = activeConfig.id;
+    try {
+      const overrideId = await maybeCreateOverrideConfig({
+        projectId: activeProjectId,
+        activeConfig,
+        environment,
+        modalGpuType,
+        saveConfig: saveConfig.mutateAsync,
+      });
+      if (overrideId !== null) {
+        configVersionId = overrideId;
+      }
+    } catch (cause) {
+      toast({
+        title: "Could not prepare config override",
+        description: describeApiError({ cause, fallback: "Failed to save config override." }),
+        variant: "destructive",
+      });
+      return;
+    }
+
     createRunMutation.mutate(
-      { projectId: activeProjectId, configVersionId: activeConfig.id },
+      { projectId: activeProjectId, configVersionId },
       {
         onSuccess: (newRun) => {
           setSelectedRunId(newRun.id);
@@ -308,7 +440,9 @@ export default function RunsPage(): React.JSX.Element {
           <Button
             variant="primary"
             size="sm"
-            onClick={handleStartRun}
+            onClick={() => {
+              void handleStartRun();
+            }}
             disabled={!canStartRun || createRunMutation.isPending}
           >
             <Play aria-hidden="true" />
@@ -377,7 +511,9 @@ export default function RunsPage(): React.JSX.Element {
             isDeletingRunId={
               deleteRunMutation.isPending ? (deleteRunMutation.variables?.runId ?? null) : null
             }
-            onStartRun={handleStartRun}
+            onStartRun={() => {
+              void handleStartRun();
+            }}
             isStartingRun={createRunMutation.isPending}
             canStartRun={canStartRun}
           />
@@ -387,6 +523,9 @@ export default function RunsPage(): React.JSX.Element {
       {selectedRun ? (
         <>
           {selectedRun.status === "failed" ? <FailurePanel run={selectedRun} /> : null}
+          {selectedRun.attempts.length > 1 ? (
+            <RunAttemptsStrip attempts={selectedRun.attempts} />
+          ) : null}
           <Tabs defaultValue="timeline" className="mt-2">
             <TabsList>
               <TabsTrigger value="timeline">Timeline</TabsTrigger>
@@ -459,6 +598,19 @@ export default function RunsPage(): React.JSX.Element {
         onClose={() => setIsResumeDialogOpen(false)}
         isResuming={resumeRun.isPending}
       />
+
+      {activeProjectId && selectedRunId ? (
+        <RunFallbackDialog
+          isOpen={fallbackProposal !== null}
+          projectId={activeProjectId}
+          runId={selectedRunId}
+          maxRunMinutes={maxRunMinutes}
+          proposal={fallbackProposal}
+          onClose={() => {
+            if (selectedRunId) clearFallbackProposal(selectedRunId);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

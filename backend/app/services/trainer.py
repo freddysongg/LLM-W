@@ -97,6 +97,32 @@ _TARGET_FIELD_CANDIDATES: list[str] = [
     "label",
 ]
 
+_MESSAGES_COLUMN = "messages"
+
+
+class ChatTemplateMissingError(ValueError):
+    """Raised when a messages-shape dataset meets a tokenizer with no chat_template.
+
+    Base models that have not been chat-tuned ship without a chat_template, so
+    apply_chat_template would raise a low-level Jinja error mid-training. The
+    typed error lets the orchestrator surface an actionable message that names
+    the two remediation paths (chat-tuned base or custom template).
+    """
+
+
+def _is_messages_only_dataset(available_columns: list[str]) -> bool:
+    """Return True when the dataset has only the OpenAI messages column.
+
+    The sanitizer's normalize=true path rewrites every row to
+    ``{"messages": [...]}`` and drops the flat input/target fields, so a
+    presence-of-messages plus absence-of-any-flat-field check is enough to
+    route the row down the chat-template branch.
+    """
+    if _MESSAGES_COLUMN not in available_columns:
+        return False
+    flat_field_candidates = set(_INPUT_FIELD_CANDIDATES) | set(_TARGET_FIELD_CANDIDATES)
+    return not any(column in flat_field_candidates for column in available_columns)
+
 
 def _resolve_dataset_field(
     *,
@@ -922,19 +948,33 @@ def _stage_dataset_resolution(*, raw_config: dict[str, Any], tokenizer: Any) -> 
     return train_dataset, eval_dataset
 
 
-def _stage_dataset_profiling(*, train_dataset: Any, raw_config: dict[str, Any]) -> None:
+def _stage_dataset_profiling(
+    *, train_dataset: Any, tokenizer: Any, raw_config: dict[str, Any]
+) -> None:
     stage_name = "dataset_profiling"
     _emit_stage_enter(stage_name=stage_name, stage_order=5)
     t0 = time.monotonic()
 
     row_count = len(train_dataset)
+    available_columns: list[str] = list(train_dataset.column_names)
     input_field = raw_config.get("dataset", {}).get("input_field", "prompt")
+    is_messages_shape = _is_messages_only_dataset(available_columns)
 
     sample_count = min(100, row_count)
     lengths = []
     for i in range(sample_count):
         row = train_dataset[i]
-        text = str(row.get(input_field, ""))
+        if is_messages_shape:
+            messages = row.get(_MESSAGES_COLUMN, [])
+            try:
+                text = tokenizer.apply_chat_template(messages, tokenize=False)
+            except Exception:
+                # Profiling is a best-effort length estimate — if a row
+                # fails template rendering we still want the run to proceed
+                # to tokenization where the typed error surfaces properly.
+                text = ""
+        else:
+            text = str(row.get(input_field, ""))
         lengths.append(len(text.split()))
 
     avg_len = sum(lengths) / len(lengths) if lengths else 0
@@ -965,11 +1005,58 @@ def _stage_tokenization_preprocessing(
 
     preprocessing_cfg = raw_config.get("preprocessing", {})
     max_seq_length = preprocessing_cfg.get("max_seq_length", 512)
+    available_columns: list[str] = list(train_dataset.column_names)
+
+    if _is_messages_only_dataset(available_columns):
+        if not getattr(tokenizer, "chat_template", None):
+            error_msg = (
+                "Dataset is in the OpenAI messages format but the tokenizer has "
+                "no chat_template configured. Use a chat-tuned base model "
+                "(e.g. *-Instruct) or set tokenizer.chat_template to a custom "
+                "Jinja template before re-running."
+            )
+            _emit_stage_fail(stage_name=stage_name, error=error_msg)
+            raise ChatTemplateMissingError(error_msg)
+
+        _emit_log(
+            severity="info",
+            message=(
+                f"Tokenizing messages-shape dataset "
+                f"({len(train_dataset)} rows, max_seq_length={max_seq_length})"
+            ),
+            stage=stage_name,
+        )
+
+        def _tokenize_messages(batch: dict[str, list[Any]]) -> dict[str, list[Any]]:
+            messages_lists = batch.get(_MESSAGES_COLUMN, [])
+            texts = [
+                tokenizer.apply_chat_template(msgs, tokenize=False)
+                for msgs in messages_lists
+            ]
+            return tokenizer(
+                texts,
+                truncation=True,
+                max_length=max_seq_length,
+                padding=False,
+            )
+
+        train_tokenized = train_dataset.map(_tokenize_messages, batched=True)
+        eval_tokenized = (
+            eval_dataset.map(_tokenize_messages, batched=True) if eval_dataset else None
+        )
+
+        duration_ms = int((time.monotonic() - t0) * 1000)
+        _emit_stage_complete(
+            stage_name=stage_name,
+            duration_ms=duration_ms,
+            output_summary=f"max_seq_length={max_seq_length}, shape=messages",
+        )
+        return train_tokenized, eval_tokenized
+
     dataset_cfg = raw_config.get("dataset", {})
     input_field = dataset_cfg.get("input_field", "prompt")
     target_field = dataset_cfg.get("target_field", "response")
 
-    available_columns: list[str] = list(train_dataset.column_names)
     input_field = _resolve_dataset_field(
         configured=input_field,
         candidates=_INPUT_FIELD_CANDIDATES,
@@ -1398,7 +1485,9 @@ def main() -> int:
             return 0
 
         heartbeat_state["stage"] = "dataset_profiling"
-        _stage_dataset_profiling(train_dataset=train_dataset, raw_config=raw_config)
+        _stage_dataset_profiling(
+            train_dataset=train_dataset, tokenizer=tokenizer, raw_config=raw_config
+        )
         if _CANCEL_REQUESTED.is_set():
             _emit_complete(status="cancelled", final_metrics=final_metrics)
             return 0

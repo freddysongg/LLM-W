@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -21,7 +22,7 @@ from app.models.project import Project
 from app.models.suggestion import AISuggestion
 from app.schemas.config_version import ConfigVersionCreate
 from app.schemas.suggestion import SuggestionListResponse, SuggestionResponse
-from app.services import config_service
+from app.services import ai_rule_settings_service, config_service, notifications_service
 from app.services.ai_recommender import AISuggestionCreate, build_engine
 from app.services.settings_service import get_raw_api_key, get_settings
 
@@ -144,6 +145,11 @@ async def _store_suggestion(
         expected_effect=create.expected_effect,
         tradeoffs=create.tradeoffs,
         confidence=create.confidence,
+        confidence_per_action_json=(
+            json.dumps(create.confidence_per_action)
+            if create.confidence_per_action is not None
+            else None
+        ),
         risk_level=create.risk_level,
         status="pending",
         applied_config_version_id=None,
@@ -188,12 +194,18 @@ async def generate_suggestions(
         base_url=current_settings.ai_base_url,
     )
 
+    rule_settings = ai_rule_settings_service.get_rule_settings(
+        project_dir=Path(project.directory_path)
+    )
+    disabled_rules = ai_rule_settings_service.disabled_rule_names(rule_settings)
+
     creates = await engine.generate_recommendations(
         config=config,
         run_metrics=run_metrics,
         dataset_profile={},
         comparison_data=None,
         notes=notes,
+        disabled_rules=disabled_rules,
     )
 
     stored = []
@@ -207,6 +219,15 @@ async def generate_suggestions(
         stored.append(suggestion)
 
     await session.commit()
+
+    for suggestion in stored:
+        await notifications_service.create_notification(
+            session=session,
+            notification_type="ai_suggestion",
+            title="New AI suggestion",
+            subtitle=suggestion.expected_effect,
+        )
+
     return SuggestionListResponse(
         items=[_to_response(s) for s in stored],
         total=len(stored),

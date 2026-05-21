@@ -1,10 +1,18 @@
 import type {
+  DatasetFormatTag,
   DatasetProfile,
   DatasetResolveRequest,
   DatasetSamplesResponse,
   TokenStats,
   PreviewTransformRequest,
   PreviewTransformResponse,
+  SanitizeDatasetRequest,
+  SanitizeDatasetResponse,
+  SanitizeRedactionManifest,
+  SanitizeSourceFormat,
+  SanitizeSplitAssignment,
+  SanitizeSplitName,
+  SanitizeStatus,
 } from "@/types/dataset";
 import { fetchApi } from "./client";
 
@@ -12,6 +20,7 @@ interface RawDatasetProfile {
   readonly dataset_id: string;
   readonly source: string;
   readonly format: string;
+  readonly format_tag: string | null;
   readonly total_rows: number;
   readonly split_counts: {
     readonly train: number | null;
@@ -34,7 +43,16 @@ interface RawDatasetProfile {
   }>;
   readonly duplicate_count: number;
   readonly malformed_count: number;
+  readonly frozen_eval_splits: number;
+  readonly eval_leakage_count: number;
   readonly resolved_at: string;
+}
+
+function coerceFormatTag(raw: string | null): DatasetFormatTag | null {
+  if (raw === "chatml" || raw === "alpaca" || raw === "paired") {
+    return raw;
+  }
+  return null;
 }
 
 interface RawPreviewTransformResponse {
@@ -48,6 +66,7 @@ function normalizeProfile(raw: RawDatasetProfile): DatasetProfile {
     datasetId: raw.dataset_id,
     source: raw.source as DatasetProfile["source"],
     format: raw.format as DatasetProfile["format"],
+    formatTag: coerceFormatTag(raw.format_tag),
     totalRows: raw.total_rows,
     splitCounts: {
       train: raw.split_counts.train,
@@ -59,6 +78,8 @@ function normalizeProfile(raw: RawDatasetProfile): DatasetProfile {
     qualityWarnings: raw.quality_warnings,
     duplicateCount: raw.duplicate_count,
     malformedCount: raw.malformed_count,
+    frozenEvalSplits: raw.frozen_eval_splits,
+    evalLeakageCount: raw.eval_leakage_count,
     resolvedAt: raw.resolved_at,
   };
 }
@@ -123,6 +144,95 @@ export async function fetchTokenStats({ projectId }: { projectId: string }): Pro
   return fetchApi<TokenStats>({
     path: `/projects/${projectId}/datasets/token-stats`,
   });
+}
+
+interface RawSanitizeDatasetResponse {
+  readonly total_rows: number;
+  readonly sanitized_rows: ReadonlyArray<Record<string, unknown>>;
+  readonly manifest: {
+    readonly per_pattern: Record<string, number>;
+    readonly total_redactions: number;
+  };
+  readonly splits: {
+    readonly assignments: Record<string, SanitizeSplitName>;
+    readonly counts: Record<string, number>;
+  };
+  readonly content_hash: string;
+  readonly source_format: SanitizeSourceFormat;
+  readonly normalized: boolean;
+}
+
+function normalizeManifest(raw: RawSanitizeDatasetResponse["manifest"]): SanitizeRedactionManifest {
+  return {
+    perPattern: raw.per_pattern,
+    totalRedactions: raw.total_redactions,
+  };
+}
+
+function normalizeSplitAssignment(
+  raw: RawSanitizeDatasetResponse["splits"],
+): SanitizeSplitAssignment {
+  const assignments: Record<number, SanitizeSplitName> = {};
+  for (const [rawIndex, splitName] of Object.entries(raw.assignments)) {
+    const parsedIndex = Number.parseInt(rawIndex, 10);
+    if (Number.isFinite(parsedIndex)) {
+      assignments[parsedIndex] = splitName;
+    }
+  }
+  return { assignments, counts: raw.counts };
+}
+
+export async function sanitizeProjectDataset({
+  projectId,
+  request,
+}: {
+  projectId: string;
+  request: SanitizeDatasetRequest;
+}): Promise<SanitizeDatasetResponse> {
+  const raw = await fetchApi<RawSanitizeDatasetResponse>({
+    path: `/projects/${projectId}/datasets/sanitize`,
+    method: "POST",
+    body: {
+      split_ratios: {
+        train: request.splitRatios.train,
+        val: request.splitRatios.val,
+        test: request.splitRatios.test,
+      },
+      source_format: request.sourceFormat,
+      normalize: request.normalize,
+      persist: request.persist,
+    },
+  });
+  return {
+    totalRows: raw.total_rows,
+    sanitizedRows: raw.sanitized_rows,
+    manifest: normalizeManifest(raw.manifest),
+    splits: normalizeSplitAssignment(raw.splits),
+    contentHash: raw.content_hash,
+    sourceFormat: raw.source_format,
+    normalized: raw.normalized,
+  };
+}
+
+interface RawSanitizeStatusResponse {
+  readonly exists: boolean;
+  readonly content_hash: string | null;
+  readonly sanitized_at: string | null;
+}
+
+export async function fetchSanitizeStatus({
+  projectId,
+}: {
+  projectId: string;
+}): Promise<SanitizeStatus> {
+  const raw = await fetchApi<RawSanitizeStatusResponse>({
+    path: `/projects/${projectId}/datasets/sanitize/status`,
+  });
+  return {
+    exists: raw.exists,
+    contentHash: raw.content_hash,
+    sanitizedAt: raw.sanitized_at,
+  };
 }
 
 export async function previewTransform({

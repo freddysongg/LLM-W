@@ -6,31 +6,240 @@ import json
 import logging
 import os
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
 import modal
+import yaml
+
+from app.core.config import settings
+from app.core.modal_catalog import DEFAULT_MODAL_GPU_SPEC, MODAL_GPU_SPEC_MAP
 
 logger = logging.getLogger(__name__)
 
-_GPU_TYPE_MAP: dict[str, str] = {
-    "t4": "T4",
-    "a10": "A10G",
-    "a100-40gb": "A100",
-    "a100-80gb": "A100-80GB",
-    "h100": "H100",
-}
 
 _WORKSPACE_ROOT = "/workspace"
 _WORKSPACE_CONFIGS = f"{_WORKSPACE_ROOT}/configs"
 _WORKSPACE_DATASETS = f"{_WORKSPACE_ROOT}/datasets"
 
+_SANITIZED_DATASET_FILENAME = "sanitized.jsonl"
+_SANITIZED_MANIFEST_FILENAME = "sanitized.meta.json"
+
+
+class SanitizedArtifactMissingError(RuntimeError):
+    """Raised when the adapter cannot find a persisted sanitized dataset.
+
+    The orchestrator gate at `_require_sanitized_artifact` should catch this
+    earlier; this exception is the defense-in-depth check at the upload
+    boundary so raw datasets are never sent even if the gate is bypassed.
+    """
+
+
+@dataclass(frozen=True)
+class ModalUploadPlan:
+    """Files and directories the adapter will upload to the Modal volume.
+
+    Only the sanitized dataset artifact (and its optional manifest) is
+    uploaded under `datasets/`. The raw `datasets/` directory is never sent.
+    """
+
+    files: tuple[tuple[Path, str], ...]
+    directories: tuple[tuple[Path, str], ...]
+
+
+_MODAL_UPLOAD_STAGING_DIR = ".modal-uploads"
+
+
+def _rewrite_config_for_modal_upload(
+    *,
+    src_config_path: Path,
+    dst_path: Path,
+    normalized: bool | None = None,
+) -> None:
+    """Write a copy of the config whose dataset section points at the uploaded
+    sanitized artifact.
+
+    The remote trainer reads `dataset.source` / `dataset.dataset_id` from the
+    config we upload. Without this rewrite, a `local_jsonl` config would point
+    at a host path that does not exist in the Modal sandbox, and a
+    `huggingface` config would re-download the raw dataset, bypassing the
+    `sanitized_cloud` data policy.
+
+    `normalized` reflects the sanitizer manifest's `normalized` flag. Only when
+    `normalized is True` do we force `format="openai"` — otherwise the original
+    format is preserved (the sanitizer wrote rows in the source schema).
+    """
+    raw = yaml.safe_load(src_config_path.read_text(encoding="utf-8")) or {}
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"Config at {src_config_path} did not parse as a mapping (got {type(raw).__name__})."
+        )
+    dataset_section = raw.get("dataset", {})
+    if not isinstance(dataset_section, dict):
+        dataset_section = {}
+    rewritten_dataset: dict[str, object] = {
+        **dataset_section,
+        "source": "local_jsonl",
+        "dataset_id": f"{_WORKSPACE_DATASETS}/{_SANITIZED_DATASET_FILENAME}",
+    }
+    if normalized is True:
+        rewritten_dataset["format"] = "openai"
+    raw["dataset"] = rewritten_dataset
+    dst_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = dst_path.with_suffix(dst_path.suffix + ".tmp")
+    tmp_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    os.replace(tmp_path, dst_path)
+
+
+def build_modal_upload_plan(*, project_dir: Path, config_path: Path) -> ModalUploadPlan:
+    """Return the upload plan for a Modal cloud run.
+
+    Modal runs require `data_policy=sanitized_cloud`, which means a persisted
+    sanitized artifact at `datasets/sanitized.jsonl` must exist. Raises when
+    the artifact is absent so the upload pipeline cannot send raw data.
+    """
+    sanitized = project_dir / "datasets" / _SANITIZED_DATASET_FILENAME
+    if not sanitized.is_file():
+        raise SanitizedArtifactMissingError(
+            f"Modal upload requires a sanitized dataset artifact at {sanitized}. "
+            "Call POST /api/v1/projects/{project_id}/datasets/sanitize with "
+            "persist=true before launching the cloud run."
+        )
+    # Stage a rewritten config under project_dir/.modal-uploads/ so the
+    # uploaded file points dataset.source/dataset_id at the sanitized artifact
+    # instead of carrying the host's raw source. The remote name continues to
+    # match the original so the trainer's --config-path argument is unchanged.
+    staging_path = project_dir / _MODAL_UPLOAD_STAGING_DIR / config_path.name
+    normalized_flag = _read_sanitized_normalized_flag(project_dir=project_dir)
+    _rewrite_config_for_modal_upload(
+        src_config_path=config_path,
+        dst_path=staging_path,
+        normalized=normalized_flag,
+    )
+
+    files: list[tuple[Path, str]] = [
+        (staging_path, f"{_WORKSPACE_CONFIGS}/{config_path.name}"),
+        (sanitized, f"{_WORKSPACE_DATASETS}/{sanitized.name}"),
+    ]
+    manifest = project_dir / "datasets" / _SANITIZED_MANIFEST_FILENAME
+    if manifest.is_file():
+        files.append((manifest, f"{_WORKSPACE_DATASETS}/{manifest.name}"))
+    # Intentionally no directory uploads. Uploading project_dir/configs/ would
+    # clobber the rewritten config above with its raw-source original.
+    return ModalUploadPlan(files=tuple(files), directories=())
+
 
 def _workspace_checkpoints_path(run_id: str) -> str:
     # Matches the per-run layout used by the local trainer (trainer._run_checkpoints_dir)
     return f"{_WORKSPACE_ROOT}/runs/{run_id}/checkpoints"
+
+
+def translate_workspace_path(*, raw_path: str, project_dir: Path) -> str:
+    """Map a Modal sandbox path under /workspace to its host-side mirror.
+
+    The remote trainer emits checkpoint and artifact paths rooted at
+    ``/workspace`` because that's what it sees inside the Modal container.
+    ``_download_checkpoints`` materializes those files under
+    ``{project_dir}/runs/{run_id}/...`` after the run completes, so the DB row
+    that gets written from the event must already carry the eventual host path
+    — otherwise host-side consumers (MLX serving, merged-model creation,
+    resume-from-checkpoint) look under ``/workspace`` on a machine that has no
+    such directory.
+
+    Non-workspace paths pass through unchanged so this is safe to apply
+    indiscriminately to every event with a ``path`` field.
+    """
+    workspace_prefix = f"{_WORKSPACE_ROOT}/"
+    if not raw_path.startswith(workspace_prefix):
+        return raw_path
+    suffix = raw_path[len(workspace_prefix) :]
+    return str(project_dir / suffix)
+
+
+def translate_host_path_to_workspace(*, host_path: str, project_dir: Path) -> str:
+    """Inverse of ``translate_workspace_path`` — rewrite a host-mirror path
+    back to the ``/workspace`` path the Modal sandbox sees.
+
+    Stored ``run.last_checkpoint_path`` rows have been translated to the host
+    mirror by ``translate_workspace_path``, but an OOM fallback retry mounts
+    the same per-run Volume in a fresh sandbox and the trainer's
+    ``--resume-from-checkpoint`` argument needs the in-container path. Passing
+    the host path verbatim would dereference ``/Users/.../runs/...`` inside the
+    container, where that directory does not exist.
+
+    Paths outside the project directory pass through unchanged so this is safe
+    to apply unconditionally to any threaded checkpoint path.
+    """
+    project_str = str(project_dir).rstrip("/") + "/"
+    if not host_path.startswith(project_str):
+        return host_path
+    suffix = host_path[len(project_str) :]
+    return f"{_WORKSPACE_ROOT}/{suffix}"
+
+
+def _read_sanitized_content_hash(*, project_dir: Path) -> str | None:
+    """Return the sanitized artifact's content hash from its local manifest, if present.
+
+    The manifest is written next to `sanitized.jsonl` whenever the sanitizer
+    runs with persist=true. Absent manifest → caller must upload (no hash to
+    compare). Malformed manifest → treat as missing rather than crashing.
+    """
+    manifest_path = project_dir / "datasets" / _SANITIZED_MANIFEST_FILENAME
+    if not manifest_path.is_file():
+        return None
+    try:
+        parsed = json.loads(manifest_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    content_hash = parsed.get("content_hash")
+    if isinstance(content_hash, str) and content_hash:
+        return content_hash
+    return None
+
+
+def _read_sanitized_normalized_flag(*, project_dir: Path) -> bool | None:
+    """Return the sanitizer manifest's `normalized` boolean if present.
+
+    Returns None when the manifest is missing, malformed, or the key is absent
+    or non-boolean. Callers treat None as "do not assume openai shape" so the
+    rewritten config preserves the user's original `dataset.format`.
+    """
+    manifest_path = project_dir / "datasets" / _SANITIZED_MANIFEST_FILENAME
+    if not manifest_path.is_file():
+        return None
+    try:
+        parsed = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    value = parsed.get("normalized")
+    return value if isinstance(value, bool) else None
+
+
+def _remote_sanitized_hash_matches(*, volume: modal.Volume, expected_hash: str) -> bool:
+    """Return True iff the remote sanitized manifest carries the same content hash.
+
+    Best-effort: any read error means we fall through to the safer behavior of
+    re-uploading (returns False) rather than skipping an upload we should do.
+    """
+    remote_manifest = f"{_WORKSPACE_DATASETS}/{_SANITIZED_MANIFEST_FILENAME}"
+    try:
+        chunks = list(volume.read_file(remote_manifest))
+    except Exception:
+        return False
+    try:
+        raw = b"".join(chunks).decode("utf-8", errors="replace")
+        parsed = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return False
+    if not isinstance(parsed, dict):
+        return False
+    return parsed.get("content_hash") == expected_hash
 
 
 # backend/ is 4 levels up from this file (cloud/ -> services/ -> app/ -> backend/)
@@ -61,6 +270,29 @@ class TrainingProcess(Protocol):
     async def wait(self) -> int: ...
 
 
+# Cap on stderr tail captured for OOM detection. The detector only needs the
+# trailing message, and the orchestrator persists this string into the failure
+# reason — keeping it bounded prevents a 100MB stderr from blowing up the DB row.
+_STDERR_TAIL_MAX_BYTES: int = 4096
+
+# Packages installed into the Modal training image. `accelerate` is required by
+# the trainer's launch wrapper; `bitsandbytes` is required by QLoRA / 4-bit
+# quantization paths — without it `adapters.type=qlora` configs raise at model
+# resolution time even though the config validates locally.
+_TRAINING_IMAGE_PACKAGES: tuple[str, ...] = (
+    "torch>=2.2.0",
+    "transformers>=4.40.0",
+    "accelerate>=0.30.0",
+    "peft>=0.10.0",
+    "trl>=0.9.0",
+    "datasets>=2.0.0",
+    "bitsandbytes>=0.43.0",
+    "pyyaml>=6.0.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+)
+
+
 @dataclass(frozen=True)
 class ModalAdapterConfig:
     run_id: str
@@ -71,6 +303,9 @@ class ModalAdapterConfig:
     modal_token_secret: str
     heartbeat_path: Path
     heartbeat_interval_seconds: int = 10
+    sandbox_timeout_seconds: int = field(
+        default_factory=lambda: settings.max_sandbox_timeout_seconds
+    )
     resume_from_checkpoint: str | None = None
 
 
@@ -86,6 +321,47 @@ class ModalTrainingAdapter:
         self._exit_code: int | None = None
         self._heartbeat_task: asyncio.Task[None] | None = None
         self._volume: modal.Volume | None = None
+        # Surface trailing stderr and any Modal-specific exception class name so
+        # the orchestrator's OOM classifier can disambiguate container-OOM kills
+        # from generic exits.
+        self._stderr_tail: str = ""
+        self._exception_type_name: str | None = None
+
+    @property
+    def last_exit_code(self) -> int | None:
+        return self._exit_code
+
+    @property
+    def last_stderr_tail(self) -> str:
+        return self._stderr_tail
+
+    @property
+    def last_exception_type_name(self) -> str | None:
+        return self._exception_type_name
+
+    def _build_trainer_cmd(self) -> list[str]:
+        config_name = self._config.config_path.name
+        cmd: list[str] = [
+            "python",
+            "-u",
+            "-m",
+            "app.services.trainer",
+            "--run-id",
+            self._config.run_id,
+            "--config-path",
+            f"{_WORKSPACE_CONFIGS}/{config_name}",
+            "--project-dir",
+            _WORKSPACE_ROOT,
+            "--heartbeat-interval",
+            str(self._config.heartbeat_interval_seconds),
+        ]
+        if self._config.resume_from_checkpoint is not None:
+            workspace_resume = translate_host_path_to_workspace(
+                host_path=self._config.resume_from_checkpoint,
+                project_dir=self._config.project_dir,
+            )
+            cmd += ["--resume-from-checkpoint", workspace_resume]
+        return cmd
 
     async def start(self) -> None:
         os.environ["MODAL_TOKEN_ID"] = self._config.modal_token_id
@@ -103,31 +379,21 @@ class ModalTrainingAdapter:
             ignore=_should_ignore_backend_path,
         )
 
-        gpu_spec = _GPU_TYPE_MAP.get(self._config.gpu_type, "T4")
+        gpu_spec = MODAL_GPU_SPEC_MAP.get(self._config.gpu_type, DEFAULT_MODAL_GPU_SPEC)
+        # Clamp to a sane bound — a misconfigured timeout shouldn't be able to
+        # request a sandbox lifetime longer than Modal will actually allow.
+        timeout_seconds = min(
+            max(self._config.sandbox_timeout_seconds, 60),
+            settings.max_sandbox_timeout_seconds,
+        )
         self._sandbox = await modal.Sandbox.create.aio(
             image=image,
             gpu=gpu_spec,
             volumes={_WORKSPACE_ROOT: self._volume},
-            timeout=6 * 3600,
+            timeout=timeout_seconds,
         )
 
-        config_name = self._config.config_path.name
-        cmd = [
-            "python",
-            "-u",
-            "-m",
-            "app.services.trainer",
-            "--run-id",
-            self._config.run_id,
-            "--config-path",
-            f"{_WORKSPACE_CONFIGS}/{config_name}",
-            "--project-dir",
-            _WORKSPACE_ROOT,
-            "--heartbeat-interval",
-            str(self._config.heartbeat_interval_seconds),
-        ]
-        if self._config.resume_from_checkpoint is not None:
-            cmd += ["--resume-from-checkpoint", self._config.resume_from_checkpoint]
+        cmd = self._build_trainer_cmd()
 
         self._process = await self._sandbox.exec.aio(*cmd)
         self._stdout_aiter = self._process.stdout.__aiter__()
@@ -145,6 +411,7 @@ class ModalTrainingAdapter:
                     continue
                 try:
                     parsed: dict[str, object] = json.loads(stripped)
+                    self._rewrite_event_paths(event=parsed)
                     return parsed
                 except json.JSONDecodeError:
                     return {
@@ -157,6 +424,24 @@ class ModalTrainingAdapter:
             except (StopAsyncIteration, StopIteration):
                 self._stdout_aiter = None
                 return None
+
+    def _rewrite_event_paths(self, *, event: dict[str, object]) -> None:
+        """Translate any /workspace paths in checkpoint/artifact events in place.
+
+        The orchestrator persists ``event["path"]`` directly into
+        ``runs.last_checkpoint_path`` (checkpoint) or the artifacts table
+        (artifact). Rewriting here means every downstream consumer reads the
+        eventual host path rather than the unreachable sandbox path.
+        """
+        if event.get("type") not in ("checkpoint", "artifact"):
+            return
+        raw_path = event.get("path")
+        if not isinstance(raw_path, str):
+            return
+        event["path"] = translate_workspace_path(
+            raw_path=raw_path,
+            project_dir=self._config.project_dir,
+        )
 
     async def cancel(self) -> None:
         self._is_terminated = True
@@ -183,7 +468,21 @@ class ModalTrainingAdapter:
 
     async def wait(self) -> int:
         if self._process is not None:
-            self._exit_code = await self._process.wait.aio()
+            try:
+                self._exit_code = await self._process.wait.aio()
+            except Exception as exc:
+                # Modal raises typed exceptions for sandbox-level failures (e.g.
+                # OOM kills, infra timeouts). Capture the class name so the
+                # orchestrator can classify the failure without speculating on
+                # Modal's internal exception class hierarchy.
+                self._exception_type_name = type(exc).__name__
+                logger.warning(
+                    "Modal process.wait failed for run %s: %s",
+                    self._config.run_id,
+                    type(exc).__name__,
+                    exc_info=True,
+                )
+            await self._capture_stderr_tail()
         if self._heartbeat_task is not None:
             self._heartbeat_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -195,35 +494,60 @@ class ModalTrainingAdapter:
                 await self._sandbox.terminate.aio()
         return self._exit_code if self._exit_code is not None else 1
 
+    async def _capture_stderr_tail(self) -> None:
+        if self._process is None:
+            return
+        stderr_stream = getattr(self._process, "stderr", None)
+        if stderr_stream is None:
+            return
+        try:
+            chunks: list[str] = []
+            async for line in stderr_stream:
+                text = line if isinstance(line, str) else line.decode("utf-8", errors="replace")
+                chunks.append(text)
+            if chunks:
+                self._stderr_tail = "".join(chunks)[-_STDERR_TAIL_MAX_BYTES:]
+        except Exception:
+            logger.debug(
+                "Failed to read Modal stderr for run %s",
+                self._config.run_id,
+                exc_info=True,
+            )
+
     async def _upload_training_data(self, *, volume: modal.Volume) -> None:
-        config_path = self._config.config_path
-        project_dir = self._config.project_dir
-        datasets_dir = project_dir / "datasets"
-        configs_dir = project_dir / "configs"
+        plan = build_modal_upload_plan(
+            project_dir=self._config.project_dir,
+            config_path=self._config.config_path,
+        )
 
         loop = asyncio.get_running_loop()
+        local_hash = _read_sanitized_content_hash(project_dir=self._config.project_dir)
 
         def _sync_upload() -> None:
+            # On retry, the sandbox is new but the named Volume persists. Skip
+            # re-uploading the sanitized artifact if its content hash matches the
+            # one already on the volume — uploads are network-expensive and the
+            # artifact is immutable per spec.
+            if local_hash is not None and _remote_sanitized_hash_matches(
+                volume=volume, expected_hash=local_hash
+            ):
+                logger.info(
+                    "Skipping sanitized artifact upload for run %s — volume hash matches",
+                    self._config.run_id,
+                )
+                return
             with volume.batch_upload() as batch:
-                batch.put_file(str(config_path), f"{_WORKSPACE_CONFIGS}/{config_path.name}")
-                if datasets_dir.exists():
-                    batch.put_directory(str(datasets_dir), _WORKSPACE_DATASETS)
-                if configs_dir.exists():
-                    batch.put_directory(str(configs_dir), _WORKSPACE_CONFIGS)
+                for local, remote in plan.files:
+                    batch.put_file(str(local), remote)
+                for local_dir, remote_dir in plan.directories:
+                    batch.put_directory(str(local_dir), remote_dir)
 
         await loop.run_in_executor(None, _sync_upload)
 
     @staticmethod
     def _build_training_image() -> modal.Image:
         return modal.Image.debian_slim(python_version="3.11").pip_install(
-            "torch>=2.2.0",
-            "transformers>=4.40.0",
-            "peft>=0.10.0",
-            "trl>=0.9.0",
-            "datasets>=2.0.0",
-            "pyyaml>=6.0.0",
-            "pydantic>=2.0.0",
-            "pydantic-settings>=2.0.0",
+            *_TRAINING_IMAGE_PACKAGES,
         )
 
     async def _synthesize_heartbeats(self) -> None:

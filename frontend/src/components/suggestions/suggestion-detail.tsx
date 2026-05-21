@@ -8,6 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { ActionCard } from "./action-card";
 import { EvidenceList } from "./evidence-list";
+import { SuggestionChatPanel } from "./suggestion-chat-panel";
 
 interface SuggestionDetailProps {
   readonly suggestion: AISuggestion;
@@ -18,8 +19,21 @@ interface SuggestionDetailProps {
 }
 
 const OPT_LABELS = ["A", "B", "C", "D"] as const;
-// TODO(P8): action-impact bars use a static curve until a confidence field per action is returned -- remove when API exposes it
-const DEFAULT_IMPACTS: ReadonlyArray<number> = [0.82, 0.64, 0.48, 0.38];
+const FALLBACK_IMPACTS: ReadonlyArray<number> = [0.82, 0.64, 0.48, 0.38];
+const FALLBACK_TAIL_IMPACT = 0.4;
+
+function impactFor({
+  confidencePerAction,
+  index,
+}: {
+  confidencePerAction: ReadonlyArray<number> | null;
+  index: number;
+}): number {
+  if (confidencePerAction && index < confidencePerAction.length) {
+    return confidencePerAction[index];
+  }
+  return FALLBACK_IMPACTS[index] ?? FALLBACK_TAIL_IMPACT;
+}
 
 const SEVERITY_COLOR: Record<RiskLevel | "default", string> = {
   high: "var(--danger)",
@@ -74,22 +88,37 @@ export function SuggestionDetail({
   onReject,
 }: SuggestionDetailProps): React.JSX.Element {
   const { toast } = useToast();
-  const { id, status, rationale, expectedEffect, tradeoffs, riskLevel, configDiff, evidence } =
-    suggestion;
+  const [isChatOpen, setIsChatOpen] = React.useState<boolean>(false);
+  const {
+    id,
+    projectId,
+    status,
+    rationale,
+    expectedEffect,
+    tradeoffs,
+    riskLevel,
+    configDiff,
+    evidence,
+    confidencePerAction,
+  } = suggestion;
 
   const canAct = status === "pending";
   const variant = severityVariant(riskLevel);
   const bulletColor = severityBulletColor(riskLevel);
 
+  React.useEffect(() => {
+    setIsChatOpen(false);
+  }, [id]);
+
   const actions = React.useMemo(() => {
     return Object.entries(configDiff).map(([key, change], index) => ({
       key,
       optLabel: OPT_LABELS[index] ?? "·",
-      impact: DEFAULT_IMPACTS[index] ?? 0.4,
+      impact: impactFor({ confidencePerAction, index }),
       label: key,
       patch: formatPatch(key, change.suggested),
     }));
-  }, [configDiff]);
+  }, [configDiff, confidencePerAction]);
 
   const handlePreview = (actionKey: string): void => {
     toast({ title: "Previewed", description: `Previewing change to ${actionKey}.` });
@@ -191,19 +220,22 @@ export function SuggestionDetail({
           claude-sonnet-4-5 · offline analysis
         </span>
         <Button
-          variant="outline"
+          variant={isChatOpen ? "primary" : "outline"}
           size="sm"
-          onClick={() =>
-            toast({
-              title: "Ask Claude",
-              description: "Conversational follow-up is not yet wired.",
-            })
-          }
+          onClick={() => setIsChatOpen((open) => !open)}
+          aria-expanded={isChatOpen}
         >
           <MessageSquare aria-hidden="true" />
-          Ask Claude
+          {isChatOpen ? "Hide chat" : "Ask Claude"}
         </Button>
       </CardFooter>
+      {isChatOpen ? (
+        <SuggestionChatPanel
+          projectId={projectId}
+          suggestionId={id}
+          onClose={() => setIsChatOpen(false)}
+        />
+      ) : null}
     </Card>
   );
 }

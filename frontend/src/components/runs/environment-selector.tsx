@@ -1,7 +1,7 @@
 import * as React from "react";
 import { AlertCircle } from "lucide-react";
 import { Link } from "react-router-dom";
-import { MODAL_GPU_OPTIONS } from "@/api/cloud";
+import { useModalGpus } from "@/hooks/useCatalog";
 import type { ModalGpuType, TrainingEnvironment } from "@/types/config";
 import {
   Select,
@@ -26,7 +26,9 @@ export function EnvironmentSelector({
   onModalGpuTypeChange,
   isModalTokenSet,
 }: EnvironmentSelectorProps): React.JSX.Element {
+  const { data: gpuOptions, isLoading: isLoadingGpuOptions } = useModalGpus();
   const isModalMissingToken = environment === "modal" && !isModalTokenSet;
+  const shouldShowGpuPicker = environment === "modal" && isModalTokenSet;
 
   return (
     <div className="flex items-center gap-3">
@@ -58,7 +60,13 @@ export function EnvironmentSelector({
         </div>
       ) : null}
 
-      {environment === "modal" && isModalTokenSet ? (
+      {shouldShowGpuPicker && gpuOptions === undefined ? (
+        <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-ink-3">
+          {isLoadingGpuOptions ? "loading gpus…" : "gpus unavailable"}
+        </span>
+      ) : null}
+
+      {shouldShowGpuPicker && gpuOptions !== undefined ? (
         <div className="flex items-center gap-2">
           <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-ink-3">gpu</span>
           <Select
@@ -69,12 +77,12 @@ export function EnvironmentSelector({
               <SelectValue placeholder="Select GPU tier" />
             </SelectTrigger>
             <SelectContent>
-              {MODAL_GPU_OPTIONS.map(({ value, label, pricePerHour }) => (
-                <SelectItem key={value} value={value}>
+              {gpuOptions.map(({ gpuType, label, rateUsdHr }) => (
+                <SelectItem key={gpuType} value={gpuType}>
                   <span className="flex w-full items-center justify-between gap-4">
                     <span>{label}</span>
                     <span className="font-mono text-[10px] text-ink-3">
-                      ${pricePerHour.toFixed(2)}/hr
+                      ${rateUsdHr.toFixed(2)}/hr
                     </span>
                   </span>
                 </SelectItem>

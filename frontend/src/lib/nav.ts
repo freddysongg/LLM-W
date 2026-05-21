@@ -11,6 +11,7 @@ import {
   ClipboardCheck,
   Sparkles,
   Archive,
+  Mic,
   Settings,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -28,6 +29,7 @@ export type NavIcon =
   | "clipboard"
   | "sparkle"
   | "archive"
+  | "mic"
   | "cog";
 
 export interface NavItem {
@@ -56,6 +58,7 @@ export const NAV_ICON_COMPONENTS: Record<NavIcon, LucideIcon> = {
   clipboard: ClipboardCheck,
   sparkle: Sparkles,
   archive: Archive,
+  mic: Mic,
   cog: Settings,
 };
 
@@ -100,6 +103,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     items: [
       { label: "AI Suggestions", path: "/suggestions", icon: "sparkle" },
       { label: "Artifacts", path: "/artifacts", icon: "archive" },
+      { label: "Voice demo", path: "/voice-demo", icon: "mic" },
     ],
   },
 ];
@@ -123,6 +127,7 @@ const CRUMB_LEAF_BY_PATH: Record<string, string> = {
   "/eval": "Evaluation",
   "/suggestions": "AI Suggestions",
   "/artifacts": "Artifacts",
+  "/voice-demo": "Voice demo",
   "/settings": "Settings",
 };
 

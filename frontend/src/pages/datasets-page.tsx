@@ -1,13 +1,23 @@
 import * as React from "react";
-import { Check, Download, Eye, Pencil, Plus } from "lucide-react";
+import { Check, Download, Eye, Plus, ShieldCheck } from "lucide-react";
 import { useAppStore } from "@/stores/app-store";
-import { useDatasetProfile, useResolveDataset } from "@/hooks/useDatasetProfile";
+import {
+  useDatasetProfile,
+  useResolveDataset,
+  useSanitizeProjectDataset,
+  useSanitizeStatus,
+} from "@/hooks/useDatasetProfile";
 import { useDatasetSamples, usePreviewTransform } from "@/hooks/useDatasetSamples";
 import { useToast } from "@/hooks/use-toast";
+import { describeApiError } from "@/lib/api-error";
 import type {
+  DatasetFormatTag,
   DatasetProfile,
   DatasetResolveRequest,
   PreviewTransformResponse,
+  SanitizeDatasetRequest,
+  SanitizeSourceFormat,
+  SanitizeSplitRatios,
 } from "@/types/dataset";
 import type { DatasetFormat, DatasetSource } from "@/types/config";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -29,7 +39,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Slider } from "@/components/ui/slider";
 import { DatasetSourceSelector } from "@/components/dataset/dataset-source-selector";
 import { DatasetIdInput } from "@/components/dataset/dataset-id-input";
 import { FormatSelector } from "@/components/dataset/format-selector";
@@ -49,23 +58,31 @@ import { Callout } from "@/components/shared/callout";
 import { BigMetric } from "@/components/shared/big-metric";
 import { RangePills } from "@/components/shared/range-pills";
 
-type DialogKind = "add" | "validate" | "inspect" | "splits" | null;
+type DialogKind = "add" | "validate" | "inspect" | null;
 
 type LibraryFormatFilter = "all" | "chatml" | "alpaca" | "paired";
 
 type AddDatasetSplitMode = "auto" | "manual" | "single";
 
-// TODO(datasets-realign): the four visible source pills are UI-only; only `huggingface` and `upload-file` map to real backend sources today -- remove when the backend DatasetSource union grows s3/gcs/url support
-type AddSourceOption = "huggingface" | "upload-file" | "s3-gcs" | "url";
+type AddSourceOption = "huggingface" | "upload-file";
 
 interface LibraryEntry {
   readonly name: string;
   readonly format: DatasetFormat;
+  readonly formatTag: DatasetFormatTag | null;
+  readonly source: DatasetSource;
   readonly rows: string;
   readonly size: string;
   readonly isFrozen: boolean;
   readonly isActive: boolean;
 }
+
+const SOURCE_PILL_LABEL: Readonly<Record<DatasetSource, string>> = {
+  huggingface: "HF",
+  local_jsonl: "local jsonl",
+  local_csv: "local csv",
+  custom: "custom",
+};
 
 interface AddDatasetDraft {
   readonly sourceMode: AddSourceOption;
@@ -81,20 +98,8 @@ interface AddSourceMeta {
   readonly cliSourceFlag: string;
 }
 
-interface SplitDraft {
-  readonly train: number;
-  readonly val: number;
-  readonly test: number;
-  readonly seed: number;
-}
-
 interface BuildLibraryParams {
   readonly profile: DatasetProfile | null;
-}
-
-interface ApplyTrainRatioParams {
-  readonly train: number;
-  readonly current: SplitDraft;
 }
 
 const LIBRARY_ROW_COLUMNS = "18px minmax(0,1fr) 72px 64px 28px";
@@ -119,8 +124,6 @@ const ADD_SOURCE_PILLS: ReadonlyArray<{
 }> = [
   { value: "huggingface", label: "HuggingFace" },
   { value: "upload-file", label: "Upload file" },
-  { value: "s3-gcs", label: "S3 / GCS" },
-  { value: "url", label: "URL" },
 ];
 
 const ADD_SOURCE_META: Record<AddSourceOption, AddSourceMeta> = {
@@ -136,30 +139,14 @@ const ADD_SOURCE_META: Record<AddSourceOption, AddSourceMeta> = {
     placeholder: "./datasets/my-data.jsonl",
     cliSourceFlag: "local",
   },
-  "s3-gcs": {
-    label: "S3 / GCS",
-    fieldLabel: "S3 / GCS URI",
-    placeholder: "s3://bucket/path/data.jsonl",
-    cliSourceFlag: "s3",
-  },
-  url: {
-    label: "URL",
-    fieldLabel: "URL",
-    placeholder: "https://example.com/data.jsonl",
-    cliSourceFlag: "url",
-  },
 };
 
-// TODO(datasets-realign): only `huggingface` and `upload-file` have backend support today; s3/gcs and url fall through to a toast stub -- remove when ingestion for cloud sources exists
-function resolveIngestSource(sourceMode: AddSourceOption): DatasetSource | null {
+function resolveIngestSource(sourceMode: AddSourceOption): DatasetSource {
   switch (sourceMode) {
     case "huggingface":
       return "huggingface";
     case "upload-file":
       return "local_jsonl";
-    case "s3-gcs":
-    case "url":
-      return null;
     default: {
       const exhaustiveCheck: never = sourceMode;
       return exhaustiveCheck;
@@ -194,13 +181,6 @@ const DEFAULT_ADD_DRAFT: AddDatasetDraft = {
   splitMode: "auto",
 };
 
-const DEFAULT_SPLIT_DRAFT: SplitDraft = {
-  train: 90,
-  val: 8,
-  test: 2,
-  seed: 42,
-};
-
 function formatRowCount(count: number): string {
   return count.toLocaleString();
 }
@@ -218,9 +198,11 @@ function buildLibraryEntries({ profile }: BuildLibraryParams): ReadonlyArray<Lib
     {
       name: profile.datasetId,
       format: profile.format,
+      formatTag: profile.formatTag,
+      source: profile.source,
       rows: formatRowCount(profile.totalRows),
       size: estimateSizeLabel(profile.totalRows),
-      isFrozen: false,
+      isFrozen: profile.frozenEvalSplits > 0,
       isActive: true,
     },
   ];
@@ -238,14 +220,49 @@ function computeStddev(stats: {
   return Math.round(Math.max(medianGap, spread));
 }
 
-function normalizeTrain({ train, current }: ApplyTrainRatioParams): SplitDraft {
-  const clampedTrain = Math.max(0, Math.min(100, train));
-  const remainder = 100 - clampedTrain;
-  const previousNonTrainTotal = current.val + current.test;
-  const valShare = previousNonTrainTotal > 0 ? current.val / previousNonTrainTotal : 0.8;
-  const nextVal = Math.round(remainder * valShare);
-  const nextTest = remainder - nextVal;
-  return { ...current, train: clampedTrain, val: nextVal, test: nextTest };
+const SANITIZE_FALLBACK_SPLIT_RATIOS: SanitizeSplitRatios = {
+  train: 0.8,
+  val: 0.1,
+  test: 0.1,
+};
+
+interface ToSanitizeSplitParams {
+  readonly trainPercent: number | null;
+  readonly valPercent: number | null;
+  readonly testPercent: number | null;
+}
+
+function toSanitizeSplitRatios({
+  trainPercent,
+  valPercent,
+  testPercent,
+}: ToSanitizeSplitParams): SanitizeSplitRatios {
+  const train = trainPercent ?? 0;
+  const val = valPercent ?? 0;
+  const test = testPercent ?? 0;
+  const total = train + val + test;
+  if (total <= 0) return SANITIZE_FALLBACK_SPLIT_RATIOS;
+  return {
+    train: train / total,
+    val: val / total,
+    test: test / total,
+  };
+}
+
+function toSanitizeSourceFormat(format: DatasetFormat): SanitizeSourceFormat {
+  switch (format) {
+    case "default":
+    case "openai":
+    case "sharegpt":
+    case "alpaca":
+      return format;
+    case "custom":
+      return "default";
+    default: {
+      const exhaustiveCheck: never = format;
+      return exhaustiveCheck;
+    }
+  }
 }
 
 export default function DatasetsPage(): React.JSX.Element {
@@ -255,10 +272,8 @@ export default function DatasetsPage(): React.JSX.Element {
     null,
   );
   const [activeDialog, setActiveDialog] = React.useState<DialogKind>(null);
-  // TODO(datasets-realign): backend profile has no format taxonomy matching chatml/alpaca/paired -- remove when /api/v1/datasets/profile returns a dataset-format tag aligned with mock filter
   const [formatFilter, setFormatFilter] = React.useState<LibraryFormatFilter>("all");
   const [addDraft, setAddDraft] = React.useState<AddDatasetDraft>(DEFAULT_ADD_DRAFT);
-  const [splitDraft, setSplitDraft] = React.useState<SplitDraft>(DEFAULT_SPLIT_DRAFT);
 
   const projectId = activeProjectId ?? "";
   const {
@@ -275,6 +290,8 @@ export default function DatasetsPage(): React.JSX.Element {
   });
 
   const previewTransform = usePreviewTransform({ projectId });
+  const sanitizeDataset = useSanitizeProjectDataset({ projectId });
+  const { data: sanitizeStatus } = useSanitizeStatus({ projectId });
 
   React.useEffect(() => {
     if (profile && !datasetForm.datasetId) {
@@ -327,31 +344,74 @@ export default function DatasetsPage(): React.JSX.Element {
     );
   };
 
-  const handleIngestSubmit = (): void => {
-    const resolvedSource = resolveIngestSource(addDraft.sourceMode);
-    const { label: sourceLabel } = ADD_SOURCE_META[addDraft.sourceMode];
-    if (resolvedSource === null) {
-      // TODO(datasets-realign): stub-only branch for s3/gcs/url -- remove when /api/v1/datasets/ingest supports cloud sources
-      toast({
-        title: "Coming soon",
-        description: `${sourceLabel} ingestion is not wired up yet.`,
-      });
-      return;
-    }
-    setActiveDialog(null);
-    // TODO(datasets-realign): wire to real ingestion API -- remove when /api/v1/datasets/ingest lands; today users must still use the inline Dataset configuration form on the page
-    toast({
-      title: "Dataset queued for ingest",
-      description: `${resolvedSource} · ${addDraft.path || "<path>"}`,
+  const handleSanitize = (): void => {
+    if (!profile) return;
+    const request: SanitizeDatasetRequest = {
+      splitRatios: toSanitizeSplitRatios({
+        trainPercent: datasetForm.trainRatio,
+        valPercent: datasetForm.valRatio,
+        testPercent: datasetForm.testRatio,
+      }),
+      sourceFormat: toSanitizeSourceFormat(datasetForm.format),
+      normalize: true,
+      persist: true,
+    };
+    sanitizeDataset.mutate(request, {
+      onSuccess: ({ totalRows, sanitizedRows, manifest }) => {
+        const droppedRows = Math.max(0, totalRows - sanitizedRows.length);
+        toast({
+          title: "Dataset sanitized",
+          description: `Sanitized ${sanitizedRows.length.toLocaleString()} rows, dropped ${droppedRows.toLocaleString()} · ${manifest.totalRedactions.toLocaleString()} redactions.`,
+        });
+      },
+      onError: (cause) => {
+        toast({
+          title: "Sanitize failed",
+          description: describeApiError({
+            cause,
+            fallback: "Could not sanitize dataset for cloud upload.",
+          }),
+          variant: "destructive",
+        });
+      },
     });
   };
 
-  const handleApplySplits = (): void => {
-    setActiveDialog(null);
-    // TODO(datasets-realign): persist splits to backend -- remove when /api/v1/datasets/splits endpoint lands; today the split ratios round-trip through the resolve request, not a standalone splits endpoint
-    toast({
-      title: "Splits applied locally",
-      description: `${splitDraft.train}/${splitDraft.val}/${splitDraft.test} · seed ${splitDraft.seed}`,
+  const handleIngestSubmit = (): void => {
+    const trimmedPath = addDraft.path.trim();
+    if (!trimmedPath) return;
+    const request: DatasetResolveRequest = {
+      source: resolveIngestSource(addDraft.sourceMode),
+      datasetId: trimmedPath,
+      subset: null,
+      trainSplit: "train",
+      evalSplit: null,
+      format: addDraft.format,
+      formatMapping: null,
+      maxSamples: null,
+      trainRatio: null,
+      valRatio: null,
+      testRatio: null,
+    };
+    resolveDataset.mutate(request, {
+      onSuccess: (resolvedProfile) => {
+        setActiveDialog(null);
+        setAddDraft(DEFAULT_ADD_DRAFT);
+        toast({
+          title: "Dataset resolved",
+          description: `${resolvedProfile.datasetId} · ${formatRowCount(resolvedProfile.totalRows)} rows`,
+        });
+      },
+      onError: (cause) => {
+        toast({
+          title: "Resolve failed",
+          description: describeApiError({
+            cause,
+            fallback: "Could not resolve dataset.",
+          }),
+          variant: "destructive",
+        });
+      },
     });
   };
 
@@ -361,7 +421,10 @@ export default function DatasetsPage(): React.JSX.Element {
     [profile],
   );
 
-  const filteredLibraryEntries = libraryEntries;
+  const filteredLibraryEntries = React.useMemo(() => {
+    if (formatFilter === "all") return libraryEntries;
+    return libraryEntries.filter((entry) => entry.formatTag === formatFilter);
+  }, [libraryEntries, formatFilter]);
   const activeEntryName = filteredLibraryEntries[0]?.name ?? null;
 
   if (!activeProjectId) {
@@ -387,8 +450,7 @@ export default function DatasetsPage(): React.JSX.Element {
         max: tokenStats.max,
       }).toLocaleString()
     : "—";
-  // TODO(datasets-realign): frozen eval split count has no backing field -- remove when DatasetProfile exposes frozenEvalSplits
-  const frozenEvalSplitCount = 0;
+  const frozenEvalSplitCount = profile?.frozenEvalSplits ?? 0;
 
   const inspectCode = profile
     ? JSON.stringify(
@@ -415,9 +477,26 @@ export default function DatasetsPage(): React.JSX.Element {
           <p className="font-mono text-[11px] text-ink-3">
             {libraryEntries.length} dataset{libraryEntries.length === 1 ? "" : "s"} · {sizeLabel}{" "}
             total · {frozenEvalSplitCount} frozen eval split
+            {frozenEvalSplitCount === 1 ? "" : "s"}
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {sanitizeStatus !== undefined ? (
+            <Badge variant={sanitizeStatus.exists ? "secondary" : "outline"} className="text-xs">
+              {sanitizeStatus.exists && sanitizeStatus.contentHash !== null
+                ? `sanitized · ${sanitizeStatus.contentHash.slice(0, 7)}`
+                : "not sanitized"}
+            </Badge>
+          ) : null}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleSanitize}
+            disabled={!profile || sanitizeDataset.isPending}
+          >
+            <ShieldCheck className="size-3" aria-hidden="true" />
+            {sanitizeDataset.isPending ? "Sanitizing…" : "Sanitize for cloud"}
+          </Button>
           <Button variant="outline" size="sm" onClick={() => setActiveDialog("inspect")}>
             <Eye className="size-3" aria-hidden="true" />
             Inspect
@@ -459,6 +538,9 @@ export default function DatasetsPage(): React.JSX.Element {
                           <span className="truncate font-mono text-[12px] text-ink-1">
                             {entry.name}
                           </span>
+                          <Badge variant="outline" className="text-[10px]">
+                            {SOURCE_PILL_LABEL[entry.source]}
+                          </Badge>
                           {isSelected ? <Badge variant="iris">ACTIVE</Badge> : null}
                         </div>
                         <div className="truncate font-mono text-[10px] text-ink-3">
@@ -488,10 +570,6 @@ export default function DatasetsPage(): React.JSX.Element {
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Button variant="outline" size="sm" onClick={() => setActiveDialog("splits")}>
-                    <Pencil className="size-3" aria-hidden="true" />
-                    Splits
-                  </Button>
                   <Button variant="outline" size="sm" onClick={() => setActiveDialog("validate")}>
                     <Check className="size-3" aria-hidden="true" />
                     Validate
@@ -617,18 +695,10 @@ export default function DatasetsPage(): React.JSX.Element {
       <AddDatasetDialog
         isOpen={activeDialog === "add"}
         draft={addDraft}
+        isPending={resolveDataset.isPending}
         onDraftChange={setAddDraft}
         onCancel={() => setActiveDialog(null)}
         onIngest={handleIngestSubmit}
-      />
-
-      <SplitsDialog
-        isOpen={activeDialog === "splits"}
-        datasetName={profile?.datasetId ?? "—"}
-        draft={splitDraft}
-        onDraftChange={setSplitDraft}
-        onCancel={() => setActiveDialog(null)}
-        onApply={handleApplySplits}
       />
 
       <Dialog
@@ -658,15 +728,7 @@ export default function DatasetsPage(): React.JSX.Element {
                     { key: "Malformed", value: profile.malformedCount.toLocaleString() },
                     {
                       key: "Leakage",
-                      value: (
-                        <span
-                          className="text-ink-3"
-                          title="pending backend signal"
-                          // TODO(datasets-realign): wire leakage signal -- remove when DatasetProfile exposes an evalLeakageCount field
-                        >
-                          —
-                        </span>
-                      ),
+                      value: profile.evalLeakageCount.toLocaleString(),
                     },
                   ]}
                 />
@@ -728,6 +790,7 @@ export default function DatasetsPage(): React.JSX.Element {
 interface AddDatasetDialogProps {
   readonly isOpen: boolean;
   readonly draft: AddDatasetDraft;
+  readonly isPending: boolean;
   readonly onDraftChange: (next: AddDatasetDraft) => void;
   readonly onCancel: () => void;
   readonly onIngest: () => void;
@@ -736,6 +799,7 @@ interface AddDatasetDialogProps {
 function AddDatasetDialog({
   isOpen,
   draft,
+  isPending,
   onDraftChange,
   onCancel,
   onIngest,
@@ -826,128 +890,12 @@ function AddDatasetDialog({
           <Button variant="outline" onClick={onCancel}>
             Cancel
           </Button>
-          <Button variant="primary" onClick={onIngest}>
+          <Button variant="primary" onClick={onIngest} disabled={isPending || !draft.path.trim()}>
             <Download className="size-3" aria-hidden="true" />
-            Ingest
+            {isPending ? "Resolving…" : "Ingest"}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  );
-}
-
-interface SplitsDialogProps {
-  readonly isOpen: boolean;
-  readonly datasetName: string;
-  readonly draft: SplitDraft;
-  readonly onDraftChange: (next: SplitDraft) => void;
-  readonly onCancel: () => void;
-  readonly onApply: () => void;
-}
-
-function SplitsDialog({
-  isOpen,
-  datasetName,
-  draft,
-  onDraftChange,
-  onCancel,
-  onApply,
-}: SplitsDialogProps): React.JSX.Element {
-  const handleTrainChange = (next: number): void => {
-    onDraftChange(normalizeTrain({ train: next, current: draft }));
-  };
-
-  const handleSeedChange = (raw: string): void => {
-    const parsed = Number.parseInt(raw, 10);
-    onDraftChange({ ...draft, seed: Number.isFinite(parsed) ? parsed : 0 });
-  };
-
-  return (
-    <Dialog open={isOpen} onOpenChange={(next) => (next ? undefined : onCancel())}>
-      <DialogContent className="max-w-[520px]">
-        <DialogHeader>
-          <DialogTitle>Splits · {datasetName}</DialogTitle>
-        </DialogHeader>
-        <div className="flex flex-col gap-5 px-6 py-5">
-          <div className="space-y-2">
-            <div className="flex items-baseline justify-between">
-              <Label>Train</Label>
-              <span className="font-mono text-[11px] text-ink-2">{draft.train}%</span>
-            </div>
-            <Slider
-              min={50}
-              max={98}
-              step={1}
-              value={[draft.train]}
-              onValueChange={([next]) => handleTrainChange(next)}
-              aria-label="Train split percentage"
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <Label>Validation</Label>
-              <div className="font-mono text-[13px] text-ink-1">{draft.val}%</div>
-            </div>
-            <div className="space-y-1">
-              <Label>Test</Label>
-              <div className="font-mono text-[13px] text-ink-1">{draft.test}%</div>
-            </div>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="splits-seed">Seed</Label>
-            <Input
-              id="splits-seed"
-              mono
-              type="number"
-              value={draft.seed}
-              onChange={(event) => handleSeedChange(event.target.value)}
-            />
-          </div>
-          <SplitsBar draft={draft} />
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onCancel}>
-            Cancel
-          </Button>
-          <Button variant="primary" onClick={onApply}>
-            Apply
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-interface SplitsBarProps {
-  readonly draft: SplitDraft;
-}
-
-function SplitsBar({ draft }: SplitsBarProps): React.JSX.Element {
-  const segments: ReadonlyArray<{
-    readonly key: "train" | "val" | "test";
-    readonly label: string;
-    readonly value: number;
-    readonly color: string;
-  }> = [
-    { key: "train", label: "train", value: draft.train, color: "var(--iris-3)" },
-    { key: "val", label: "val", value: draft.val, color: "var(--iris-2)" },
-    { key: "test", label: "test", value: draft.test, color: "var(--iris-4)" },
-  ];
-
-  return (
-    <div className="flex h-7 w-full overflow-hidden rounded-md border border-hairline">
-      {segments.map(({ key, label, value, color }) =>
-        value > 0 ? (
-          <div
-            key={key}
-            className="flex items-center justify-center font-mono text-[10px] text-[color:var(--surface)]"
-            style={{ flex: value, backgroundColor: color }}
-            title={`${label} ${value}%`}
-          >
-            {value}%
-          </div>
-        ) : null,
-      )}
-    </div>
   );
 }

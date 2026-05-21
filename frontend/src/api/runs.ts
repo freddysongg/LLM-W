@@ -1,5 +1,6 @@
 import type {
   Run,
+  RunAttempt,
   RunStage,
   MetricPoint,
   MetricName,
@@ -15,8 +16,29 @@ import type {
   StageName,
   RunStatus,
   StageStatus,
+  TrainingEnvironment,
+  ModalGpuType,
+  DeviceType,
 } from "@/types/run";
 import { fetchApi } from "./client";
+
+interface RawRunAttempt {
+  readonly id: string;
+  readonly run_id: string;
+  readonly attempt_index: number;
+  readonly gpu_type: string | null;
+  readonly device: string | null;
+  readonly started_at: string;
+  readonly ended_at: string | null;
+  readonly exit_reason: string | null;
+  readonly cost_estimate_usd: number | null;
+  readonly created_at: string;
+}
+
+interface RunFallbackBody {
+  readonly action: "accept" | "cancel";
+  readonly gpuType?: ModalGpuType;
+}
 
 interface RawRun {
   readonly id: string;
@@ -34,8 +56,12 @@ interface RawRun {
   readonly failure_stage: string | null;
   readonly last_checkpoint_path: string | null;
   readonly pid: number | null;
+  readonly environment: string | null;
+  readonly modal_gpu_type: string | null;
+  readonly device: string | null;
   readonly created_at: string;
   readonly updated_at: string;
+  readonly attempts?: ReadonlyArray<RawRunAttempt>;
 }
 
 interface RawRunListResponse {
@@ -123,6 +149,21 @@ interface RawCheckpoint {
   readonly created_at: string;
 }
 
+function normalizeRunAttempt(raw: RawRunAttempt): RunAttempt {
+  return {
+    id: raw.id,
+    runId: raw.run_id,
+    attemptIndex: raw.attempt_index,
+    gpuType: raw.gpu_type as ModalGpuType | null,
+    device: raw.device as DeviceType | null,
+    startedAt: raw.started_at,
+    endedAt: raw.ended_at,
+    exitReason: raw.exit_reason,
+    costEstimateUsd: raw.cost_estimate_usd,
+    createdAt: raw.created_at,
+  };
+}
+
 function normalizeRun(raw: RawRun): Run {
   return {
     id: raw.id,
@@ -142,8 +183,12 @@ function normalizeRun(raw: RawRun): Run {
     // heartbeat_path is not included in RunResponse — backend gap
     heartbeatPath: null,
     pid: raw.pid,
+    environment: raw.environment as TrainingEnvironment | null,
+    modalGpuType: raw.modal_gpu_type as ModalGpuType | null,
+    device: raw.device as DeviceType | null,
     createdAt: raw.created_at,
     updatedAt: raw.updated_at,
+    attempts: raw.attempts ? raw.attempts.map(normalizeRunAttempt) : [],
   };
 }
 
@@ -251,6 +296,15 @@ function normalizeRunCompare(raw: RawRunCompareResponse): RunCompareResponse {
 
 export async function fetchRuns({ projectId }: { projectId: string }): Promise<ReadonlyArray<Run>> {
   const raw = await fetchApi<RawRunListResponse>({ path: `/projects/${projectId}/runs` });
+  return raw.items.map(normalizeRun);
+}
+
+export async function fetchRecentRuns({
+  limit = 10,
+}: {
+  limit?: number;
+} = {}): Promise<ReadonlyArray<Run>> {
+  const raw = await fetchApi<RawRunListResponse>({ path: `/runs?limit=${limit}` });
   return raw.items.map(normalizeRun);
 }
 
@@ -406,4 +460,27 @@ export async function fetchRunComparison({
     path: `/projects/${projectId}/runs/compare?run_ids=${runIds.join(",")}`,
   });
   return normalizeRunCompare(raw);
+}
+
+export type { RunFallbackBody };
+
+export async function postRunFallback({
+  projectId,
+  runId,
+  body,
+}: {
+  projectId: string;
+  runId: string;
+  body: RunFallbackBody;
+}): Promise<Run> {
+  const wireBody: Record<string, string> = { action: body.action };
+  if (body.gpuType !== undefined) {
+    wireBody.gpu_type = body.gpuType;
+  }
+  const raw = await fetchApi<RawRun>({
+    path: `/projects/${projectId}/runs/${runId}/fallback`,
+    method: "POST",
+    body: wireBody,
+  });
+  return normalizeRun(raw);
 }

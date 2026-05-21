@@ -15,6 +15,7 @@ import EvalPage from "@/pages/eval-page";
 import SuggestionsPage from "@/pages/suggestions-page";
 import ArtifactsPage from "@/pages/artifacts-page";
 import SettingsPage from "@/pages/settings-page";
+import VoiceDemoPage from "@/pages/voice-demo";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -43,6 +44,7 @@ export default function App(): React.JSX.Element {
             <Route path="/eval" element={<EvalPage />} />
             <Route path="/suggestions" element={<SuggestionsPage />} />
             <Route path="/artifacts" element={<ArtifactsPage />} />
+            <Route path="/voice-demo" element={<VoiceDemoPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Route>
         </Routes>

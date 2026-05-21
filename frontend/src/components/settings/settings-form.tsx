@@ -1,7 +1,8 @@
 import * as React from "react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import type { AppSettings, UpdateSettingsRequest, ApiKeySaveResult } from "@/types/settings";
 import type { AIProvider } from "@/types/config";
+import type { LlmCatalogProvider, LlmModelOption } from "@/types/llm-catalog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -15,25 +16,12 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Check } from "lucide-react";
+import { useLlmModels } from "@/hooks/useCatalog";
 
-const OPENAI_MODELS = [
-  "gpt-4o",
-  "gpt-4o-mini",
-  "gpt-4-turbo",
-  "gpt-3.5-turbo",
-  "o1",
-  "o1-mini",
-  "o3-mini",
-] as const;
-const CLAUDE_MODELS = [
-  "claude-opus-4-6",
-  "claude-sonnet-4-6",
-  "claude-sonnet-4-5-20250514",
-  "claude-haiku-4-5-20251001",
-] as const;
-
-type OpenAIModel = (typeof OPENAI_MODELS)[number];
-type ClaudeModel = (typeof CLAUDE_MODELS)[number];
+const PROVIDER_DEFAULT_MODEL_ID: Readonly<Record<LlmCatalogProvider, string>> = {
+  openai: "gpt-4o",
+  anthropic: "claude-sonnet-4-6",
+};
 
 interface SettingsFormProps {
   readonly settings: AppSettings;
@@ -85,6 +73,20 @@ export function SettingsForm({
   const [modalTokenId, setModalTokenId] = useState("");
   const [modalTokenSecret, setModalTokenSecret] = useState("");
 
+  const { data: llmModels, isLoading: isLoadingLlmModels } = useLlmModels();
+  const modelsByProvider = useMemo<
+    Readonly<Record<LlmCatalogProvider, ReadonlyArray<LlmModelOption>>>
+  >(() => {
+    const empty: Record<LlmCatalogProvider, LlmModelOption[]> = { openai: [], anthropic: [] };
+    if (llmModels === undefined) {
+      return empty;
+    }
+    for (const option of llmModels) {
+      empty[option.provider].push(option);
+    }
+    return empty;
+  }, [llmModels]);
+
   useEffect(() => {
     if (apiKeySaveResult?.success) {
       setAiApiKey("");
@@ -104,11 +106,12 @@ export function SettingsForm({
     if (provider !== "openai_compatible") {
       setAiBaseUrl("");
     }
-    if (provider === "openai" && !(OPENAI_MODELS as readonly string[]).includes(aiModelId)) {
-      setAiModelId("gpt-4o");
-    }
-    if (provider === "anthropic" && !(CLAUDE_MODELS as readonly string[]).includes(aiModelId)) {
-      setAiModelId("claude-sonnet-4-6");
+    if (provider === "openai" || provider === "anthropic") {
+      const options = modelsByProvider[provider];
+      const hasCurrent = options.some((option) => option.modelId === aiModelId);
+      if (!hasCurrent) {
+        setAiModelId(PROVIDER_DEFAULT_MODEL_ID[provider]);
+      }
     }
   };
 
@@ -207,32 +210,23 @@ export function SettingsForm({
 
           <div className="space-y-2">
             <Label htmlFor="ai-model-id">Model</Label>
-            {aiProvider === "openai" ? (
-              <Select value={aiModelId as OpenAIModel} onValueChange={setAiModelId}>
-                <SelectTrigger id="ai-model-id">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {OPENAI_MODELS.map((m) => (
-                    <SelectItem key={m} value={m}>
-                      {m}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            ) : aiProvider === "anthropic" ? (
-              <Select value={aiModelId as ClaudeModel} onValueChange={setAiModelId}>
-                <SelectTrigger id="ai-model-id">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {CLAUDE_MODELS.map((m) => (
-                    <SelectItem key={m} value={m}>
-                      {m}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            {aiProvider === "openai" || aiProvider === "anthropic" ? (
+              isLoadingLlmModels ? (
+                <span className="font-mono text-[11px] text-ink-3">Loading models…</span>
+              ) : (
+                <Select value={aiModelId} onValueChange={setAiModelId}>
+                  <SelectTrigger id="ai-model-id">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {modelsByProvider[aiProvider].map(({ modelId, label }) => (
+                      <SelectItem key={modelId} value={modelId}>
+                        {label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )
             ) : (
               <Input
                 id="ai-model-id"
@@ -305,7 +299,9 @@ export function SettingsForm({
                 <Input
                   id="modal-token-secret"
                   type="password"
-                  placeholder={settings.isModalTokenSet ? "••••••••••••••••" : "Token Secret (as-...)"}
+                  placeholder={
+                    settings.isModalTokenSet ? "••••••••••••••••" : "Token Secret (as-...)"
+                  }
                   value={modalTokenSecret}
                   onChange={(e) => setModalTokenSecret(e.target.value)}
                   autoComplete="off"

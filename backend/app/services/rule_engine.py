@@ -14,6 +14,7 @@ class AISuggestionCreate:
     tradeoffs: str | None = None
     confidence: float | None = None
     risk_level: str | None = None
+    confidence_per_action: list[float] | None = None
 
 
 def _group_by_metric(
@@ -375,8 +376,15 @@ def evaluate_rules(
     *,
     metrics: list[dict[str, Any]],
     config: dict[str, Any],
+    disabled_rules: set[str] | None = None,
 ) -> list[AISuggestionCreate]:
-    """Run all 7 rules and return triggered suggestions."""
+    """Run the enabled rules and return triggered suggestions.
+
+    ``disabled_rules`` carries the names of rules the project has toggled off
+    in ``ai_rule_settings.yaml``. A rule whose name appears in the set is
+    skipped before its evaluator runs, so operator preferences gate which
+    signals surface without changing the rule semantics or the project config.
+    """
     grouped = _group_by_metric(metrics)
 
     training = config.get("training", {})
@@ -396,16 +404,51 @@ def evaluate_rules(
     current_rank: int = int(adapters.get("rank", 8))
     max_memory_gb: float | None = execution.get("max_memory_gb")
 
-    rules = [
-        _check_loss_plateau(grouped, current_lr),
-        _check_loss_spike(grouped, current_lr, current_warmup_ratio),
-        _check_grad_norm_exploding(grouped, current_lr, current_max_grad_norm),
-        _check_eval_diverging(grouped, current_epochs, current_dropout, current_rank),
-        _check_very_low_loss(grouped),
-        _check_high_truncation(grouped, current_max_seq_length),
-        _check_memory_limit(
-            grouped, current_batch_size, current_gradient_checkpointing, max_memory_gb
+    disabled: set[str] = disabled_rules or set()
+
+    candidates: list[tuple[str, AISuggestionCreate | None]] = [
+        (
+            "loss_plateau",
+            _check_loss_plateau(grouped, current_lr)
+            if "loss_plateau" not in disabled
+            else None,
+        ),
+        (
+            "loss_spike",
+            _check_loss_spike(grouped, current_lr, current_warmup_ratio)
+            if "loss_spike" not in disabled
+            else None,
+        ),
+        (
+            "grad_norm_exploding",
+            _check_grad_norm_exploding(grouped, current_lr, current_max_grad_norm)
+            if "grad_norm_exploding" not in disabled
+            else None,
+        ),
+        (
+            "eval_diverging",
+            _check_eval_diverging(grouped, current_epochs, current_dropout, current_rank)
+            if "eval_diverging" not in disabled
+            else None,
+        ),
+        (
+            "very_low_loss",
+            _check_very_low_loss(grouped) if "very_low_loss" not in disabled else None,
+        ),
+        (
+            "high_truncation",
+            _check_high_truncation(grouped, current_max_seq_length)
+            if "high_truncation" not in disabled
+            else None,
+        ),
+        (
+            "memory_limit",
+            _check_memory_limit(
+                grouped, current_batch_size, current_gradient_checkpointing, max_memory_gb
+            )
+            if "memory_limit" not in disabled
+            else None,
         ),
     ]
 
-    return [r for r in rules if r is not None]
+    return [suggestion for _name, suggestion in candidates if suggestion is not None]

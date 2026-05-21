@@ -8,10 +8,13 @@ import {
   useRejectSuggestion,
   useGenerateSuggestions,
 } from "@/hooks/useSuggestions";
+import { useAIRuleSettings, useUpdateAIRuleSettings } from "@/hooks/useAIRuleSettings";
 import { useLockEntered } from "@/hooks/use-lock-entered";
 import { useToast } from "@/hooks/use-toast";
+import { describeApiError } from "@/lib/api-error";
 import { SuggestionList } from "@/components/suggestions/suggestion-list";
 import { SuggestionDetail, SuggestionEmptyHint } from "@/components/suggestions/suggestion-detail";
+import { RuleSettingsDialog } from "@/components/suggestions/rule-settings-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -21,6 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import type { AIRuleSettings } from "@/types/ai-rule-settings";
 import { cn } from "@/lib/utils";
 
 export default function SuggestionsPage(): React.JSX.Element {
@@ -28,7 +32,7 @@ export default function SuggestionsPage(): React.JSX.Element {
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [selectedRunId, setSelectedRunId] = React.useState<string>("none");
   const [statusFilter, setStatusFilter] = React.useState<string | undefined>(undefined);
-  const [isAutoApply, setIsAutoApply] = React.useState<boolean>(false);
+  const [isRuleSettingsOpen, setIsRuleSettingsOpen] = React.useState<boolean>(false);
   const isAnimationLocked = useLockEntered();
   const { toast } = useToast();
 
@@ -39,10 +43,12 @@ export default function SuggestionsPage(): React.JSX.Element {
     projectId,
     status: statusFilter,
   });
+  const { data: ruleSettings } = useAIRuleSettings({ projectId });
 
   const acceptMutation = useAcceptSuggestion();
   const rejectMutation = useRejectSuggestion();
   const generateMutation = useGenerateSuggestions();
+  const updateRuleSettings = useUpdateAIRuleSettings({ projectId });
 
   const selectedSuggestion = suggestions.find((candidate) => candidate.id === selectedId) ?? null;
 
@@ -78,12 +84,22 @@ export default function SuggestionsPage(): React.JSX.Element {
     setSelectedId(null);
   };
 
-  const handleToggleAutoApply = (): void => {
-    const nextValue = !isAutoApply;
-    setIsAutoApply(nextValue);
-    toast({
-      title: nextValue ? "Auto-apply enabled" : "Auto-apply disabled",
-      description: "Rules configuration is not yet wired.",
+  const handleSaveRuleSettings = (next: AIRuleSettings): void => {
+    updateRuleSettings.mutate(next, {
+      onSuccess: () => {
+        setIsRuleSettingsOpen(false);
+        toast({ title: "Rule settings saved" });
+      },
+      onError: (cause) => {
+        toast({
+          title: "Save failed",
+          description: describeApiError({
+            cause,
+            fallback: "Could not persist rule settings.",
+          }),
+          variant: "destructive",
+        });
+      },
     });
   };
 
@@ -137,17 +153,20 @@ export default function SuggestionsPage(): React.JSX.Element {
             <RefreshCw aria-hidden="true" />
             {generateMutation.isPending ? "Scanning…" : "Re-scan"}
           </Button>
-          <Button
-            variant={isAutoApply ? "primary" : "outline"}
-            size="sm"
-            onClick={handleToggleAutoApply}
-            aria-pressed={isAutoApply}
-          >
+          <Button variant="outline" size="sm" onClick={() => setIsRuleSettingsOpen(true)}>
             <SettingsIcon aria-hidden="true" />
-            Auto-apply rules
+            Rule settings
           </Button>
         </div>
       </header>
+
+      <RuleSettingsDialog
+        isOpen={isRuleSettingsOpen}
+        initialSettings={ruleSettings}
+        isPending={updateRuleSettings.isPending}
+        onOpenChange={setIsRuleSettingsOpen}
+        onSave={handleSaveRuleSettings}
+      />
 
       <div
         className={cn("grid gap-4 enter enter-2", enteredClass)}

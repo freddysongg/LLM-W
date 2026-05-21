@@ -18,8 +18,6 @@ const DISPLAY_CATEGORIES: ReadonlyArray<{
   { key: "exports", label: "Exports" },
 ];
 
-const PROJECT_STORAGE_QUOTA_BYTES = 250 * 1024 * 1024 * 1024;
-
 function formatBytes(bytes: number): string {
   if (bytes === 0) return "0 B";
   if (bytes < 1024) return `${bytes} B`;
@@ -80,8 +78,8 @@ export function StoragePanel({ projectId }: StoragePanelProps): React.JSX.Elemen
     );
   }
 
-  const { totalBytes, breakdown, retentionPolicy } = storage;
-  const usagePct = Math.min(100, (totalBytes / PROJECT_STORAGE_QUOTA_BYTES) * 100);
+  const { totalBytes, quotaBytes, breakdown, retentionPolicy } = storage;
+  const usagePct = Math.min(100, (totalBytes / quotaBytes) * 100);
   const canCleanup = retentionPolicy.reclaimableBytes > 0;
 
   return (
@@ -89,7 +87,7 @@ export function StoragePanel({ projectId }: StoragePanelProps): React.JSX.Elemen
       <CardHeader>
         <CardTitle>Storage</CardTitle>
         <span className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3">
-          {formatBytes(totalBytes)} / {formatBytes(PROJECT_STORAGE_QUOTA_BYTES)}
+          {formatBytes(totalBytes)} / {formatBytes(quotaBytes)}
         </span>
       </CardHeader>
       <CardContent className="space-y-4">

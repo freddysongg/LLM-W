@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from app.models.config_version import ConfigVersion
     from app.models.metric_point import MetricPoint
     from app.models.project import Project
+    from app.models.run_attempt import RunAttempt
     from app.models.run_stage import RunStage
     from app.models.suggestion import AISuggestion
 
@@ -42,6 +43,8 @@ class Run(Base):
     heartbeat_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     pid: Mapped[int | None] = mapped_column(Integer, nullable=True)
     run_type: Mapped[str] = mapped_column(Text, nullable=False, default="training")
+    environment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    modal_gpu_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     device: Mapped[str | None] = mapped_column(Text, nullable=True)
     tokens_per_sec: Mapped[float | None] = mapped_column(Float, nullable=True)
     time_to_first_checkpoint_s: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -78,4 +81,18 @@ class Run(Base):
         # from also issuing its own disassociation UPDATEs (which would touch the
         # same rows again and trip async lazy-load on `session.delete(run)`).
         passive_deletes="all",
+    )
+    attempts: Mapped[list[RunAttempt]] = relationship(
+        "RunAttempt",
+        back_populates="run",
+        cascade="all, delete-orphan",
+        # `lazy="selectin"` issues ONE batched IN-load per parent result set, not
+        # one query per row. Verified 2026-05-20 by counting `before_cursor_execute`
+        # events against a list endpoint that returned 5 runs with 10 attempts —
+        # exactly 1 SELECT on `runs` + 1 SELECT on `run_attempts WHERE run_id IN (...)`.
+        # Safe for list endpoints; `RunResponse.model_validate(run)` works without
+        # explicit eager loading on every call site.
+        lazy="selectin",
+        passive_deletes=True,
+        order_by="RunAttempt.attempt_index",
     )

@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.schemas.settings import AITestResponse, ModalTestResponse, SettingsResponse, SettingsUpdate
+from app.schemas.settings import (
+    AITestResponse,
+    ModalTestRequest,
+    ModalTestResponse,
+    SettingsResponse,
+    SettingsUpdate,
+)
 from app.services import settings_service
 
 router = APIRouter(prefix="/api/v1/settings", tags=["settings"])
@@ -24,5 +30,8 @@ async def test_ai_connection() -> AITestResponse:
 
 
 @router.post("/modal/test", response_model=ModalTestResponse)
-async def test_modal_connection() -> ModalTestResponse:
-    return await settings_service.test_modal_connection()
+async def test_modal_connection(
+    payload: ModalTestRequest | None = None,
+) -> ModalTestResponse:
+    default_gpu_type = payload.default_gpu_type if payload is not None else None
+    return await settings_service.test_modal_connection(default_gpu_type=default_gpu_type)

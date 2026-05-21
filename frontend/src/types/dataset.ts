@@ -26,10 +26,13 @@ export interface DatasetSample {
   readonly row: Record<string, unknown>;
 }
 
+export type DatasetFormatTag = "chatml" | "alpaca" | "paired";
+
 export interface DatasetProfile {
   readonly datasetId: string;
   readonly source: DatasetSource;
   readonly format: DatasetFormat;
+  readonly formatTag: DatasetFormatTag | null;
   readonly totalRows: number;
   readonly splitCounts: SplitCounts;
   readonly detectedFields: ReadonlyArray<string>;
@@ -37,6 +40,8 @@ export interface DatasetProfile {
   readonly qualityWarnings: ReadonlyArray<QualityWarning>;
   readonly duplicateCount: number;
   readonly malformedCount: number;
+  readonly frozenEvalSplits: number;
+  readonly evalLeakageCount: number;
   readonly resolvedAt: string;
 }
 
@@ -71,4 +76,46 @@ export interface PreviewTransformResponse {
   readonly samples: ReadonlyArray<Record<string, unknown>>;
   readonly formatApplied: string;
   readonly truncated: boolean;
+}
+
+export type SanitizeSourceFormat = "openai" | "sharegpt" | "alpaca" | "default";
+export type SanitizeSplitName = "train" | "val" | "test";
+
+export interface SanitizeSplitRatios {
+  readonly train: number;
+  readonly val: number;
+  readonly test: number;
+}
+
+export interface SanitizeRedactionManifest {
+  readonly perPattern: Record<string, number>;
+  readonly totalRedactions: number;
+}
+
+export interface SanitizeSplitAssignment {
+  readonly assignments: Record<number, SanitizeSplitName>;
+  readonly counts: Record<string, number>;
+}
+
+export interface SanitizeDatasetRequest {
+  readonly splitRatios: SanitizeSplitRatios;
+  readonly sourceFormat: SanitizeSourceFormat;
+  readonly normalize: boolean;
+  readonly persist: boolean;
+}
+
+export interface SanitizeDatasetResponse {
+  readonly totalRows: number;
+  readonly sanitizedRows: ReadonlyArray<Record<string, unknown>>;
+  readonly manifest: SanitizeRedactionManifest;
+  readonly splits: SanitizeSplitAssignment;
+  readonly contentHash: string;
+  readonly sourceFormat: SanitizeSourceFormat;
+  readonly normalized: boolean;
+}
+
+export interface SanitizeStatus {
+  readonly exists: boolean;
+  readonly contentHash: string | null;
+  readonly sanitizedAt: string | null;
 }

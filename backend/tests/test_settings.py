@@ -62,3 +62,137 @@ async def test_ai_test_no_key(client: AsyncClient) -> None:
     body = response.json()
     assert body["success"] is False
     assert "No API key" in body["message"]
+
+
+async def test_modal_test_valid_gpu_without_credentials(client: AsyncClient) -> None:
+    response = await client.post(
+        "/api/v1/settings/modal/test",
+        json={"default_gpu_type": "a10"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is False
+    assert body["gpu_type_valid"] is True
+    assert body["resolved_gpu_spec"] == "A10G"
+    assert "No Modal token" in body["message"]
+
+
+async def test_modal_test_invalid_gpu_short_circuits(client: AsyncClient) -> None:
+    # Sanity that the invalid-GPU branch is independent of credentials and of any
+    # network calls — the response must come back fast and consistent.
+    response = await client.post(
+        "/api/v1/settings/modal/test",
+        json={"default_gpu_type": "nvidia-3090"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is False
+    assert body["gpu_type_valid"] is False
+    assert body["resolved_gpu_spec"] is None
+    assert "nvidia-3090" in body["message"]
+
+
+async def test_modal_test_invalid_gpu_short_circuits_without_modal_import(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # If invalid-GPU validation accidentally triggered `import modal` or any
+    # Modal client call, this test would crash because the patched module is
+    # broken on purpose. Passing proves the early-return path is honored.
+    import sys
+
+    monkeypatch.setitem(sys.modules, "modal", None)
+    response = await client.post(
+        "/api/v1/settings/modal/test",
+        json={"default_gpu_type": "totally-fake"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is False
+    assert body["gpu_type_valid"] is False
+
+
+async def test_modal_test_no_body_returns_legacy_shape(client: AsyncClient) -> None:
+    response = await client.post("/api/v1/settings/modal/test")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is False
+    assert body["gpu_type_valid"] is None
+    assert body["resolved_gpu_spec"] is None
+    assert "No Modal token" in body["message"]
+
+
+async def test_get_modal_credentials_falls_back_to_app_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings_service.settings, "modal_token_id", "env-id")
+    monkeypatch.setattr(settings_service.settings, "modal_token_secret", "env-secret")
+
+    credentials = settings_service.get_modal_credentials()
+    assert credentials == ("env-id", "env-secret")
+
+
+async def test_get_modal_credentials_prefers_overrides_over_app_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings_service.settings, "modal_token_id", "env-id")
+    monkeypatch.setattr(settings_service.settings, "modal_token_secret", "env-secret")
+    settings_service._overrides["modal_token_id"] = "override-id"
+    settings_service._overrides["modal_token_secret"] = "override-secret"
+
+    credentials = settings_service.get_modal_credentials()
+    assert credentials == ("override-id", "override-secret")
+
+
+async def test_get_settings_reports_modal_token_set_when_env_provided(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings_service.settings, "modal_token_id", "env-id")
+    monkeypatch.setattr(settings_service.settings, "modal_token_secret", "env-secret")
+
+    response = await client.get("/api/v1/settings")
+    assert response.status_code == 200
+    assert response.json()["is_modal_token_set"] is True
+
+
+def test_app_config_defaults_for_pipeline_and_training_knobs() -> None:
+    from app.core.config import AppConfig
+
+    config = AppConfig()
+    assert config.max_allowed_cost_usd == 5.0
+    assert config.max_sandbox_timeout_seconds == 6 * 3600
+    assert config.oom_fallback_recovery_ttl_hours == 24.0
+    assert config.voice_pending_session_ttl_seconds == 60.0
+
+
+def test_max_allowed_cost_usd_reads_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.core.config import AppConfig
+
+    monkeypatch.setenv("MAX_ALLOWED_COST_USD", "12.5")
+    assert AppConfig().max_allowed_cost_usd == 12.5
+
+
+def test_max_sandbox_timeout_seconds_reads_env_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.core.config import AppConfig
+
+    monkeypatch.setenv("MAX_SANDBOX_TIMEOUT_SECONDS", "7200")
+    assert AppConfig().max_sandbox_timeout_seconds == 7200
+
+
+def test_oom_fallback_recovery_ttl_hours_reads_env_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.core.config import AppConfig
+
+    monkeypatch.setenv("OOM_FALLBACK_RECOVERY_TTL_HOURS", "0.5")
+    assert AppConfig().oom_fallback_recovery_ttl_hours == 0.5
+
+
+def test_voice_pending_session_ttl_seconds_reads_env_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.core.config import AppConfig
+
+    monkeypatch.setenv("VOICE_PENDING_SESSION_TTL_SECONDS", "10")
+    assert AppConfig().voice_pending_session_ttl_seconds == 10.0

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
+from app.schemas.run_attempt import RunAttemptResponse
+
 
 class RunCreate(BaseModel):
     config_version_id: str
@@ -25,6 +27,8 @@ class RunResponse(BaseModel):
     last_checkpoint_path: str | None
     pid: int | None
     run_type: str = "training"
+    environment: str | None = None
+    modal_gpu_type: str | None = None
     device: str | None = None
     tokens_per_sec: float | None = None
     time_to_first_checkpoint_s: float | None = None
@@ -38,6 +42,7 @@ class RunResponse(BaseModel):
     metric_unavailable_reasons: str | None = None
     created_at: str
     updated_at: str
+    attempts: list[RunAttemptResponse] = []
 
     model_config = {"from_attributes": True}
 

@@ -214,7 +214,9 @@ def build_architecture_from_config(*, hf_config: Any, model_id: str) -> ModelArc
         import torch
         from transformers import AutoModelForCausalLM
     except ImportError as exc:
-        raise RuntimeError("torch and transformers are required for architecture building.") from exc
+        raise RuntimeError(
+            "torch and transformers are required for architecture building."
+        ) from exc
 
     with torch.device("meta"):
         meta_model = AutoModelForCausalLM.from_config(hf_config)

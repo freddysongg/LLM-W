@@ -13,7 +13,13 @@ from app.services.eval.rubric_loader import load_rubric_from_yaml
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _RUBRICS_DIR = _REPO_ROOT / "rubrics"
-_EXPECTED_STEMS = ("faithfulness", "hallucination", "instruction_following", "safety")
+_EXPECTED_STEMS = (
+    "faithfulness",
+    "hallucination",
+    "instruction_following",
+    "safety",
+    "shopping_assistant",
+)
 
 
 @pytest.fixture
@@ -29,7 +35,7 @@ async def db_session():
     await engine.dispose()
 
 
-async def test_seed_rubrics_loads_all_four_into_db(db_session: AsyncSession) -> None:
+async def test_seed_rubrics_loads_all_into_db(db_session: AsyncSession) -> None:
     yaml_paths = sorted(_RUBRICS_DIR.glob("*.yaml"))
     discovered_stems = tuple(path.stem for path in yaml_paths)
     assert discovered_stems == _EXPECTED_STEMS

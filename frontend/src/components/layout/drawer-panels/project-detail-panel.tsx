@@ -36,6 +36,7 @@ function runStatusVariant(status: RunStatus): "default" | "secondary" | "destruc
     case "cancelled":
     case "paused":
     case "pending":
+    case "fallback_pending":
       return "outline";
     default: {
       const _exhaustive: never = status;

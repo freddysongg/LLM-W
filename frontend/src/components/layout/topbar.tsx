@@ -11,20 +11,16 @@ import {
   ArrowRight,
   Plus,
   BookOpen,
-  Terminal,
-  Star,
   ExternalLink,
-  Play,
-  Sparkles,
-  X,
 } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app-store";
 import { useProjects } from "@/hooks/useProjects";
+import { useNotifications, useMarkNotificationRead } from "@/hooks/useNotifications";
 import { useToast } from "@/hooks/use-toast";
 import { getCrumbs } from "@/lib/nav";
 import type { Project } from "@/types/project";
+import type { Notification } from "@/types/notification";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -36,58 +32,23 @@ import {
 
 const PROJECT_NAME_FALLBACK = "Workbench";
 
-type NotificationVariant = "running" | "success" | "iris" | "danger";
+const NOTIFICATION_TYPE_COLOR: Readonly<Record<string, string>> = {
+  run_created: "text-ink-2",
+  run_started: "text-info",
+  run_completed: "text-success",
+  run_failed: "text-danger",
+  ai_suggestion: "text-iris-4",
+};
 
-interface NotificationEntry {
-  readonly id: string;
-  readonly title: string;
-  readonly subtitle: string;
-  readonly time: string;
-  readonly icon: LucideIcon;
-  readonly variant: NotificationVariant;
+function notificationColor(type: string): string {
+  return NOTIFICATION_TYPE_COLOR[type] ?? "text-ink-3";
 }
 
-const NOTIFICATIONS_STUB: readonly NotificationEntry[] = [
-  {
-    id: "run-8f2a",
-    title: "run_8f2a streaming",
-    subtitle: "step 2,840/4,000 · eta 18m",
-    time: "now",
-    icon: Play,
-    variant: "running",
-  },
-  {
-    id: "dpo-step2",
-    title: "dpo-step2 finished",
-    subtitle: "eval loss 0.412 · +8.4%",
-    time: "2h",
-    icon: Check,
-    variant: "success",
-  },
-  {
-    id: "ai-suggestion",
-    title: "AI suggestion available",
-    subtitle: "reduce lr after plateau",
-    time: "3h",
-    icon: Sparkles,
-    variant: "iris",
-  },
-  {
-    id: "tinyllama-failed",
-    title: "tinyllama failed",
-    subtitle: "OOM at step 340 · see logs",
-    time: "yest",
-    icon: X,
-    variant: "danger",
-  },
-];
-
-const NOTIFICATION_COLOR_BY_VARIANT: Record<NotificationVariant, string> = {
-  running: "text-info",
-  success: "text-success",
-  iris: "text-iris-4",
-  danger: "text-danger",
-};
+function formatNotificationTimestamp(iso: string): string {
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+}
 
 interface CrumbsProps {
   readonly crumbs: readonly string[];
@@ -138,7 +99,6 @@ function ProjectChip({ projects, activeProject }: ProjectChipProps): React.JSX.E
 
   const handleNewProject = (): void => {
     navigate("/projects");
-    toast({ title: "New project — stubbed" });
   };
 
   return (
@@ -208,15 +168,16 @@ function SearchChip(): React.JSX.Element {
 }
 
 function NotificationsMenu(): React.JSX.Element {
-  const navigate = useNavigate();
-  const { toast } = useToast();
+  const { data: notifications } = useNotifications();
+  const markRead = useMarkNotificationRead();
+  const unreadCount = (notifications ?? []).filter(
+    (notification: Notification) => notification.readAt === null,
+  ).length;
 
-  const handleOpenRuns = (): void => {
-    navigate("/runs");
-  };
-
-  const handleMarkAllRead = (): void => {
-    toast({ title: "Cleared notifications" });
+  const handleSelectNotification = (notification: Notification): void => {
+    if (notification.readAt === null) {
+      markRead.mutate({ id: notification.id });
+    }
   };
 
   return (
@@ -228,35 +189,49 @@ function NotificationsMenu(): React.JSX.Element {
           className="relative inline-flex items-center justify-center w-8 h-8 rounded-[10px] text-ink-3 hover:bg-surface-2 hover:text-ink-1 transition-colors"
         >
           <Bell className="h-4 w-4" />
-          <span
-            aria-hidden="true"
-            className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full"
-            style={{ background: "var(--danger)" }}
-          />
+          {unreadCount > 0 ? (
+            <span
+              aria-hidden="true"
+              className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full"
+              style={{ background: "var(--danger)" }}
+            />
+          ) : null}
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-80">
-        <DropdownMenuLabel>{`Notifications · ${NOTIFICATIONS_STUB.length} new`}</DropdownMenuLabel>
-        {NOTIFICATIONS_STUB.map((entry) => {
-          const { id, title, subtitle, time, icon: IconComponent, variant } = entry;
-          return (
-            <DropdownMenuItem key={id} onSelect={handleOpenRuns} className="gap-3 py-2">
-              <IconComponent
-                className={cn("h-3.5 w-3.5 shrink-0", NOTIFICATION_COLOR_BY_VARIANT[variant])}
-              />
-              <div className="flex-1 min-w-0">
-                <div className="text-[12px] text-ink-1 truncate">{title}</div>
-                <div className="font-mono text-[10px] text-ink-3 truncate">{subtitle}</div>
-              </div>
-              <span className="font-mono text-[10px] text-ink-4 shrink-0">{time}</span>
-            </DropdownMenuItem>
-          );
-        })}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={handleMarkAllRead}>
-          <Check className="h-4 w-4" />
-          <span>Mark all read</span>
-        </DropdownMenuItem>
+        <DropdownMenuLabel>{`Notifications · ${unreadCount} new`}</DropdownMenuLabel>
+        {notifications === undefined || notifications.length === 0 ? (
+          <div className="px-2 py-3 font-mono text-[11px] text-ink-3">No notifications yet.</div>
+        ) : (
+          notifications.map((notification: Notification) => {
+            const { id, type, title, subtitle, createdAt, readAt } = notification;
+            return (
+              <DropdownMenuItem
+                key={id}
+                onSelect={() => handleSelectNotification(notification)}
+                className="gap-3 py-2"
+              >
+                <Bell className={cn("h-3.5 w-3.5 shrink-0", notificationColor(type))} />
+                <div className="flex-1 min-w-0">
+                  <div
+                    className={cn(
+                      "text-[12px] truncate",
+                      readAt === null ? "text-ink-1" : "text-ink-3",
+                    )}
+                  >
+                    {title}
+                  </div>
+                  {subtitle !== null ? (
+                    <div className="font-mono text-[10px] text-ink-3 truncate">{subtitle}</div>
+                  ) : null}
+                </div>
+                <span className="font-mono text-[10px] text-ink-4 shrink-0">
+                  {formatNotificationTimestamp(createdAt)}
+                </span>
+              </DropdownMenuItem>
+            );
+          })
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -288,15 +263,6 @@ function HelpMenu(): React.JSX.Element {
         <DropdownMenuItem onSelect={handleOpenDocs}>
           <BookOpen className="h-4 w-4" />
           <span>Documentation</span>
-        </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => handleShowToast("Keyboard shortcuts — stubbed")}>
-          <Terminal className="h-4 w-4" />
-          <span>Keyboard shortcuts</span>
-          <span className="ml-auto font-mono text-[10px] text-ink-4">?</span>
-        </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => handleShowToast("Changelog — stubbed")}>
-          <Star className="h-4 w-4" />
-          <span>Changelog</span>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={() => handleShowToast("Opened support form")}>

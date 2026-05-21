@@ -46,18 +46,14 @@ def _persist_overrides() -> None:
 def get_settings() -> SettingsResponse:
     return SettingsResponse(
         ai_provider=_overrides.get("ai_provider", settings.ai_provider),
-        ai_api_key_set=bool(
-            _overrides.get("ai_api_key") or settings.ai_api_key
-        ),
+        ai_api_key_set=bool(_overrides.get("ai_api_key") or settings.ai_api_key),
         ai_model_id=_overrides.get("ai_model_id", settings.ai_model_id),
         ai_base_url=_overrides.get("ai_base_url", settings.ai_base_url),
         default_projects_dir=str(
             _overrides.get("default_projects_dir", str(settings.projects_dir))
         ),
         storage_warning_threshold_gb=float(
-            _overrides.get(
-                "storage_warning_threshold_gb", settings.storage_warning_threshold_gb
-            )
+            _overrides.get("storage_warning_threshold_gb", settings.storage_warning_threshold_gb)
         ),
         watchdog_stale_timeout_seconds=int(
             _overrides.get(
@@ -70,9 +66,7 @@ def get_settings() -> SettingsResponse:
                 settings.watchdog_heartbeat_interval_seconds,
             )
         ),
-        is_modal_token_set=bool(
-            _overrides.get("modal_token_id") and _overrides.get("modal_token_secret")
-        ),
+        is_modal_token_set=get_modal_credentials() is not None,
     )
 
 
@@ -82,9 +76,16 @@ def get_raw_api_key() -> str | None:
 
 
 def get_modal_credentials() -> tuple[str, str] | None:
-    """Return the Modal (token_id, token_secret) pair, or None if not configured."""
-    token_id = _overrides.get("modal_token_id")
-    token_secret = _overrides.get("modal_token_secret")
+    """Return the Modal (token_id, token_secret) pair, or None if not configured.
+
+    Resolution order: in-memory overrides (set via PATCH /api/v1/settings, persisted
+    to data/settings.json) take precedence over AppConfig (env vars / .env), so the
+    backend's authoritative settings remain the source of truth when present. The
+    env-var fallback exists so out-of-process tooling like `python -m app.cli modal
+    smoke` can authenticate without sharing the FastAPI in-memory store.
+    """
+    token_id = _overrides.get("modal_token_id") or settings.modal_token_id
+    token_secret = _overrides.get("modal_token_secret") or settings.modal_token_secret
     if token_id and token_secret:
         return (str(token_id), str(token_secret))
     return None
@@ -149,11 +150,7 @@ async def test_ai_connection() -> AITestResponse:
         elif provider in ("openai", "openai_compatible"):
             import openai
 
-            base_url = (
-                "https://api.openai.com/v1"
-                if provider == "openai"
-                else current.ai_base_url
-            )
+            base_url = "https://api.openai.com/v1" if provider == "openai" else current.ai_base_url
             openai_client = openai.OpenAI(api_key=api_key, base_url=base_url)
             openai_client.chat.completions.create(
                 model=model_id,
@@ -183,11 +180,38 @@ async def test_ai_connection() -> AITestResponse:
     )
 
 
-async def test_modal_connection() -> ModalTestResponse:
-    credentials = get_modal_credentials()
+async def test_modal_connection(*, default_gpu_type: str | None = None) -> ModalTestResponse:
+    # GPU validation runs first and short-circuits before contacting Modal so
+    # the operator gets a fast, deterministic answer for a typo'd GPU type
+    # even when credentials aren't configured.
+    gpu_type_valid: bool | None = None
+    resolved_spec: str | None = None
+    if default_gpu_type is not None:
+        # Import from the catalog (no `import modal`) so this path stays usable
+        # on base installs without the optional cloud extra.
+        from app.core.modal_catalog import is_valid_modal_gpu_type, resolve_modal_gpu_spec
 
+        gpu_type_valid = is_valid_modal_gpu_type(default_gpu_type)
+        if not gpu_type_valid:
+            return ModalTestResponse(
+                success=False,
+                message=(
+                    f"Unsupported Modal GPU type '{default_gpu_type}'. "
+                    "Expected one of: t4, a10, l40s, a100-40gb, a100-80gb, h100."
+                ),
+                gpu_type_valid=False,
+                resolved_gpu_spec=None,
+            )
+        resolved_spec = resolve_modal_gpu_spec(default_gpu_type)
+
+    credentials = get_modal_credentials()
     if not credentials:
-        return ModalTestResponse(success=False, message="No Modal token configured")
+        return ModalTestResponse(
+            success=False,
+            message="No Modal token configured",
+            gpu_type_valid=gpu_type_valid,
+            resolved_gpu_spec=resolved_spec,
+        )
 
     try:
         import modal
@@ -196,6 +220,16 @@ async def test_modal_connection() -> ModalTestResponse:
         client = modal.Client.from_credentials(token_id, token_secret)
         client.hello()
     except Exception as exc:
-        return ModalTestResponse(success=False, message=str(exc))
+        return ModalTestResponse(
+            success=False,
+            message=str(exc),
+            gpu_type_valid=gpu_type_valid,
+            resolved_gpu_spec=resolved_spec,
+        )
 
-    return ModalTestResponse(success=True, message="Modal connection successful")
+    return ModalTestResponse(
+        success=True,
+        message="Modal connection successful",
+        gpu_type_valid=gpu_type_valid,
+        resolved_gpu_spec=resolved_spec,
+    )

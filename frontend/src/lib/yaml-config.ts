@@ -14,10 +14,7 @@ function camelToSnakeKey(key: string): string {
     .toLowerCase();
 }
 
-function deepConvertKeys(
-  value: JsonValue,
-  convertKey: (key: string) => string,
-): JsonValue {
+function deepConvertKeys(value: JsonValue, convertKey: (key: string) => string): JsonValue {
   if (value === null || typeof value !== "object") return value;
   if (Array.isArray(value)) {
     return value.map((item) => deepConvertKeys(item, convertKey));

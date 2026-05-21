@@ -80,6 +80,7 @@ async def get_project_storage(*, session: AsyncSession, project_id: str) -> Proj
     return ProjectStorageResponse(
         project_id=project_id,
         total_bytes=total_bytes,
+        quota_bytes=settings.project_storage_quota_bytes,
         breakdown=breakdown,
         per_run=per_run,
         retention_policy=retention,

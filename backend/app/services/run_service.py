@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import (
     ConfigVersionNotFoundError,
+    ModalResumeUnsupportedError,
     NoCheckpointError,
     ProjectNotFoundError,
     RunNotFoundError,
@@ -207,6 +208,9 @@ async def resume_run(*, session: AsyncSession, run_id: str, project_id: str) -> 
     checkpoint_path = run.last_checkpoint_path
     if not checkpoint_path:
         raise NoCheckpointError(run_id)
+
+    if await _parent_run_was_modal(session=session, config_version_id=run.config_version_id):
+        raise ModalResumeUnsupportedError(run_id)
 
     resume_from_step = _extract_step_from_checkpoint_path(checkpoint_path)
 
@@ -482,6 +486,24 @@ def _extract_step_from_checkpoint_path(checkpoint_path: str) -> int | None:
         if step_str.isdigit():
             return int(step_str)
     return None
+
+
+async def _parent_run_was_modal(
+    *, session: AsyncSession, config_version_id: str
+) -> bool:
+    result = await session.execute(
+        select(ConfigVersion.yaml_blob).where(ConfigVersion.id == config_version_id)
+    )
+    yaml_blob = result.scalar_one_or_none()
+    if yaml_blob is None:
+        return False
+    parsed = yaml.safe_load(yaml_blob) or {}
+    if not isinstance(parsed, dict):
+        return False
+    execution = parsed.get("execution")
+    if not isinstance(execution, dict):
+        return False
+    return execution.get("environment") == "modal"
 
 
 def _flatten_config(d: dict[str, object], prefix: str = "") -> dict[str, object]:

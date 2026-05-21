@@ -30,6 +30,7 @@ class AISuggestion(Base):
     expected_effect: Mapped[str | None] = mapped_column(Text, nullable=True)
     tradeoffs: Mapped[str | None] = mapped_column(Text, nullable=True)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    confidence_per_action_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     risk_level: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
     applied_config_version_id: Mapped[str | None] = mapped_column(

@@ -14,6 +14,7 @@ class SuggestionResponse(BaseModel):
     expected_effect: str | None
     tradeoffs: str | None
     confidence: float | None
+    confidence_per_action_json: str | None
     risk_level: str | None
     status: str
     applied_config_version_id: str | None

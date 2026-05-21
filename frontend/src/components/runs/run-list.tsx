@@ -1,6 +1,7 @@
 import * as React from "react";
 import { MoreHorizontal, Trash2 } from "lucide-react";
-import { MODAL_GPU_OPTIONS } from "@/api/cloud";
+import { useModalGpus } from "@/hooks/useCatalog";
+import type { ModalGpuOption } from "@/types/catalog";
 import type { Run, RunStatus } from "@/types/run";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -32,6 +33,7 @@ function mapStatus(status: RunStatus): DotStatus {
     case "failed":
       return "failed";
     case "paused":
+    case "fallback_pending":
       return "paused";
     case "pending":
     case "cancelled":
@@ -43,11 +45,18 @@ function mapStatus(status: RunStatus): DotStatus {
   }
 }
 
-function environmentLabel(run: Run): string {
+function environmentLabel({
+  run,
+  gpuOptions,
+}: {
+  run: Run;
+  gpuOptions: ReadonlyArray<ModalGpuOption> | undefined;
+}): string {
   if (!run.environment || run.environment === "local") return "local";
-  const option = run.modalGpuType
-    ? MODAL_GPU_OPTIONS.find(({ value }) => value === run.modalGpuType)
-    : null;
+  const option =
+    run.modalGpuType && gpuOptions
+      ? (gpuOptions.find(({ gpuType }) => gpuType === run.modalGpuType) ?? null)
+      : null;
   return option ? `modal · ${option.label.toLowerCase()}` : "modal";
 }
 
@@ -97,6 +106,7 @@ export function RunList({
   onDeleteRun,
   isDeletingRunId,
 }: RunListProps): React.JSX.Element {
+  const { data: gpuOptions } = useModalGpus();
   if (runs.length === 0) {
     return (
       <Card>
@@ -138,7 +148,7 @@ export function RunList({
               </div>
               <div className="font-mono text-[10.5px] text-ink-3">{run.id}</div>
             </div>
-            <RunRowCell>{environmentLabel(run)}</RunRowCell>
+            <RunRowCell>{environmentLabel({ run, gpuOptions })}</RunRowCell>
             <RunRowCell>{stepsLabel(run)}</RunRowCell>
             <RunRowCell align="end">{formatRelative(run.startedAt ?? run.createdAt)}</RunRowCell>
             <RunRowActions>

@@ -1,0 +1,64 @@
+name: ci
+
+on:
+  push:
+    branches: [main, feat/training-observability]
+  pull_request:
+    branches: [main, feat/training-observability]
+
+jobs:
+  backend:
+    name: backend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: install backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,voice,cloud]"
+
+      - name: ruff
+        run: ruff check app/ tests/
+
+      - name: pytest
+        run: pytest tests/ -q
+
+  frontend:
+    name: frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: install frontend
+        run: npm ci
+
+      - name: lint
+        run: npm run lint
+
+      - name: typecheck
+        run: npx tsc -b --force
+
+      - name: test
+        run: npm run test
+
+      - name: build
+        run: npm run build
