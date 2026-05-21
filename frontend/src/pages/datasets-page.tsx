@@ -64,8 +64,7 @@ type LibraryFormatFilter = "all" | "chatml" | "alpaca" | "paired";
 
 type AddDatasetSplitMode = "auto" | "manual" | "single";
 
-// TODO(datasets-realign): the four visible source pills are UI-only; only `huggingface` and `upload-file` map to real backend sources today -- remove when the backend DatasetSource union grows s3/gcs/url support
-type AddSourceOption = "huggingface" | "upload-file" | "s3-gcs" | "url";
+type AddSourceOption = "huggingface" | "upload-file";
 
 interface LibraryEntry {
   readonly name: string;
@@ -136,8 +135,6 @@ const ADD_SOURCE_PILLS: ReadonlyArray<{
 }> = [
   { value: "huggingface", label: "HuggingFace" },
   { value: "upload-file", label: "Upload file" },
-  { value: "s3-gcs", label: "S3 / GCS" },
-  { value: "url", label: "URL" },
 ];
 
 const ADD_SOURCE_META: Record<AddSourceOption, AddSourceMeta> = {
@@ -153,30 +150,14 @@ const ADD_SOURCE_META: Record<AddSourceOption, AddSourceMeta> = {
     placeholder: "./datasets/my-data.jsonl",
     cliSourceFlag: "local",
   },
-  "s3-gcs": {
-    label: "S3 / GCS",
-    fieldLabel: "S3 / GCS URI",
-    placeholder: "s3://bucket/path/data.jsonl",
-    cliSourceFlag: "s3",
-  },
-  url: {
-    label: "URL",
-    fieldLabel: "URL",
-    placeholder: "https://example.com/data.jsonl",
-    cliSourceFlag: "url",
-  },
 };
 
-// TODO(datasets-realign): only `huggingface` and `upload-file` have backend support today; s3/gcs and url fall through to a toast stub -- remove when ingestion for cloud sources exists
-function resolveIngestSource(sourceMode: AddSourceOption): DatasetSource | null {
+function resolveIngestSource(sourceMode: AddSourceOption): DatasetSource {
   switch (sourceMode) {
     case "huggingface":
       return "huggingface";
     case "upload-file":
       return "local_jsonl";
-    case "s3-gcs":
-    case "url":
-      return null;
     default: {
       const exhaustiveCheck: never = sourceMode;
       return exhaustiveCheck;
@@ -427,15 +408,6 @@ export default function DatasetsPage(): React.JSX.Element {
 
   const handleIngestSubmit = (): void => {
     const resolvedSource = resolveIngestSource(addDraft.sourceMode);
-    const { label: sourceLabel } = ADD_SOURCE_META[addDraft.sourceMode];
-    if (resolvedSource === null) {
-      // TODO(datasets-realign): stub-only branch for s3/gcs/url -- remove when /api/v1/datasets/ingest supports cloud sources
-      toast({
-        title: "Coming soon",
-        description: `${sourceLabel} ingestion is not wired up yet.`,
-      });
-      return;
-    }
     setActiveDialog(null);
     // TODO(datasets-realign): wire to real ingestion API -- remove when /api/v1/datasets/ingest lands; today users must still use the inline Dataset configuration form on the page
     toast({
