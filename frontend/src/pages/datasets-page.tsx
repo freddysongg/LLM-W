@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Check, Download, Eye, Pencil, Plus, ShieldCheck } from "lucide-react";
+import { Check, Download, Eye, Plus, ShieldCheck } from "lucide-react";
 import { useAppStore } from "@/stores/app-store";
 import {
   useDatasetProfile,
@@ -39,7 +39,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Slider } from "@/components/ui/slider";
 import { DatasetSourceSelector } from "@/components/dataset/dataset-source-selector";
 import { DatasetIdInput } from "@/components/dataset/dataset-id-input";
 import { FormatSelector } from "@/components/dataset/format-selector";
@@ -59,7 +58,7 @@ import { Callout } from "@/components/shared/callout";
 import { BigMetric } from "@/components/shared/big-metric";
 import { RangePills } from "@/components/shared/range-pills";
 
-type DialogKind = "add" | "validate" | "inspect" | "splits" | null;
+type DialogKind = "add" | "validate" | "inspect" | null;
 
 type LibraryFormatFilter = "all" | "chatml" | "alpaca" | "paired";
 
@@ -99,20 +98,8 @@ interface AddSourceMeta {
   readonly cliSourceFlag: string;
 }
 
-interface SplitDraft {
-  readonly train: number;
-  readonly val: number;
-  readonly test: number;
-  readonly seed: number;
-}
-
 interface BuildLibraryParams {
   readonly profile: DatasetProfile | null;
-}
-
-interface ApplyTrainRatioParams {
-  readonly train: number;
-  readonly current: SplitDraft;
 }
 
 const LIBRARY_ROW_COLUMNS = "18px minmax(0,1fr) 72px 64px 28px";
@@ -194,13 +181,6 @@ const DEFAULT_ADD_DRAFT: AddDatasetDraft = {
   splitMode: "auto",
 };
 
-const DEFAULT_SPLIT_DRAFT: SplitDraft = {
-  train: 90,
-  val: 8,
-  test: 2,
-  seed: 42,
-};
-
 function formatRowCount(count: number): string {
   return count.toLocaleString();
 }
@@ -238,16 +218,6 @@ function computeStddev(stats: {
   const medianGap = Math.max(1, Math.abs(mean - median) * 2);
   const spread = Math.max(1, (max - min) / 4);
   return Math.round(Math.max(medianGap, spread));
-}
-
-function normalizeTrain({ train, current }: ApplyTrainRatioParams): SplitDraft {
-  const clampedTrain = Math.max(0, Math.min(100, train));
-  const remainder = 100 - clampedTrain;
-  const previousNonTrainTotal = current.val + current.test;
-  const valShare = previousNonTrainTotal > 0 ? current.val / previousNonTrainTotal : 0.8;
-  const nextVal = Math.round(remainder * valShare);
-  const nextTest = remainder - nextVal;
-  return { ...current, train: clampedTrain, val: nextVal, test: nextTest };
 }
 
 const SANITIZE_FALLBACK_SPLIT_RATIOS: SanitizeSplitRatios = {
@@ -304,7 +274,6 @@ export default function DatasetsPage(): React.JSX.Element {
   const [activeDialog, setActiveDialog] = React.useState<DialogKind>(null);
   const [formatFilter, setFormatFilter] = React.useState<LibraryFormatFilter>("all");
   const [addDraft, setAddDraft] = React.useState<AddDatasetDraft>(DEFAULT_ADD_DRAFT);
-  const [splitDraft, setSplitDraft] = React.useState<SplitDraft>(DEFAULT_SPLIT_DRAFT);
 
   const projectId = activeProjectId ?? "";
   const {
@@ -415,15 +384,6 @@ export default function DatasetsPage(): React.JSX.Element {
     toast({
       title: "Dataset queued for ingest",
       description: `${resolvedSource} · ${addDraft.path || "<path>"}`,
-    });
-  };
-
-  const handleApplySplits = (): void => {
-    setActiveDialog(null);
-    // TODO(datasets-realign): persist splits to backend -- remove when /api/v1/datasets/splits endpoint lands; today the split ratios round-trip through the resolve request, not a standalone splits endpoint
-    toast({
-      title: "Splits applied locally",
-      description: `${splitDraft.train}/${splitDraft.val}/${splitDraft.test} · seed ${splitDraft.seed}`,
     });
   };
 
@@ -582,10 +542,6 @@ export default function DatasetsPage(): React.JSX.Element {
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Button variant="outline" size="sm" onClick={() => setActiveDialog("splits")}>
-                    <Pencil className="size-3" aria-hidden="true" />
-                    Splits
-                  </Button>
                   <Button variant="outline" size="sm" onClick={() => setActiveDialog("validate")}>
                     <Check className="size-3" aria-hidden="true" />
                     Validate
@@ -714,15 +670,6 @@ export default function DatasetsPage(): React.JSX.Element {
         onDraftChange={setAddDraft}
         onCancel={() => setActiveDialog(null)}
         onIngest={handleIngestSubmit}
-      />
-
-      <SplitsDialog
-        isOpen={activeDialog === "splits"}
-        datasetName={profile?.datasetId ?? "—"}
-        draft={splitDraft}
-        onDraftChange={setSplitDraft}
-        onCancel={() => setActiveDialog(null)}
-        onApply={handleApplySplits}
       />
 
       <Dialog
@@ -919,121 +866,5 @@ function AddDatasetDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  );
-}
-
-interface SplitsDialogProps {
-  readonly isOpen: boolean;
-  readonly datasetName: string;
-  readonly draft: SplitDraft;
-  readonly onDraftChange: (next: SplitDraft) => void;
-  readonly onCancel: () => void;
-  readonly onApply: () => void;
-}
-
-function SplitsDialog({
-  isOpen,
-  datasetName,
-  draft,
-  onDraftChange,
-  onCancel,
-  onApply,
-}: SplitsDialogProps): React.JSX.Element {
-  const handleTrainChange = (next: number): void => {
-    onDraftChange(normalizeTrain({ train: next, current: draft }));
-  };
-
-  const handleSeedChange = (raw: string): void => {
-    const parsed = Number.parseInt(raw, 10);
-    onDraftChange({ ...draft, seed: Number.isFinite(parsed) ? parsed : 0 });
-  };
-
-  return (
-    <Dialog open={isOpen} onOpenChange={(next) => (next ? undefined : onCancel())}>
-      <DialogContent className="max-w-[520px]">
-        <DialogHeader>
-          <DialogTitle>Splits · {datasetName}</DialogTitle>
-        </DialogHeader>
-        <div className="flex flex-col gap-5 px-6 py-5">
-          <div className="space-y-2">
-            <div className="flex items-baseline justify-between">
-              <Label>Train</Label>
-              <span className="font-mono text-[11px] text-ink-2">{draft.train}%</span>
-            </div>
-            <Slider
-              min={50}
-              max={98}
-              step={1}
-              value={[draft.train]}
-              onValueChange={([next]) => handleTrainChange(next)}
-              aria-label="Train split percentage"
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <Label>Validation</Label>
-              <div className="font-mono text-[13px] text-ink-1">{draft.val}%</div>
-            </div>
-            <div className="space-y-1">
-              <Label>Test</Label>
-              <div className="font-mono text-[13px] text-ink-1">{draft.test}%</div>
-            </div>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="splits-seed">Seed</Label>
-            <Input
-              id="splits-seed"
-              mono
-              type="number"
-              value={draft.seed}
-              onChange={(event) => handleSeedChange(event.target.value)}
-            />
-          </div>
-          <SplitsBar draft={draft} />
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onCancel}>
-            Cancel
-          </Button>
-          <Button variant="primary" onClick={onApply}>
-            Apply
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-interface SplitsBarProps {
-  readonly draft: SplitDraft;
-}
-
-function SplitsBar({ draft }: SplitsBarProps): React.JSX.Element {
-  const segments: ReadonlyArray<{
-    readonly key: "train" | "val" | "test";
-    readonly label: string;
-    readonly value: number;
-    readonly color: string;
-  }> = [
-    { key: "train", label: "train", value: draft.train, color: "var(--iris-3)" },
-    { key: "val", label: "val", value: draft.val, color: "var(--iris-2)" },
-    { key: "test", label: "test", value: draft.test, color: "var(--iris-4)" },
-  ];
-
-  return (
-    <div className="flex h-7 w-full overflow-hidden rounded-md border border-hairline">
-      {segments.map(({ key, label, value, color }) =>
-        value > 0 ? (
-          <div
-            key={key}
-            className="flex items-center justify-center font-mono text-[10px] text-[color:var(--surface)]"
-            style={{ flex: value, backgroundColor: color }}
-            title={`${label} ${value}%`}
-          >
-            {value}%
-          </div>
-        ) : null,
-      )}
-    </div>
   );
 }
