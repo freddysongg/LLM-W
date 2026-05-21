@@ -249,9 +249,9 @@ def test_build_modal_upload_plan_uploads_rewritten_config_pointing_at_sanitized(
     with the path of the uploaded sanitized artifact so the remote trainer
     doesn't try to load host paths or bypass sanitized_cloud by fetching HF.
 
-    Uses normalize=false because the trainer-side tokenization stage does not
-    yet handle the OpenAI messages shape that normalize=true produces — the
-    upload planner refuses that combination explicitly in a separate test.
+    Uses normalize=false to assert the original dataset format is preserved on
+    the rewrite (a separate test covers the normalize=true → format=openai
+    branch).
     """
     import yaml as _yaml
 
@@ -308,17 +308,16 @@ def test_build_modal_upload_plan_uploads_rewritten_config_pointing_at_sanitized(
     assert rewritten["execution"]["environment"] == "modal"
 
 
-def test_build_modal_upload_plan_rejects_normalized_artifact(tmp_path: Path) -> None:
-    """A normalized sanitized artifact pairs with messages-only rows that the
-    trainer's tokenization stage cannot consume. Surfacing the incompatibility
-    here fails fast with an actionable message instead of letting the run die
-    mid-tokenization on the remote side."""
+def test_build_modal_upload_plan_accepts_normalized_artifact(tmp_path: Path) -> None:
+    """A normalized sanitized artifact (messages shape) must be accepted by the
+    upload planner now that the trainer's tokenization stage routes
+    ``messages`` columns through ``tokenizer.apply_chat_template``. The
+    rewritten config also forces ``format=openai`` so the remote trainer reads
+    the rows under the chat-template path.
+    """
     import yaml as _yaml
 
-    from app.services.cloud.modal_adapter import (
-        NormalizedArtifactUnsupportedError,
-        build_modal_upload_plan,
-    )
+    from app.services.cloud.modal_adapter import build_modal_upload_plan
 
     project_dir = tmp_path / "p1"
     datasets_dir = project_dir / "datasets"
@@ -334,15 +333,24 @@ def test_build_modal_upload_plan_rejects_normalized_artifact(tmp_path: Path) -> 
     config_path.write_text(
         _yaml.safe_dump(
             {
-                "dataset": {"source": "huggingface", "dataset_id": "x"},
+                "dataset": {
+                    "source": "huggingface",
+                    "dataset_id": "x",
+                    "format": "sharegpt",
+                },
                 "execution": {"environment": "modal"},
             }
         ),
         encoding="utf-8",
     )
 
-    with pytest.raises(NormalizedArtifactUnsupportedError, match="normalize=false"):
-        build_modal_upload_plan(project_dir=project_dir, config_path=config_path)
+    plan = build_modal_upload_plan(project_dir=project_dir, config_path=config_path)
+    rewritten_config_path = next(
+        local for local, remote in plan.files if remote.endswith(f"/{config_path.name}")
+    )
+    rewritten = _yaml.safe_load(rewritten_config_path.read_text(encoding="utf-8"))
+    assert rewritten["dataset"]["format"] == "openai"
+    assert rewritten["dataset"]["source"] == "local_jsonl"
 
 
 def test_build_modal_upload_plan_does_not_upload_configs_directory(tmp_path: Path) -> None:

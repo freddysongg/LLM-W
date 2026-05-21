@@ -17,10 +17,10 @@ def test_seed_writes_sanitized_jsonl_and_manifest(tmp_path: Path) -> None:
     lines = artifact.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 1
     row = json.loads(lines[0])
-    # Smoke seed writes a flat prompt/response pair (normalize=false) so the
-    # trainer's tokenization stage can read input_field/target_field directly.
-    assert row["prompt"] == "modal smoke check"
-    assert row["response"] == "ok"
+    # Smoke seed writes a messages-shape row (normalize=true) so the upload
+    # planner exercises the chat-template branch of the trainer end-to-end.
+    assert row["messages"][0] == {"role": "user", "content": "modal smoke check"}
+    assert row["messages"][1] == {"role": "assistant", "content": "ok"}
 
 
 def test_seed_manifest_carries_content_hash_total_rows_and_split_counts(

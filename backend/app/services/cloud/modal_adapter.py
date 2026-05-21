@@ -37,21 +37,6 @@ class SanitizedArtifactMissingError(RuntimeError):
     """
 
 
-class NormalizedArtifactUnsupportedError(RuntimeError):
-    """Raised when a normalized sanitized artifact is paired with Modal training.
-
-    ``normalize=true`` rewrites every row to ``{"messages": [...]}`` (the
-    canonical OpenAI chat shape), but the trainer's tokenization stage still
-    looks up ``input_field`` / ``target_field`` against flat columns like
-    ``prompt`` / ``response``. Letting the upload proceed would surface as a
-    confusing ``input_field not found in dataset columns ['messages']`` failure
-    at tokenization time; raising here fails fast with an actionable message.
-    A follow-up trainer slice can teach ``_stage_tokenization_preprocessing``
-    to call ``tokenizer.apply_chat_template`` for openai-shape datasets and
-    flip this guard off.
-    """
-
-
 @dataclass(frozen=True)
 class ModalUploadPlan:
     """Files and directories the adapter will upload to the Modal volume.
@@ -128,14 +113,6 @@ def build_modal_upload_plan(*, project_dir: Path, config_path: Path) -> ModalUpl
     # match the original so the trainer's --config-path argument is unchanged.
     staging_path = project_dir / _MODAL_UPLOAD_STAGING_DIR / config_path.name
     normalized_flag = _read_sanitized_normalized_flag(project_dir=project_dir)
-    if normalized_flag is True:
-        raise NormalizedArtifactUnsupportedError(
-            "The persisted sanitized artifact was normalized to OpenAI "
-            "messages shape, but the trainer's tokenization stage reads flat "
-            "input_field/target_field columns. Re-sanitize this project with "
-            "normalize=false before launching the Modal run, or wait for the "
-            "trainer's chat-template support to land."
-        )
     _rewrite_config_for_modal_upload(
         src_config_path=config_path,
         dst_path=staging_path,
