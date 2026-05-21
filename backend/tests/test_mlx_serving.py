@@ -812,6 +812,41 @@ async def test_post_serve_returns_404_when_run_id_unknown(
     assert body["error"]["details"]["run_id"] == "run-does-not-exist"
 
 
+async def test_post_serve_returns_404_when_run_id_belongs_to_other_project(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A run_id from sibling project must not load that project's checkpoint
+    under the requesting project's serving config — the lookup is filtered by
+    project_id so the cross-project leak surfaces as the same 404 the route
+    returns for a truly-unknown run.
+    """
+    _patch_for_happy_path(monkeypatch)
+    project_a = await _seed_project(
+        db_session,
+        serving_model_id="mlx-community/Qwen2.5-1.5B-Instruct-4bit",
+        name="project-a",
+    )
+    project_b = await _seed_project(
+        db_session,
+        serving_model_id="mlx-community/Qwen2.5-1.5B-Instruct-4bit",
+        name="project-b",
+    )
+    run_in_b = await _seed_run(
+        db_session, project_id=project_b, last_checkpoint_path="/tmp/checkpoint-b"
+    )
+
+    resp = await client.post(
+        f"/api/v1/projects/{project_a}/serve",
+        json={"run_id": run_in_b},
+    )
+    body = resp.json()
+    assert resp.status_code == 404, body
+    assert body["error"]["code"] == "RUN_NOT_FOUND"
+    assert body["error"]["details"]["run_id"] == run_in_b
+
+
 async def test_post_serve_returns_422_when_run_has_no_checkpoint(
     client: AsyncClient,
     db_session: AsyncSession,

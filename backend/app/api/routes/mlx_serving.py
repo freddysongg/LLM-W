@@ -78,7 +78,7 @@ async def start_serve(
             requested_model_id=payload.serving_model_id,
         )
         adapter_path = await _resolve_adapter_path(
-            session=session, run_id=payload.run_id
+            session=session, project_id=project_id, run_id=payload.run_id
         )
         status = await mlx_serving_registry.start_serving(
             project_id=project_id,
@@ -148,18 +148,25 @@ async def _resolve_serving_model_id(
 
 
 async def _resolve_adapter_path(
-    *, session: AsyncSession, run_id: str | None
+    *, session: AsyncSession, project_id: str, run_id: str | None
 ) -> Path | None:
-    """Look up the on-disk checkpoint directory for *run_id*.
+    """Look up the on-disk checkpoint directory for *run_id* within *project_id*.
 
     Returns ``None`` when no run_id was supplied. The serving registry pairs
     the returned path with the configured base model and, when the directory
     contains a peft adapter, converts it to MLX format before spawning the
     server (see ``mlx_adapter_conversion`` and the registry's start path).
+
+    Cross-project run ids are reported as ``RunNotFoundError`` rather than a
+    distinct error: from the caller's perspective the run does not exist
+    within the project they own, and the route surfaces both as a 404 so the
+    response does not leak the existence of runs in sibling projects.
     """
     if run_id is None:
         return None
-    result = await session.execute(select(Run).where(Run.id == run_id))
+    result = await session.execute(
+        select(Run).where(Run.id == run_id, Run.project_id == project_id)
+    )
     run = result.scalar_one_or_none()
     if run is None:
         raise RunNotFoundError(run_id)
